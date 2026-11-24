@@ -78,14 +78,16 @@ public enum FullRecordingOrganizer {
         guard track >= 0, !FileManager.default.fileExists(atPath: output.path) else { throw VoiceOSError("音轨选择或输出路径无效") }
         try await run(executable: executable("ffmpeg"), arguments: ["-v", "error", "-nostdin", "-i", input.path, "-map", "0:a:\(track)", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.path], log: log)
     }
-    public static func organize(folder: URL, script: URL, python: URL, configuration: URL, log: URL, reviewTranscriptOnly: Bool = false) async throws {
-        try await organize(folders:[folder],script:script,python:python,configuration:configuration,log:log,reviewTranscriptOnly:reviewTranscriptOnly)
+    public static func organize(folder: URL, script: URL, python: URL, modelEnvironment: [String: String], log: URL, reviewTranscriptOnly: Bool = false) async throws {
+        try await organize(folders:[folder],script:script,python:python,modelEnvironment:modelEnvironment,log:log,reviewTranscriptOnly:reviewTranscriptOnly)
     }
-    public static func organize(folders: [URL], script: URL, python: URL, configuration: URL, log: URL, reviewTranscriptOnly: Bool = false) async throws {
+    /// 模型配置经进程环境传入，不在磁盘上留下密钥；地址、型号与强度都来自应用内设置。
+    public static func organize(folders: [URL], script: URL, python: URL, modelEnvironment: [String: String], log: URL, reviewTranscriptOnly: Bool = false) async throws {
         guard !folders.isEmpty else { throw VoiceOSError("连续表达没有录音") }
         let arguments = [script.path] + folders.map(\.path) + [reviewTranscriptOnly ? "--review-transcript-only" : "--include-knowledge"]
-        try await run(executable: python, arguments: arguments, log: log,
-                      environment: ["PATH": "/opt/homebrew/bin:/usr/bin:/bin", "VOICEOS_MODEL_CONFIG_FILE": configuration.path, "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"])
+        var environment = ["PATH": "/opt/homebrew/bin:/usr/bin:/bin", "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"]
+        environment.merge(modelEnvironment) { _, new in new }
+        try await run(executable: python, arguments: arguments, log: log, environment: environment)
     }
     private static func run(executable: URL, arguments: [String], log: URL, environment: [String: String]? = nil) async throws {
         FileManager.default.createFile(atPath: log.path, contents: nil)

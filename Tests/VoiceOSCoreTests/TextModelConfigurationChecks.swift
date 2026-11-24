@@ -8,9 +8,19 @@ extension CoreFlowTests {
         XCTAssertEqual(config.model, LocalTextModel.defaultModel)
         XCTAssertEqual(config.noteEffort, "high")
         XCTAssertEqual(config.topicEffort, "high")
+        XCTAssertEqual(config.reviewEffort, "high")
         let data = try! JSONEncoder().encode(config)
         let decoded = try! JSONDecoder().decode(TextModelConfiguration.self, from: data)
         XCTAssertEqual(decoded, config)
+    }
+
+    func test内部模型配置旧数据缺少核对强度时按high解码() {
+        let legacy = #"{"baseURL":"https://api.example.com/v1","model":"gpt-6.2-sol","noteEffort":"xhigh","topicEffort":"medium"}"#
+        let decoded = try! JSONDecoder().decode(TextModelConfiguration.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.model, "gpt-6.2-sol")
+        XCTAssertEqual(decoded.noteEffort, "xhigh")
+        XCTAssertEqual(decoded.topicEffort, "medium")
+        XCTAssertEqual(decoded.reviewEffort, "high")
     }
 
     func test内部模型配置校验拒绝空地址与非URL() {

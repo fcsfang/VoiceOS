@@ -114,6 +114,49 @@ extension ControlCenter {
         }
     }
 
+    /// 笔记首页的批量整理：每份先补做完整转写核对，再生成笔记；单份失败不阻断其余。
+    func generateNotesSequentially(_ records: [SourceRecord]) async {
+        guard !records.isEmpty else { return }
+        guard modelConfigured, materialNoteModel != nil else { status = "文本模型未配置，无法整理"; return }
+        guard !fullRecordingBusy, organizingSourceID == nil else {
+            status = "有整理任务正在进行，稍后再试"
+            return
+        }
+        var made = 0, blocked = 0, failed = 0
+        for (index, record) in records.enumerated() {
+            status = "正在整理第 \(index + 1)/\(records.count) 份：\(record.displayTitle)"
+            if record.needsTranscriptionReview {
+                transcriptReviewStatus = "第 \(index + 1)/\(records.count) 份 · 正在核对完整转写…"
+                do { try await ensureTranscriptReviewed(sourceID: record.id, retry: true) }
+                catch {
+                    failed += 1
+                    transcriptReviewStatus = "「\(record.displayTitle)」核对未完成：" + error.localizedDescription
+                    continue
+                }
+            }
+            await requestMaterialNote(sourceID: record.id)
+            if let state = materialNoteStates[record.id] {
+                switch state {
+                case .idle:
+                    if materialNotePresence[record.id] == true {
+                        made += 1
+                        // 生成笔记就是这份材料被处理完：从待处理里移出，下一批继续往前推进。
+                        if let store { try? await store.setSourceReadingState(sourceID: record.id, state: .read) }
+                    } else { failed += 1 }
+                case .unavailable(let reason):
+                    blocked += 1
+                    status = "「\(record.displayTitle)」暂不能整理：" + reason
+                case .generating, .failed:
+                    failed += 1
+                }
+            } else { failed += 1 }
+        }
+        status = "已整理成笔记 \(made) 份"
+            + (blocked > 0 ? "，\(blocked) 份被门控挡住" : "")
+            + (failed > 0 ? "，\(failed) 份未完成" : "")
+        await refresh()
+    }
+
     @MainActor private static var materialNoteRuns: [String: MaterialNoteRun] = [:]
 
     /// The newest saved note for the expression that contains this material,

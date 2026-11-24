@@ -294,6 +294,10 @@ final class RecordingInbox: ObservableObject {
     }
     private func recordProcessed(_ item: RecordingInboxItem) {
         receipts.insert(item.id); failures.remove(item.id); items[item.id] = nil
+        // 同一文件先失败、重试后成功时，旧条目会留在入口里继续显示失败；一并清掉。
+        for key in items.filter({ $0.value.folderID == item.folderID && $0.value.path == item.path }).map(\.key) {
+            items[key] = nil; failures.remove(key)
+        }
         if let stamp = item.fileStamp, let index = folders.firstIndex(where: { $0.id == item.folderID }) {
             folders[index].baseline[item.path] = stamp
         }

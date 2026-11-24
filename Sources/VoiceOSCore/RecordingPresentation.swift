@@ -68,7 +68,8 @@ public struct TranscriptionReview: Codable, Sendable {
             scope == "complete_expression_knowledge_and_intent" &&
             !response_id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             receipts.contains(response_id) else { return false }
-        if context_review_version == 3, review_method == "direct_ai" {
+        // v3 是按最小替换校正，v4 是按片段校正后的全文；两者都是一次通读全文的直接核对。
+        if context_review_version == 3 || context_review_version == 4, review_method == "direct_ai" {
             return full_text_independent_passes == 1
         }
         return context_review_version == 2 && full_text_independent_passes == 2 && Set(receipts).count >= 2

@@ -407,6 +407,7 @@ struct WorkspaceView: View {
     @State private var modelName = LocalTextModel.defaultModel
     @State private var modelNoteEffort = "high"
     @State private var modelTopicEffort = "high"
+    @State private var modelReviewEffort = "high"
     @State private var modelAPIKey = ""
     @State private var modelSaving = false
     @State private var modelTestResult: String?
@@ -2411,6 +2412,9 @@ struct WorkspaceView: View {
                 WorkspaceSettingsRow(title:"主题整理思考强度", subtitle:"主题骨架、合流与正文") {
                     effortPicker($modelTopicEffort, id:"settings.model.topicEffort")
                 }
+                WorkspaceSettingsRow(title:"核对与整理思考强度", subtitle:"完整转写核对、观点与任务提取") {
+                    effortPicker($modelReviewEffort, id:"settings.model.reviewEffort")
+                }
                 HStack(spacing:10) {
                     Button(modelSaving ? "保存中…" : "保存并启用", action: saveInternalModel)
                         .buttonStyle(.workspacePrimary)
@@ -2444,13 +2448,15 @@ struct WorkspaceView: View {
         modelName = config.model
         modelNoteEffort = config.noteEffort
         modelTopicEffort = config.topicEffort
+        modelReviewEffort = config.reviewEffort
     }
     private func saveInternalModel() {
         guard !modelSaving else { return }
         let name = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         let config = TextModelConfiguration(baseURL: modelBaseURL,
                                             model: name.isEmpty ? LocalTextModel.defaultModel : name,
-                                            noteEffort: modelNoteEffort, topicEffort: modelTopicEffort).validated()
+                                            noteEffort: modelNoteEffort, topicEffort: modelTopicEffort,
+                                            reviewEffort: modelReviewEffort).validated()
         guard let config else { error = "服务地址无效"; return }
         let typedKey = modelAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveKey = typedKey.isEmpty ? (TextModelKeychain.apiKey() ?? "") : typedKey
@@ -2466,7 +2472,8 @@ struct WorkspaceView: View {
         let name = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         let config = TextModelConfiguration(baseURL: modelBaseURL,
                                             model: name.isEmpty ? LocalTextModel.defaultModel : name,
-                                            noteEffort: modelNoteEffort, topicEffort: modelTopicEffort).validated()
+                                            noteEffort: modelNoteEffort, topicEffort: modelTopicEffort,
+                                            reviewEffort: modelReviewEffort).validated()
         guard let config else { modelTestResult = "服务地址无效"; return }
         let typedKey = modelAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveKey = typedKey.isEmpty ? (TextModelKeychain.apiKey() ?? "") : typedKey

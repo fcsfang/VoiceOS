@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Organize real podcast transcripts into complete, cited task lists."""
-import argparse, hashlib, math, json, os, re, time, urllib.request, urllib.error
+import argparse, hashlib, math, json, os, re, time, urllib.request, urllib.error, urllib.parse
 from collections import Counter
 from pathlib import Path
 from organizer_quality import review_transcript, reviewed_transcript
@@ -96,21 +96,44 @@ audio_uncertain仅当该意图确实依赖仍未辨认的音频含义时为true�
     return reviewed["groups"], by_id, provenance
 
 
+TEXT_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"]
+DEFAULT_TEXT_MODEL = "gpt-6.2-sol"
+
+
 def settings():
-    text = Path(os.environ.get("VOICEOS_MODEL_CONFIG_FILE", ROOT / ".env")).read_text().strip()
-    if text.startswith("{"):
-        options = json.loads(text)["provider"]["openai"]["options"]
-        address, key = options["baseURL"], options["apiKey"]
-    else:
-        values = {}
-        for line in text.splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                k, v = line.split("=", 1)
-                values[k.strip().removeprefix("export ")] = v.strip().strip('"\'')
-        address, key = values["OPENAI_BASE_URL"], values["OPENAI_API_KEY"]
-    if address not in ["https://api.chiyi.cc/v1", "https://api.openai.com/v1"]:
-        raise ValueError("Use the existing authorized text provider")
-    return address, key
+    # The in-app settings page passes the endpoint and key through the child
+    # process environment; the key is never written to disk or printed.
+    address = os.environ.get("VOICEOS_TEXT_BASE_URL", "").strip()
+    key = os.environ.get("VOICEOS_TEXT_API_KEY", "").strip()
+    model = os.environ.get("VOICEOS_TEXT_MODEL", "").strip()
+    effort = os.environ.get("VOICEOS_TEXT_EFFORT", "").strip()
+    if not (address and key):
+        text = Path(os.environ.get("VOICEOS_MODEL_CONFIG_FILE", ROOT / ".env")).read_text().strip()
+        if text.startswith("{"):
+            root = json.loads(text)
+            options = root["provider"]["openai"]["options"]
+            address, key = options["baseURL"], options["apiKey"]
+            model = root.get("model") or ""
+            effort = root.get("reviewEffort") or root.get("organizeEffort") or ""
+        else:
+            values = {}
+            for line in text.splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    values[k.strip().removeprefix("export ")] = v.strip().strip('"\'')
+            address, key = values["OPENAI_BASE_URL"], values["OPENAI_API_KEY"]
+            model = values.get("OPENAI_MODEL", "")
+            effort = values.get("OPENAI_REVIEW_EFFORT", "")
+    address = (address or "").strip().rstrip("/")
+    key = (key or "").strip()
+    parsed = urllib.parse.urlparse(address)
+    if parsed.scheme not in ["http", "https"] or not parsed.netloc:
+        raise ValueError("文本服务地址必须是带主机名的 http/https 地址")
+    if not key:
+        raise ValueError("文本服务密钥为空")
+    if effort not in TEXT_EFFORTS:
+        effort = "high"
+    return address, key, model or DEFAULT_TEXT_MODEL, effort
 
 
 def transient_service_error(error):
@@ -198,10 +221,10 @@ def ask(payload, instructions, cache, schema=SCHEMA, max_output_tokens=65536, re
         except ResponseContractError as error:
             preserve_rejected(cache, content, error)
             discard_response_copies(cache)
-    address, key = settings()
+    address, key, model, effort = settings()
     # Keep Responses as the production default; the gateway comparison did not establish full-pipeline superiority.
-    body = {"model": "gpt-6.1-sol", "store": False, "stream": True, "truncation": "disabled",
-            "reasoning": {"effort": "high"}, "max_output_tokens": max(65536, max_output_tokens),
+    body = {"model": model, "store": False, "stream": True, "truncation": "disabled",
+            "reasoning": {"effort": effort}, "max_output_tokens": max(65536, max_output_tokens),
             "instructions": instructions + "\nReturn only JSON matching this exact schema; include every required field and no additional fields:\n" + json.dumps(schema, ensure_ascii=False, sort_keys=True), "input": json.dumps(payload, ensure_ascii=False),
             "text": {"format": {"type": "json_schema", "name": "podcast_intents", "strict": True, "schema": schema}}}
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))

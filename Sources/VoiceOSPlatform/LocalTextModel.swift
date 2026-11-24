@@ -30,13 +30,15 @@ public enum LocalTextModel {
         public let model: String
         public let noteEffort: String
         public let topicEffort: String
+        public let reviewEffort: String
         public init(address: URL, key: String, model: String = LocalTextModel.defaultModel,
-                    noteEffort: String = "high", topicEffort: String = "high") {
+                    noteEffort: String = "high", topicEffort: String = "high", reviewEffort: String = "high") {
             self.address = address; self.key = key; self.model = model
             self.noteEffort = noteEffort; self.topicEffort = topicEffort
+            self.reviewEffort = reviewEffort
         }
     }
-    public static let defaultModel = "gpt-6.1-sol"
+    public static let defaultModel = "gpt-6.2-sol"
 
     public static func loadSuite(from file:URL, compactSegmentExtraction: Bool = false, compactSegmentAggregation: Bool = false, segmentRequestTimeout: TimeInterval = 120, segmentTransport: any ModelHTTPTransport = DirectModelHTTPTransport(), segmentStreaming: Bool = false, expandAmbiguousQuotes: Bool = false, strictSegmentAggregation: Bool = false) throws -> Suite {
         try loadSuite(settings: settings(from: file), compactSegmentExtraction: compactSegmentExtraction,
@@ -120,7 +122,8 @@ public enum LocalTextModel {
             return Settings(address: address, key: key,
                             model: optional("VOICEOS_TEXT_MODEL") ?? defaultModel,
                             noteEffort: optional("VOICEOS_NOTE_EFFORT") ?? "high",
-                            topicEffort: optional("VOICEOS_TOPIC_EFFORT") ?? "high")
+                            topicEffort: optional("VOICEOS_TOPIC_EFFORT") ?? "high",
+                            reviewEffort: optional("VOICEOS_REVIEW_EFFORT") ?? "high")
         } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
 }

@@ -72,11 +72,11 @@ struct NotesLibraryView: View {
                     } else {
                         HStack(spacing: 10) {
                             Text("已选 \(selectedPending.count) 份").vosFont(WorkspaceText.meta)
-                            Button(organizingSelected ? "整理中…" : "整理所选的 \(selectedPending.count) 份") {
+                            Button(organizingSelected ? "整理中…" : "整理成笔记（\(selectedPending.count) 份）") {
                                 let records = pendingMaterials.filter { selectedPending.contains($0.id) }
                                 organizingSelected = true
                                 Task {
-                                    await model.organizeMaterialsSequentially(records)
+                                    await model.generateNotesSequentially(records)
                                     organizingSelected = false
                                     selectedPending = []
                                 }
@@ -88,7 +88,7 @@ struct NotesLibraryView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(pendingMaterials.prefix(6).enumerated()), id: \.element.id) { index, record in
+                        ForEach(Array(pendingMaterials.prefix(12).enumerated()), id: \.element.id) { index, record in
                             if index > 0 { WorkspaceListDivider() }
                             HStack(spacing: 8) {
                                 Button {
@@ -123,8 +123,8 @@ struct NotesLibraryView: View {
                             }
                         }
                     }
-                    if pendingMaterials.count > 6 {
-                        Button("还有 \(pendingMaterials.count - 6) 条，去材料页", action: openMaterials)
+                    if pendingMaterials.count > 12 {
+                        Button("还有 \(pendingMaterials.count - 12) 条，去材料页", action: openMaterials)
                             .buttonStyle(.workspaceQuietCompact)
                     }
                 }

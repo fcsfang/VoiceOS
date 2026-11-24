@@ -9,12 +9,26 @@ public struct TextModelConfiguration: Codable, Equatable, Sendable {
     public var model: String
     public var noteEffort: String
     public var topicEffort: String
+    /// 完整转写核对与整理脚本的思考强度；旧配置没有这一项时按 high 解码。
+    public var reviewEffort: String
     public static let defaultsKey = "voiceos.textModel.internal.v1"
 
     public init(baseURL: String, model: String = LocalTextModel.defaultModel,
-                noteEffort: String = "high", topicEffort: String = "high") {
+                noteEffort: String = "high", topicEffort: String = "high", reviewEffort: String = "high") {
         self.baseURL = baseURL; self.model = model
         self.noteEffort = noteEffort; self.topicEffort = topicEffort
+        self.reviewEffort = reviewEffort
+    }
+
+    private enum CodingKeys: String, CodingKey { case baseURL, model, noteEffort, topicEffort, reviewEffort }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = try container.decode(String.self, forKey: .baseURL)
+        model = try container.decodeIfPresent(String.self, forKey: .model) ?? LocalTextModel.defaultModel
+        noteEffort = try container.decodeIfPresent(String.self, forKey: .noteEffort) ?? "high"
+        topicEffort = try container.decodeIfPresent(String.self, forKey: .topicEffort) ?? "high"
+        reviewEffort = try container.decodeIfPresent(String.self, forKey: .reviewEffort) ?? "high"
     }
 
     public static func load() -> TextModelConfiguration? {

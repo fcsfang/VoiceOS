@@ -526,6 +526,20 @@ final class ControlCenter: ObservableObject {
     var textModelConfigured: Bool { modelConfigured }
     var modelConfigurationName: String? { textConfigurationFile?.lastPathComponent }
     var modelConfigurationPath: String? { textConfigurationFile?.path }
+    /// 应用内配置（或导入的配置文件）转成 Python 子进程环境。地址、型号与核对强度
+    /// 都跟随设置页；密钥只存在于内存与子进程环境，不写盘、不打印。
+    var textModelOrganizerEnvironment: [String: String]? {
+        if let config = TextModelConfiguration.load(), let key = TextModelKeychain.apiKey(), !key.isEmpty,
+           let url = URL(string: config.baseURL), url.scheme != nil {
+            return ["VOICEOS_TEXT_BASE_URL": url.absoluteString, "VOICEOS_TEXT_API_KEY": key,
+                    "VOICEOS_TEXT_MODEL": config.model, "VOICEOS_TEXT_EFFORT": config.reviewEffort]
+        }
+        if let file = textConfigurationFile, let settings = try? LocalTextModel.inspect(file) {
+            return ["VOICEOS_TEXT_BASE_URL": settings.address.absoluteString, "VOICEOS_TEXT_API_KEY": settings.key,
+                    "VOICEOS_TEXT_MODEL": settings.model, "VOICEOS_TEXT_EFFORT": settings.reviewEffort]
+        }
+        return nil
+    }
     var recordingModelIssue: String? {
         if !speechConfigured { return "尚未配置本地 Qwen 转写模型。" }
         if !textModelConfigured { return "尚未配置文本模型。" }
@@ -1769,7 +1783,8 @@ final class ControlCenter: ObservableObject {
             if let settings = try? LocalTextModel.inspect(file) {
                 try? TextModelKeychain.save(settings.key)
                 TextModelConfiguration(baseURL: settings.address.absoluteString, model: settings.model,
-                                       noteEffort: settings.noteEffort, topicEffort: settings.topicEffort).save()
+                                       noteEffort: settings.noteEffort, topicEffort: settings.topicEffort,
+                                       reviewEffort: settings.reviewEffort).save()
                 UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
             }
             installTextModelSuite(suite, configurationName: file.lastPathComponent, resume: resume)
@@ -1795,7 +1810,8 @@ final class ControlCenter: ObservableObject {
         do {
             let suite = try LocalTextModel.loadSuite(
                 settings: LocalTextModel.Settings(address: url, key: apiKey, model: config.model,
-                                                  noteEffort: config.noteEffort, topicEffort: config.topicEffort),
+                                                  noteEffort: config.noteEffort, topicEffort: config.topicEffort,
+                                                  reviewEffort: config.reviewEffort),
                 segmentRequestTimeout: 600, segmentStreaming: true)
             UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
@@ -1846,7 +1862,8 @@ final class ControlCenter: ObservableObject {
               let url = URL(string: config.baseURL),
               let suite = try? LocalTextModel.loadSuite(
                 settings: LocalTextModel.Settings(address: url, key: key, model: config.model,
-                                                  noteEffort: config.noteEffort, topicEffort: config.topicEffort),
+                                                  noteEffort: config.noteEffort, topicEffort: config.topicEffort,
+                                                  reviewEffort: config.reviewEffort),
                 segmentRequestTimeout: 600, segmentStreaming: true) else { return false }
         installTextModelSuite(suite, configurationName: config.model, resume: false)
         return true
@@ -1998,9 +2015,19 @@ final class ControlCenter: ObservableObject {
         try await store.attachRecordingContext(personalSourceID:personalSourceID,externalSourceID:externalID,sessionID:personalSourceID,offsetMS:media.contextOffsetMS(personalTrack:personalTrack))
     }
     func organizeAutomaticRecordings(_ batch:[RecordingInboxInput],finished:@escaping ([String:RecordingInboxOutcome])->Void) {
-        guard let store,var speech=speechPort as? LocalQwenSpeechPort,let grouping=recordingExpressionModel,
-              let configuration=textConfigurationFile,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),organizingSourceID == nil,!fullRecordingBusy else {
-            finished(Dictionary(uniqueKeysWithValues:batch.map { ($0.digest,.retryableFailure("请等待模型就绪与当前整理完成")) }));return
+        // 自动入口的失败原因要能直接指向用户可修的那一项，而不是笼统的「请等待」。
+        let blocker: String? = {
+            if !initialized || !modelConfigured { return "文本模型尚未就绪；请先在设置中连接" }
+            if !(speechPort is LocalQwenSpeechPort) { return "本地 Qwen 转写尚未配置" }
+            if recordingExpressionModel == nil { return "文本模型端口尚未就绪" }
+            if textModelOrganizerEnvironment == nil { return "文本模型配置不完整；请在设置中重新保存" }
+            if Bundle.main.url(forResource:"organize_podcast",withExtension:"py") == nil { return "应用缺少完整整理脚本" }
+            if organizingSourceID != nil || fullRecordingBusy { return "另一段录音正在整理；空闲后自动重试" }
+            return nil
+        }()
+        guard blocker == nil,let store,var speech=speechPort as? LocalQwenSpeechPort,let grouping=recordingExpressionModel,
+              let configuration=textModelOrganizerEnvironment,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),organizingSourceID == nil,!fullRecordingBusy else {
+            finished(Dictionary(uniqueKeysWithValues:batch.map { ($0.digest,.retryableFailure(blocker ?? "请等待模型就绪与当前整理完成")) }));return
         }
         fullRecordingBusy=true;fullRecordingCount=nil
         fullRecordingCompletedSourceID=nil
@@ -2049,7 +2076,7 @@ final class ControlCenter: ObservableObject {
                             let folder=staging.appendingPathComponent(version).appendingPathComponent(id)
                             _ = try await store.writeOrganizingInput(sourceID:id,to:folder)
                             setFullRecordingStatus("正在校正完整转写，保留每段原音与时间…")
-                            try await FullRecordingOrganizer.organize(folder:folder,script:script,python:speech.pythonExecutable,configuration:configuration,log:log,reviewTranscriptOnly:true)
+                            try await FullRecordingOrganizer.organize(folder:folder,script:script,python:speech.pythonExecutable,modelEnvironment:configuration,log:log,reviewTranscriptOnly:true)
                             _ = try await store.applyTranscriptQualityResult(sourceID:id,expectedVersionID:version,from:folder)
                             try? await store.clearTranscriptionReviewFailure(sourceID: id)
                         }
@@ -2065,7 +2092,7 @@ final class ControlCenter: ObservableObject {
                 setFullRecordingStatus("AI 正在阅读全部分段并独立核对连续性…")
                 try await preparePendingCorrectedRecordingContexts()
                 _ = try await store.connectRecordingExpressions(using:grouping)
-                try await understandPendingRecordingExpressions(store:store,speech:speech,grouping:grouping,configuration:configuration,script:script)
+                try await understandPendingRecordingExpressions(store:store,speech:speech,grouping:grouping,modelEnvironment:configuration,script:script)
                 if let firstID = firstProcessedID {
                     fullRecordingCompletedSourceID = firstID
                     LocalNotice.post(title: "录音已整理", body: "这次录音的笔记、观点与任务已保存。", sourceID: firstID)
@@ -2087,7 +2114,7 @@ final class ControlCenter: ObservableObject {
     private func resumeSavedRecordingExpressions() async -> Task<Void, Never>? {
         guard !resumedSavedRecordingExpressions,organizingSourceID == nil,worker == nil,understandingWorker == nil,!dictationActive,!dictationBusy,let store,
               let speech=speechPort as? LocalQwenSpeechPort,let grouping=recordingExpressionModel,
-              let configuration=textConfigurationFile,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),
+              let configuration=textModelOrganizerEnvironment,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),
               !fullRecordingBusy else { return nil }
         resumedSavedRecordingExpressions=true
         do {
@@ -2108,7 +2135,7 @@ final class ControlCenter: ObservableObject {
                 setFullRecordingStatus("正在为已接收录音补充连续表达判断，复用完整转写…")
                 try await preparePendingCorrectedRecordingContexts()
                 _ = try await store.connectRecordingExpressions(using:grouping)
-                try await understandPendingRecordingExpressions(store:store,speech:speech,grouping:grouping,configuration:configuration,script:script)
+                try await understandPendingRecordingExpressions(store:store,speech:speech,grouping:grouping,modelEnvironment:configuration,script:script)
                 try await acknowledgeCompletedRecordingExpressions(store:store)
                 requestReminderRefresh();queueRecordingTitles();queueTopicOrganization()
                 setFullRecordingStatus("已接收录音的连续表达已整理，原始分段保留")
@@ -2142,7 +2169,7 @@ final class ControlCenter: ObservableObject {
         }
         try await store.refreshCorrectedRecordingContexts(sourceIDs:Array(ids))
     }
-    private func understandPendingRecordingExpressions(store:VoiceOSStore,speech:LocalQwenSpeechPort,grouping:ResponsesRecordingExpressionPort,configuration:URL,script:URL) async throws {
+    private func understandPendingRecordingExpressions(store:VoiceOSStore,speech:LocalQwenSpeechPort,grouping:ResponsesRecordingExpressionPort,modelEnvironment:[String:String],script:URL) async throws {
         let root=await store.root
         let groups=try await store.recordingExpressions().filter { $0.state != "completed" }
         for expression in groups {
@@ -2161,7 +2188,7 @@ final class ControlCenter: ObservableObject {
             try JSONEncoder().encode(expression).write(to:base.appendingPathComponent("连续表达.json"),options:.atomic)
             let log=base.appendingPathComponent("处理日志.txt");fullRecordingLog=log
             setFullRecordingStatus("正在整体理解“"+expression.title+"”的 \(folders.count) 段录音…")
-            try await FullRecordingOrganizer.organize(folders:folders,script:script,python:speech.pythonExecutable,configuration:configuration,log:log)
+            try await FullRecordingOrganizer.organize(folders:folders,script:script,python:speech.pythonExecutable,modelEnvironment:modelEnvironment,log:log)
             _ = try await store.ingestOrganizedPodcast(at:base,allowReminderWrites:false,requireAPIReview:true)
             try await store.finishRecordingExpression(expression,using:grouping)
             fullRecordingOutput=base
@@ -2229,7 +2256,7 @@ final class ControlCenter: ObservableObject {
             lastRecordingOutcome = .needsAttention(fullRecordingStatus); finished?(false); return
         }
         guard let store, var speech = speechPort as? LocalQwenSpeechPort, organizingSourceID == nil, !fullRecordingBusy, worker == nil,
-              understandingWorker == nil, !dictationActive, let configuration = textConfigurationFile,
+              understandingWorker == nil, !dictationActive, let configuration = textModelOrganizerEnvironment,
               let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py") else {
             fullRecordingStatus = organizingSourceID != nil ? "上一段口述正在后台整理，完成后可重新整理" : (recordingModelIssue ?? "请等待当前处理结束或重新打开资料库")
             lastRecordingOutcome = .needsAttention(fullRecordingStatus); finished?(false); return
@@ -2284,7 +2311,7 @@ final class ControlCenter: ObservableObject {
                 }
                 try Task.checkCancellation()
                 try await prepareRecordingContext(input:input.url,media:input.media,personalSourceID:id,personalTrack:track,staging:staging,speech:speech)
-                try await completeFullOrganization(sourceID: id, speech: speech, configuration: configuration, script: script)
+                try await completeFullOrganization(sourceID: id, speech: speech, modelEnvironment: configuration, script: script)
                 success = true
             } catch is CancellationError {
                 setFullRecordingStatus("已停止；原件、逐字稿和已完成整理结果保留")
@@ -2381,12 +2408,12 @@ final class ControlCenter: ObservableObject {
             scheduleProcessing()
         }
     }
-    private func savedRecordingOrganizationInputs() -> (speech: LocalQwenSpeechPort, configuration: URL, script: URL)? {
-        guard let speech = speechPort as? LocalQwenSpeechPort, let configuration = textConfigurationFile,
+    private func savedRecordingOrganizationInputs() -> (speech: LocalQwenSpeechPort, configuration: [String: String], script: URL)? {
+        guard let speech = speechPort as? LocalQwenSpeechPort, let configuration = textModelOrganizerEnvironment,
               let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py") else { return nil }
         return (speech, configuration, script)
     }
-    private func runSavedRecordingOrganization(sourceID: String, transcribeFirst: Bool, inputs: (speech: LocalQwenSpeechPort, configuration: URL, script: URL)) async throws {
+    private func runSavedRecordingOrganization(sourceID: String, transcribeFirst: Bool, inputs: (speech: LocalQwenSpeechPort, configuration: [String: String], script: URL)) async throws {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
         var speech = inputs.speech
         let policy = try await store.sourcePolicy(sourceID: sourceID)
@@ -2404,9 +2431,9 @@ final class ControlCenter: ObservableObject {
             }
             try Task.checkCancellation()
         }
-        try await completeFullOrganization(sourceID: sourceID, speech: speech, configuration: inputs.configuration, script: inputs.script)
+        try await completeFullOrganization(sourceID: sourceID, speech: speech, modelEnvironment: inputs.configuration, script: inputs.script)
     }
-    private func completeFullOrganization(sourceID: String, speech: LocalQwenSpeechPort, configuration: URL, script: URL) async throws {
+    private func completeFullOrganization(sourceID: String, speech: LocalQwenSpeechPort, modelEnvironment: [String: String], script: URL) async throws {
         guard let store, let record = try await store.sources().first(where: { $0.id == sourceID }), let version = record.transcriptVersionID else { throw VoiceOSError("完整转写尚未保存") }
         let policy = try await store.sourcePolicy(sourceID: sourceID)
         guard !policy.localOnly else { throw VoiceOSError("这份文字已限制为仅本机，完整整理已停止") }
@@ -2428,13 +2455,13 @@ final class ControlCenter: ObservableObject {
         _ = try await store.writeExistingTaskInput(to: base.appendingPathComponent("已有任务.json"), excludingSourceIDs: [sourceID])
         let log = base.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
         setFullRecordingStatus("AI 正在直接校正完整逐字稿…")
-        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log, reviewTranscriptOnly: true)
+        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, modelEnvironment: modelEnvironment, log: log, reviewTranscriptOnly: true)
         try Task.checkCancellation()
         _ = try await store.applyTranscriptQualityResult(sourceID: sourceID, expectedVersionID: version, from: folder)
         try? await store.clearTranscriptionReviewFailure(sourceID: sourceID)
         await refresh()
         setFullRecordingStatus("全文校正已保存，正在整理观点、任务与已有任务的接续…")
-        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log)
+        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, modelEnvironment: modelEnvironment, log: log)
         try Task.checkCancellation()
         let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS", requireAPIReview: true)
         fullRecordingCount = count
@@ -2815,33 +2842,6 @@ final class ControlCenter: ObservableObject {
         scheduleProcessing()
     }
 
-    /// 依次重新整理一批材料：前一条做完再开下一条，失败跳过并继续；
-    /// 用于笔记页「待处理」里挑选的几条一次整理。
-    func organizeMaterialsSequentially(_ records: [SourceRecord]) async {
-        var succeeded = 0, failed = 0
-        for record in records {
-            guard modelConfigured else { failed += 1; continue }
-            guard sourceReidentifyWorker == nil, understandingWorker == nil, pausedActionBatch?.isRunning != true else {
-                failed += records.count - succeeded - failed
-                break
-            }
-            understandingSource = record.id
-            var ok = false
-            let worker = Task {
-                switch await reidentifySource(record.id) {
-                case .finished: ok = true
-                case .skipped, .failed: ok = false
-                }
-            }
-            sourceReidentifyWorker = worker
-            await worker.value
-            await refresh(); requestReminderRefresh()
-            understandingSource = nil
-            sourceReidentifyWorker = nil
-            if ok { succeeded += 1 } else { failed += 1 }
-        }
-        status = failed == 0 ? "已整理 \(succeeded) 份材料" : "已整理 \(succeeded) 份，\(failed) 份未完成"
-    }
     func reidentify(_ record: SourceRecord) {
         guard sourceReidentifyWorker == nil, understandingWorker == nil, pausedActionBatch?.isRunning != true else { return }
         understandingSource = record.id
@@ -5669,10 +5669,10 @@ extension CognitiveContentKind {
 }
 
 extension ControlCenter {
-    private func ensureTranscriptReviewed(sourceID: String, retry: Bool = false) async throws {
+    func ensureTranscriptReviewed(sourceID: String, retry: Bool = false) async throws {
         guard let store, let source = try await store.sources().first(where: { $0.id == sourceID }), source.needsTranscriptionReview else { return }
         guard !source.localOnly, let version = source.transcriptVersionID,
-              let speech = speechPort as? LocalQwenSpeechPort, let configuration = textConfigurationFile,
+              let speech = speechPort as? LocalQwenSpeechPort, let configuration = textModelOrganizerEnvironment,
               let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py") else {
             throw VoiceOSError("请配置 Qwen 与文本模型，并允许这份文字处理后再校正；音频仍仅本机")
         }
@@ -5689,7 +5689,7 @@ extension ControlCenter {
             let folder = root.appendingPathComponent("整理/转写校正/" + sourceID + "/" + version + "-" + String(source.policyVersion))
             _ = try await store.writeOrganizingInput(sourceID: sourceID, to: folder, reviewTranscriptOnly: true)
             try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable,
-                configuration: configuration, log: folder.appendingPathComponent("校正日志.txt"), reviewTranscriptOnly: true)
+                modelEnvironment: configuration, log: folder.appendingPathComponent("校正日志.txt"), reviewTranscriptOnly: true)
             try Task.checkCancellation()
             let policy = try await store.sourcePolicy(sourceID: sourceID)
             guard policy.version == source.policyVersion, !policy.localOnly else { throw VoiceOSError("校正期间文字许可已变化，未接纳旧结果") }
