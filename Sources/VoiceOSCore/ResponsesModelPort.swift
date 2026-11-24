@@ -199,6 +199,19 @@ private final class ModelDeadlineRace<T: Sendable>: @unchecked Sendable {
     }
 }
 
+/// 文本服务地址的唯一授权口径：HTTPS、指定主机、精确 `/v1`，不带用户信息、端口、查询或片段。
+/// 端口构造与设置页「测试连接」共用这一处，避免两条路径对同一地址给出不同结论。
+public enum TextModelHostPolicy {
+    public static let allowedHosts: Set<String> = ["api.openai.com", "api.chiyi.cc"]
+    public static func isAllowed(_ baseURL: URL) -> Bool {
+        let host = baseURL.host ?? ""
+        return baseURL.scheme == "https" && allowedHosts.contains(host)
+            && baseURL.absoluteString == "https://" + host + "/v1"
+            && baseURL.path == "/v1" && baseURL.query == nil && baseURL.fragment == nil
+            && baseURL.user == nil && baseURL.password == nil && baseURL.port == nil
+    }
+}
+
 /// Text-only Responses-compatible driver. One POST, no fallback, polling, tools or retry.
 public struct ResponsesModelPort: ModelPort {
     public let configuration: ModelConfiguration
@@ -206,9 +219,7 @@ public struct ResponsesModelPort: ModelPort {
     private let apiKey: String
     private let transport: any ModelHTTPTransport
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
-        guard baseURL.scheme == "https", ["api.openai.com", "api.chiyi.cc"].contains(baseURL.host ?? ""),
-              baseURL.absoluteString == "https://" + (baseURL.host ?? "") + "/v1", baseURL.path == "/v1", baseURL.query == nil, baseURL.fragment == nil,
-              baseURL.user == nil, baseURL.password == nil, baseURL.port == nil,
+        guard TextModelHostPolicy.isAllowed(baseURL),
               !apiKey.isEmpty, apiKey.unicodeScalars.allSatisfy({ $0.value >= 33 && $0.value <= 126 }),
               !model.isEmpty else { throw VoiceOSError("模型配置须使用已授权的 HTTPS 服务和有效本地凭据") }
         endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.transport = transport

@@ -1837,7 +1837,12 @@ final class ControlCenter: ObservableObject {
     }
     /// 用给定配置发一次极小请求，验证地址、密钥与模型可用；返回面向用户的结果与延迟。
     func testTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> String {
-        guard let url = URL(string: config.baseURL)?.appendingPathComponent("responses") else { return "服务地址无效" }
+        guard let base = URL(string: config.baseURL) else { return "服务地址无效" }
+        // 与端口构造同一口径：未通过授权的地址不会收到这份密钥，测试连接也不例外。
+        guard TextModelHostPolicy.isAllowed(base) else {
+            return "服务地址须为 https://api.openai.com/v1 或 https://api.chiyi.cc/v1（不带端口、查询或子路径）"
+        }
+        let url = base.appendingPathComponent("responses")
         guard !apiKey.isEmpty else { return "没有可用的密钥：请填写后点「保存并启用」（若已在弹窗中拒绝钥匙串访问，请允许后重试）" }
         let payload: [String: Any] = ["model": config.model, "store": false,
             "reasoning": ["effort": "minimal"], "max_output_tokens": 32, "truncation": "disabled",
