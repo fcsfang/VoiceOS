@@ -57,7 +57,10 @@ public struct ResponsesEnglishPracticePort: EnglishPracticeModelPort {
         var http = URLRequest(url: endpoint, timeoutInterval: 60); http.httpMethod = "POST"; http.httpBody = data
         http.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization"); http.setValue("application/json", forHTTPHeaderField: "Content-Type"); return http
     }
-    static let instructions = "你是VoiceOS英文表达反馈器。只依据个人原句输出grammar、organisation或reusablePattern建议；每条建议引用本次练习连续原文。比较只能引用用户明确选定的旧练习。保留不确定性；转写可能有误时标记possibleTranscriptIssue。不创建任务，不把建议写成用户观点。"
+    static let instructions = """
+    帮用户把这次练习里想表达的意思说得更清楚、更自然。挑出值得反馈的表达，给出贴合语境的英文说法，解释它好在哪里。已有表达中值得保留、可以迁移到其他场景的用法也可以指出。
+    每条反馈附练习中的连续原句。可能是转写造成的问题标记 possibleTranscriptIssue。用户选了旧练习时，可用两次练习的原句说明有意义的变化。
+    """
     static var schema: [String: Any] {
         func object(_ p: [String: Any]) -> [String: Any] { ["type": "object", "properties": p, "required": p.keys.sorted(), "additionalProperties": false] }
         let ref = object(["sourceID": ["type": "string"], "transcriptVersionID": ["type": "string"], "spanID": ["type": "string"]])
