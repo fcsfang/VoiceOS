@@ -2247,8 +2247,22 @@ final class ControlCenter: ObservableObject {
     private func understandPendingRecordingExpressions(store:VoiceOSStore,speech:LocalQwenSpeechPort,grouping:ResponsesRecordingExpressionPort,modelEnvironment:[String:String],script:URL) async throws {
         let root=await store.root
         let groups=try await store.recordingExpressions().filter { $0.state != "completed" }
+        var failures: [String] = []
         for expression in groups {
-            if try await store.completeUnchangedSingleRecording(expression) { continue }
+            do {
+                try await understandRecordingExpression(expression, root: root, store: store, speech: speech, grouping: grouping, modelEnvironment: modelEnvironment, script: script)
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                let reason = error.localizedDescription
+                NSLog("VoiceOS recording recovery %@: %@", expression.id, reason)
+                failures.append(expression.title + "：" + reason)
+            }
+        }
+        if !failures.isEmpty { throw VoiceOSError(failures.joined(separator: "\n")) }
+    }
+
+    private func understandRecordingExpression(_ expression: RecordingExpression, root: URL, store: VoiceOSStore, speech: LocalQwenSpeechPort, grouping: ResponsesRecordingExpressionPort, modelEnvironment: [String:String], script: URL) async throws {
+            if try await store.completeUnchangedSingleRecording(expression) { return }
             try Task.checkCancellation()
             fullRecordingSourceID=expression.sourceIDs.first
             let digest=expression.digest
@@ -2272,7 +2286,6 @@ final class ControlCenter: ObservableObject {
                 if !(try await store.latestCandidateClaims(for:id)).isEmpty { _ = try await store.enqueueKnowledgeReview(sourceID:id) }
             }
             await refresh()
-        }
     }
     private func automaticRecordingFailure(_ error:Error) -> RecordingInboxOutcome {
         let message=error.localizedDescription
@@ -3381,6 +3394,7 @@ final class ControlCenter: ObservableObject {
                     pendingIntent = false
                 }
                 if pendingTranscription || pendingIntent { scheduleProcessing() }
+                else { await resumeSavedRecordingExpressions() }
             }
         }
     }

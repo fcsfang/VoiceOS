@@ -39,7 +39,7 @@ extension VoiceOSStore {
         try db.query("SELECT period FROM action_recurrence WHERE action_id=?", [actionID]).first?["period"].flatMap(RecurrencePeriod.init(rawValue:))
     }
     public func setRecurrence(actionID: String, period: RecurrencePeriod) throws {
-        guard let row = try db.query("SELECT state FROM actions WHERE id=?", [actionID]).first else { throw VoiceOSError("行动不存在") }
+        guard let row = try db.query("SELECT state FROM actions WHERE id=? AND removed=0", [actionID]).first else { throw VoiceOSError("行动不存在") }
         guard row["state"] == "open" else { throw VoiceOSError("只有未完成的行动可以设置重复") }
         if try db.query("SELECT action_id FROM action_recurrence WHERE action_id=?", [actionID]).first != nil {
             try db.execute("UPDATE action_recurrence SET period=? WHERE action_id=?", [period.rawValue, actionID])
@@ -104,6 +104,7 @@ extension VoiceOSStore {
                 let nextCommand = "recurrence:" + id + ":" + Self.recurrenceToken(newDue)
                 try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,nature,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json,auto_send) VALUES(?,?,?,?,?,?,?,?,'open',?,?,?,?,?,0)", [newID, claimID, reviewVersion, title, kind, row["nature"]!, actor, note, row["validity"]!, nextCommand, fingerprint, stamp, String(decoding: try JSONEncoder().encode(intent), as: UTF8.self)])
                 try db.execute("INSERT INTO action_recurrence(action_id,series_id,period,created_at) VALUES(?,?,?,?)", [newID, seriesID, period.rawValue, stamp])
+                try db.execute("UPDATE actions SET edited_title=?,edited_note=? WHERE id=?", [row["edited_title"], row["edited_note"], newID])
                 successorID = newID
             }
             try checkpoint(.actionStateUncommitted)

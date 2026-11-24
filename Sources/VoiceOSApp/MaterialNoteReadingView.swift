@@ -13,6 +13,7 @@ private struct MaterialNoteReadKey: Hashable {
     let transcriptVersionID: String?
     let policyVersion: Int
     let state: String
+    let revision: Int
     let members: [String]
 }
 
@@ -42,6 +43,8 @@ struct MaterialNoteReadingView: View {
     var restoreScroll: Binding<ScrollPosition>? = nil
 
     @State private var display: MaterialNoteDisplay?
+    @State private var editing: StoredMaterialNote?
+    @State private var replacement: StoredMaterialNote?
     @State private var requested = false
     @State private var loadedOnce = false
     @AppStorage("voiceos.note.annotations.visible") private var annotationsVisible = true
@@ -71,7 +74,7 @@ struct MaterialNoteReadingView: View {
     private var readKey: MaterialNoteReadKey {
         MaterialNoteReadKey(sourceID: source.id, transcriptVersionID: source.transcriptVersionID,
                             policyVersion: source.policyVersion, state: Self.stateToken(noteState),
-                            members: memberSignature)
+                            revision: model.materialNotesRevision, members: memberSignature)
     }
 
     private var requestKey: MaterialNoteRequestKey {
@@ -93,6 +96,20 @@ struct MaterialNoteReadingView: View {
         }
         .task(id: readKey) { await load() }
         .task(id: requestKey) { await requestNote() }
+        .sheet(item: $editing) { base in
+            MaterialNoteEditor(base: base) { draft in
+                guard let store = model.store else { throw VoiceOSError("资料库尚未打开") }
+                let saved = try await store.editMaterialNote(draft, replacing: base)
+                model.materialNoteRows[saved.expressionKey] = saved
+                model.materialNoteDidSave()
+            }
+        }
+        .alert("重新整理并替换手改笔记？", isPresented: Binding(get: { replacement != nil }, set: { if !$0 { replacement = nil } }), presenting: replacement) { base in
+            Button("保留当前笔记", role: .cancel) {}
+            Button("重新整理", role: .destructive) {
+                Task { await model.requestMaterialNote(sourceID: source.id, force: true, replacingEdited: base.id) }
+            }
+        } message: { _ in Text("生成成功后，新笔记将成为阅读页显示的版本。") }
         .task(id: positionRestoreKey) { await restoreReadingPositionIfNeeded() }
     }
 
@@ -333,7 +350,7 @@ struct MaterialNoteReadingView: View {
 
     @ViewBuilder
     private func todoBlockView(_ block: NoteBlock) -> some View {
-        if let actionID = block.actionID, let action = model.sourcePageIndex.allAction(for: actionID) {
+        if let actionID = block.actionID, let action = model.sourcePageIndex.allAction(for: actionID), action.validity == "current", action.state != "dismissed" {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Button {
                     guard action.state != "completed" else { return }
@@ -352,7 +369,7 @@ struct MaterialNoteReadingView: View {
                 .help(action.state == "completed" ? "已完成" : "勾选完成这件事")
                 .accessibilityLabel(action.state == "completed" ? "已完成" : "勾选完成")
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(normalized(block.titleOverride) ?? action.title)
+                    Text(action.title)
                         .vosFont(WorkspaceText.body)
                         .foregroundStyle(palette.text)
                         .strikethrough(action.state == "completed", color: palette.secondaryText)
@@ -366,20 +383,18 @@ struct MaterialNoteReadingView: View {
             .padding(12)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
-        } else {
-            unknownBlockView(block)
         }
     }
 
     @ViewBuilder
     private func claimBlockView(_ block: NoteBlock) -> some View {
-        if let claimID = block.claimID, let claim = model.sourcePageIndex.claim(for: claimID) {
+        if let claimID = block.claimID, let claim = model.sourcePageIndex.claim(for: claimID), claim.validity == "current", claim.reviewState != "rejected" {
             let reference = claim.references.first
             Button {
                 if let reference { openSource(reference.sourceID) }
             } label: {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(normalized(block.titleOverride) ?? claim.statement)
+                    Text(claim.statement)
                         .vosFont(WorkspaceText.body)
                         .foregroundStyle(palette.text)
                         .multilineTextAlignment(.leading)
@@ -396,8 +411,6 @@ struct MaterialNoteReadingView: View {
             }
             .buttonStyle(.plain)
             .disabled(reference == nil)
-        } else {
-            unknownBlockView(block)
         }
     }
 
@@ -519,11 +532,12 @@ struct MaterialNoteReadingView: View {
             Spacer(minLength: 8)
             // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
             Menu {
+                Button("编辑笔记…") { editing = display?.note }
                 Button(annotationsVisible ? "隐藏 AI 批注" : "显示 AI 批注") {
                     annotationsVisible.toggle()
                 }
                 Button("重新整理笔记") {
-                    Task { await model.requestMaterialNote(sourceID: source.id, force: true) }
+                    retry()
                 }
                 .disabled(noteState == .generating)
             } label: {
@@ -722,6 +736,7 @@ struct MaterialNoteReadingView: View {
     // MARK: - Actions and reads
 
     private func retry() {
+        if let base = display?.note, base.note.manuallyEdited == true { replacement = base; return }
         Task { await model.requestMaterialNote(sourceID: source.id, force: true) }
     }
 

@@ -132,7 +132,7 @@ public struct ReadOnlyStatus: Codable, Sendable, Equatable {
 /// recovery and an exclusive flock, so an agent process must not open it;
 /// this type reads the same file directly and never writes.
 public struct ReadOnlyLibrary {
-    static let schemaVersion = 77
+    static let schemaVersion = 78
     private let connection: ReadOnlyConnection
     private let databaseFile: URL
 
@@ -156,7 +156,7 @@ public struct ReadOnlyLibrary {
 
     public func actions(state: String? = nil, validity: String? = nil, kind: String? = nil,
                         limit: Int = 100, offset: Int = 0) throws -> [ReadOnlyActionRow] {
-        var conditions: [String] = []
+        var conditions: [String] = ["a.removed=0"]
         var arguments: [String?] = []
         if let state { conditions.append("a.state=?"); arguments.append(state) }
         if let validity { conditions.append("a.validity=?"); arguments.append(validity) }
@@ -165,7 +165,7 @@ public struct ReadOnlyLibrary {
         arguments.append(String(max(0, offset)))
         let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
         let rows = try connection.query("""
-        SELECT a.id,a.title,a.kind,a.state,a.validity,a.nature,a.version,a.parent_id,a.created_at,
+        SELECT a.id,COALESCE(a.edited_title,a.title) AS title,a.kind,a.state,a.validity,a.nature,a.version,a.parent_id,a.created_at,
          (SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at,
          (SELECT COUNT(*) FROM action_feedback f WHERE f.action_id=a.id) AS feedback_count,
          (SELECT MAX(f.created_at) FROM action_feedback f WHERE f.action_id=a.id) AS last_feedback_at,
@@ -198,13 +198,13 @@ public struct ReadOnlyLibrary {
     public func action(id: String, includeFeedback: Bool = false, includeFeedbackText: Bool = false,
                        includeNote: Bool = false, includeTopics: Bool = false) throws -> ReadOnlyActionDetail? {
         guard let row = try connection.query("""
-        SELECT a.id,a.title,a.kind,a.state,a.validity,a.nature,a.version,a.parent_id,a.created_at,a.note,
+        SELECT a.id,COALESCE(a.edited_title,a.title) AS title,a.kind,a.state,a.validity,a.nature,a.version,a.parent_id,a.created_at,COALESCE(a.edited_note,a.note) AS note,
          (SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at,
          (SELECT COUNT(*) FROM action_feedback f WHERE f.action_id=a.id) AS feedback_count,
          (SELECT MAX(f.created_at) FROM action_feedback f WHERE f.action_id=a.id) AS last_feedback_at,
          c.refs_json AS claim_refs,
          (SELECT l.state FROM reminder_links l WHERE l.action_id=a.id) AS reminder_state
-        FROM actions a JOIN claims c ON c.id=a.claim_id WHERE a.id=?
+        FROM actions a JOIN claims c ON c.id=a.claim_id WHERE a.id=? AND a.removed=0
         """, [id]).first else { return nil }
         let revisions = try connection.query("""
         SELECT version,state,actor,created_at FROM action_revisions WHERE action_id=? ORDER BY version DESC
@@ -242,10 +242,10 @@ public struct ReadOnlyLibrary {
         func count(_ sql: String) throws -> Int {
             Int(try connection.query(sql).first?["n"] ?? "0") ?? 0
         }
-        let states = Dictionary(try connection.query("SELECT state,COUNT(*) AS n FROM actions GROUP BY state").map {
+        let states = Dictionary(try connection.query("SELECT state,COUNT(*) AS n FROM actions WHERE removed=0 GROUP BY state").map {
             ($0["state"] ?? "", Int($0["n"] ?? "0") ?? 0)
         }, uniquingKeysWith: { $1 })
-        let validities = Dictionary(try connection.query("SELECT validity,COUNT(*) AS n FROM actions GROUP BY validity").map {
+        let validities = Dictionary(try connection.query("SELECT validity,COUNT(*) AS n FROM actions WHERE removed=0 GROUP BY validity").map {
             ($0["validity"] ?? "", Int($0["n"] ?? "0") ?? 0)
         }, uniquingKeysWith: { $1 })
         return ReadOnlyStatus(userVersion: version,

@@ -284,14 +284,13 @@ private struct WorkspaceAttentionDot: View {
         let inboxAttentionCount = inbox.pendingItems.filter { $0.state == .needsAttention }.count
         let inboxNeedsAttention = inboxAttentionCount > 0 || !inbox.folderErrors.isEmpty
         if count > 0 || inboxNeedsAttention {
-            let parts = [attention.transcriptIssueCount > 0 ? "转写疑点 \(attention.transcriptIssueCount)" : nil,
-                         attention.otherCount > 0 ? "其他 \(attention.otherCount)" : nil,
+            let parts = [count > 0 ? "处理事项 \(count)" : nil,
                          inboxAttentionCount > 0 ? "录音 \(inboxAttentionCount)" : nil,
                          !inbox.folderErrors.isEmpty ? "入口读取失败" : nil].compactMap { $0 }
             let title = "需要查看" + (parts.isEmpty ? "" : " · " + parts.joined(separator:" · "))
             Button(action:open) {
                 HStack(alignment:.firstTextBaseline,spacing:6) {
-                    Circle().fill(attention.transcriptIssueCount > 0 ? palette.warning : palette.accent)
+                    Circle().fill(palette.accent)
                         .frame(width:6,height:6).offset(y:-1).accessibilityHidden(true)
                     Text(title).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                         .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
@@ -356,7 +355,6 @@ struct WorkspaceView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.vosTextScale) private var textScale
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
-    private var brandImage: NSImage? { AppBrand.image(for: colorScheme) }
     // 笔记即首页：打开应用先落在文章列表；旧首页作为收件箱一键可达。
     @State private var page: WorkspacePage = .notes
     @State private var path: [WorkspaceNavigationEntry] = []
@@ -441,7 +439,6 @@ struct WorkspaceView: View {
     @State private var showSlowSearch = false
     @State private var searchGeneration = 0
     @State private var lastSearchAnnouncement = ""
-    @State private var searchHovered = false
     @State private var recentSearches: [String] = UserDefaults.standard.stringArray(forKey: recentSearchDefaultsKey) ?? []
     @State private var searchArrowMonitor: Any?
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
@@ -512,16 +509,21 @@ struct WorkspaceView: View {
         alertContent
     }
     private var chrome: some View {
-        HStack(spacing:0) {
-            sidebar
-            Divider()
-            mainColumn
-            if discussionIsPresented {
-                Divider()
-                WorkspaceDiscussionView(model:model,draft:$discussionDraft,close:{ showingDiscussion=false },openSource:{ go(.source($0)) })
-                    .frame(minWidth:290,idealWidth:320,maxWidth:380)
+        NavigationSplitView {
+            sidebar.navigationSplitViewColumnWidth(min: 160, ideal: 190 * vosLayoutScale(textScale), max: 300)
+        } detail: {
+            HStack(spacing:0) {
+                mainColumn
+                if discussionIsPresented {
+                    Divider()
+                    WorkspaceDiscussionView(model:model,draft:$discussionDraft,close:{ showingDiscussion=false },openSource:{ go(.source($0)) })
+                        .frame(minWidth:290,idealWidth:320,maxWidth:380)
+                }
             }
+            .navigationTitle(showsBreadcrumb ? breadcrumb : section)
+            .toolbar { workspaceToolbar }
         }
+        .navigationSplitViewStyle(.balanced)
     }
     private var styledContent: some View {
         chrome
@@ -539,6 +541,20 @@ struct WorkspaceView: View {
                     else { back() }
                 }
                 else if !path.isEmpty { back() }
+            }
+            .onChange(of:model.pendingWorkspacePageRequest) { _, request in
+                guard let request else { return }
+                model.pendingWorkspacePageRequest = nil
+                switch request {
+                case .home, .notes: openSidebarPage(.notes)
+                case .themes: openSidebarPage(.themes)
+                case .materials: openSidebarPage(.materials)
+                case .actions: openSidebarPage(.actions)
+                case .monitor: openSidebarPage(.monitor)
+                case .initiate: openSidebarPage(.initiate)
+                case .processing: openSidebarPage(.tool("处理情况"))
+                case .back: back()
+                }
             }
             .workspaceToast($toastMessage)
             .navigationTitle(model.libraryTitle)
@@ -702,8 +718,6 @@ struct WorkspaceView: View {
     }
     private var mainColumn: some View {
         VStack(spacing:0) {
-            header
-            WorkspaceListDivider()
             workspaceErrorBanner
             Group {
                 if !model.startupIssue.isEmpty {
@@ -775,164 +789,97 @@ struct WorkspaceView: View {
         } else { unavailable("这篇笔记暂时不可用",description:"可以回到笔记列表，或打开材料页。",actionTitle:"回到笔记") { go(.notes) } }
     }
     /// 保存视图区与行都单独成函数：侧栏表达式整体过大会触发类型检查超时。
-    @ViewBuilder private var sidebarSavedViews: some View {
-        if !savedViews.isEmpty {
-            VStack(alignment:.leading,spacing:8) {
-                Text("视图").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
-                VStack(spacing:2) {
-                    ForEach(savedViews) { view in savedViewRow(view) }
+    private var sidebarSelection: Binding<String?> {
+        Binding(get: {
+            if let saved = savedViews.first(where: {
+                ($0.page == .materials && page == .materials && materialFilter == $0.filter) ||
+                ($0.page == .actions && page == .actions && actionFilter == $0.filter)
+            }) { return saved.id }
+            return section
+        }, set: { selection in
+            guard let selection else { return }
+            if let saved = savedViews.first(where: { $0.id == selection }) {
+                openSavedView(saved)
+            } else if let target = sidebarItems.first(where: { $0.title == selection }) {
+                openSidebarPage(target.page)
+            }
+        })
+    }
+
+    private var sidebarItems: [(page: WorkspacePage, title: String, icon: String, id: String, count: Int)] {
+        [(.notes, "笔记", "doc.text", "notes", 0),
+         (.themes, "主题", "circle.hexagongrid", "themes", 0),
+         (.materials, "材料", "books.vertical", "materials", 0),
+         (.monitor, "消息监测", "bell.badge", "monitor", model.monitorOpenItemCount),
+         (.actions, "行动", "checkmark.circle", "actions", model.unreadDeliveryCount),
+         (.initiate, "启动", "arrow.up.forward", "initiate", 0)]
+    }
+
+    private func openSidebarPage(_ target: WorkspacePage) {
+        path = []
+        page = target
+        if target == .themes { topicID=nil; topicFocus=nil }
+        error = ""
+    }
+
+    private var sidebar: some View {
+        VStack(alignment:.leading, spacing:8) {
+            List(selection: sidebarSelection) {
+                ForEach(sidebarItems, id: \.id) { item in
+                    Button { openSidebarPage(item.page) } label: {
+                        Label(item.title, systemImage:item.icon).frame(maxWidth:.infinity, alignment:.leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).tag(item.title).badge(item.count)
+                    .accessibilityIdentifier("nav." + item.id)
+                }
+                if !savedViews.isEmpty {
+                    Section("视图") {
+                        ForEach(savedViews) { view in
+                            Label(view.name, systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
+                                .tag(view.id)
+                                .help(view.filter)
+                                .accessibilityIdentifier("workspace.savedView." + view.name)
+                                .contextMenu { Button("删除视图",role:.destructive) { pendingDeleteView=view } }
+                        }
+                    }
                 }
             }
-        }
-    }
-    @ViewBuilder private func savedViewRow(_ view: SavedWorkspaceView) -> some View {
-        let selected: Bool = (view.page == .materials && page == .materials && materialFilter == view.filter) || (view.page == .actions && page == .actions && actionFilter == view.filter)
-        Button { openSavedView(view) } label: {
-            Label(view.name,systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
-                .vosFont(WorkspaceText.body).lineLimit(textScale >= 1.3 ? 2 : 1)
-                .frame(maxWidth:.infinity,alignment:.leading)
-                .padding(.horizontal,9).padding(.vertical,7)
-                .background(selected ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .help(view.page == .materials ? "材料：" + view.filter : "行动：" + view.filter)
-            .contextMenu { Button("删除视图",role:.destructive) { pendingDeleteView = view } }
-            .accessibilityLabel("打开视图：" + view.name)
-            .accessibilityIdentifier("workspace.savedView." + view.name)
-            .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-    /// 一级导航拆成两组：七行 nav 放在同一个表达式里会把类型检查拖到超时。
-    @ViewBuilder private var sidebarNavigation: some View {
-        VStack(spacing:5) { sidebarBrowseLinks; sidebarWorkLinks }
-    }
-    @ViewBuilder private var sidebarBrowseLinks: some View {
-        VStack(spacing:5) {
-            nav("笔记",icon:"doc.text",target:.notes,id:"notes")
-            nav("主题",icon:"circle.hexagongrid",target:.themes,id:"themes")
-            nav("材料",icon:"books.vertical",target:.materials,id:"materials")
-        }
-    }
-    @ViewBuilder private var sidebarWorkLinks: some View {
-        VStack(spacing:5) {
-            nav("消息监测",icon:"bell.badge",target:.monitor,id:"monitor",badge:model.monitorOpenItemCount,badgeAccessibility:"未处理事项 \(model.monitorOpenItemCount) 条")
-            nav("行动",icon:"checkmark.circle",target:.actions,id:"actions",badge:model.unreadDeliveryCount)
-            nav("启动",icon:"arrow.up.forward",target:.initiate,id:"initiate")
-        }
-    }
-    private var sidebar: some View {
-        VStack(alignment:.leading,spacing:28) {
-            HStack(spacing:9) {
-                if let brandImage {
-                    Image(nsImage: brandImage).resizable().interpolation(.high).frame(width: 26 * vosLayoutScale(textScale), height: 26 * vosLayoutScale(textScale))
-                        .accessibilityHidden(true)
-                } else {
-                    Image(systemName:"waveform").vosFont(19, weight: .medium)
-                }
-                Text("VoiceOS").vosFont(19, weight: .medium)
-            }.padding(.horizontal,9)
-            sidebarNavigation
-            sidebarSavedViews
-            Spacer()
-            VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
-                HStack(spacing:7) {
-                    if model.organizingTopics || model.assistantBusy || model.followupBusy {
-                        ProgressView().controlSize(.mini)
-                            .accessibilityHidden(model.organizingTopics)
-                            .accessibilityLabel("正在处理")
+            .listStyle(.sidebar)
+            VStack(alignment:.leading,spacing:8) {
+                if model.organizingTopics || model.assistantBusy || model.followupBusy {
+                    HStack {
+                        ProgressView().controlSize(.mini).accessibilityLabel("正在处理")
+                        if model.organizingTopics { Text("AI 正在连接主题").font(.caption) }
                     }
-                    if model.organizingTopics { Text("AI 正在连接主题").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 }
                 if page != .tool("处理情况") {
                     WorkspaceAttentionDot(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
                 }
-                Button { go(.settings);showingDiscussion=false } label: {
-                    Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(palette.secondaryText)
-                        .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
-                        .background(page == .settings ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain)
+                Button("设置", systemImage:"gearshape") { go(.settings);showingDiscussion=false }
+                    .buttonStyle(.borderless)
                     .accessibilityIdentifier("nav.settings")
                     .accessibilityAddTraits(page == .settings ? .isSelected : [])
-            }.padding(.horizontal,8)
-                .onChange(of:model.pendingWorkspacePageRequest) { _, request in
-                    guard let request else { return }
-                    model.pendingWorkspacePageRequest = nil
-                    switch request {
-                    case .home: path=[];page = .notes;error=""
-                    case .themes: path=[];page = .themes;topicID=nil;topicFocus=nil;error=""
-                    case .materials: path=[];page = .materials;error=""
-                    case .notes: path=[];page = .notes;error=""
-                    case .actions: path=[];page = .actions;error=""
-                    case .monitor: path=[];page = .monitor;error=""
-                    case .initiate: path=[];page = .initiate;error=""
-                    case .processing: path=[];page = .tool("处理情况");error=""
-                    case .back: back()
-                    }
-                }
-        }.padding(.horizontal,13).padding(.vertical,28).frame(width: 172 * vosLayoutScale(textScale)).background(palette.sidebar)
+            }.padding([.horizontal,.bottom], 14)
+        }
             .onAppear { AppBrand.applyApplicationIcon() }
             .onChange(of: colorScheme) { _, _ in AppBrand.applyApplicationIcon() }
     }
-    /// AnyView 是刻意的：七个 nav 调用的返回类型叠在一起曾让类型检查超时，
-    /// 压平后侧栏表达式能稳定编译；每项只是一行按钮，渲染开销可忽略。
-    private func nav(_ title:String,icon:String,target:WorkspacePage,id:String,badge:Int = 0,badgeAccessibility:String? = nil) -> AnyView {
-        AnyView(navRow(title,icon:icon,target:target,id:id,badge:badge,badgeAccessibility:badgeAccessibility))
-    }
-    private func navRow(_ title:String,icon:String,target:WorkspacePage,id:String,badge:Int = 0,badgeAccessibility:String? = nil) -> some View {
-        Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
-            HStack(spacing:8) {
-                Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular).lineLimit(textScale >= 1.3 ? 2 : 1)
-                Spacer(minLength:0)
-                if badge > 0 {
-                    Text(String(badge)).vosFont(WorkspaceText.caption.size, weight: .semibold)
-                        .foregroundStyle(palette.canvas).padding(.horizontal,6).frame(minWidth:18,minHeight:18)
-                        .background(palette.accent,in:Capsule())
-                }
+    @ToolbarContentBuilder private var workspaceToolbar: some ToolbarContent {
+        if !path.isEmpty {
+            ToolbarItem(placement:.navigation) {
+                Button("返回", systemImage:"chevron.left", action:back).help("返回上一页")
             }
-                .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
-                .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityIdentifier("nav."+id)
-            .accessibilityLabel(badge > 0 ? title + "，" + (badgeAccessibility ?? "AI 交付 \(badge) 份待读") : title)
-            .accessibilityAddTraits(section == title ? .isSelected : [])
-    }
-    private var header: some View {
-        HStack(spacing:12) {
-            if !path.isEmpty {
-                Button(action:back) {
-                    Image(systemName:"chevron.left").vosFont(WorkspaceText.body.size, weight: .medium)
-                        .frame(width:44,height:44)
-                        .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页")
-                if showsBreadcrumb { Text(breadcrumb).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1) }
-            }
-            Spacer()
-            Button { if page == .search { searchFocused = true } else { go(.search) } } label: {
-                HStack(spacing:6) {
-                    Image(systemName:"magnifyingglass").vosFont(WorkspaceText.meta.size, weight: .medium)
-                    Text("搜索").vosFont(WorkspaceText.meta)
-                }.foregroundStyle(palette.secondaryText).padding(.horizontal,10).frame(height: WorkspaceMetrics.fieldHeight)
-                    .background(searchHovered ? palette.hover : palette.surface,in:Capsule())
-                    .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
-                    .contentShape(Capsule())
-            }.buttonStyle(.plain).onHover { searchHovered=$0 }
-                .accessibilityLabel("搜索").help("搜索全部内容（⌘F）")
-            WorkspaceIconButton(systemImage:"sidebar.right",label:"讨论") { Task { await toggleDiscussion() } }
+        }
+        ToolbarItemGroup(placement:.primaryAction) {
+            Button("搜索", systemImage:"magnifyingglass") {
+                if page == .search { searchFocused = true } else { go(.search) }
+            }.help("搜索全部内容（⌘F）")
+            Button("讨论", systemImage:"sidebar.right") { Task { await toggleDiscussion() } }
                 .disabled(model.discussionSaving || model.discussionSending || !discussionEntryAvailable)
                 .help(discussionEntryHint)
                 .accessibilityIdentifier("workspace.discussion")
-            Button { go(.capture) } label: {
-                HStack(spacing:6) {
-                    Image(systemName:"mic").vosFont(WorkspaceText.meta.size, weight: .medium)
-                    Text("记录想法").vosFont(WorkspaceText.meta.size, weight: .medium)
-                }.foregroundStyle(palette.canvas).padding(.horizontal,12).frame(height:30)
-                    .background(palette.accent,in:Capsule())
-                    .contentShape(Capsule())
-            }.buttonStyle(.plain)
-                .accessibilityLabel("记录想法").help("记录想法")
-        }.padding(.horizontal,26).frame(minHeight:58).background(palette.canvas)
+            Button("记录想法", systemImage:"mic") { go(.capture) }.help("记录想法")
+        }
     }
     private var showsBreadcrumb: Bool {
         guard !path.isEmpty else { return false }
@@ -1044,7 +991,7 @@ struct WorkspaceView: View {
             VStack(alignment:.leading,spacing:0) {
                 VStack(alignment:.leading,spacing:10) {
                     HStack {
-                        Button(model.dictationActive ? (model.recordingModelIssue == nil ? "停止并整理" : "停止并保存") : (model.recordingModelIssue == nil ? "开始口述并自动整理" : "开始口述（先保存原音）"),systemImage:model.dictationActive ? "stop.circle" : "mic") {
+                        Button(model.dictationActive ? "停止录音" : "开始录音", systemImage:model.dictationActive ? "stop.circle" : "mic") {
                             if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription: model.recordingModelIssue == nil) } }
                         }.buttonStyle(.workspacePrimary).disabled(model.dictationBusy || model.fullRecordingBusy)
                         Button("导入音频 / 视频") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
@@ -1231,8 +1178,6 @@ struct WorkspaceView: View {
                                 }
                             }
                             .padding(.vertical,4)
-                            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-                            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
                         }
                     }
                 }
@@ -3011,18 +2956,19 @@ struct WorkspaceView: View {
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
-        let issues=source.unresolvedTranscriptionIssueCount
-        let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
+        let reading = materialReadingStatus(source.id)
         let groupNote=reason ?? (model.sourcePageIndex.expressionIssue(for: source.id) != nil ? "分组待重新判断" : nil)
         let localOnlyNote=source.localOnly ? " · 仅本地" : ""
         let metadata=origin + localOnlyNote + (groupNote.map { " · " + $0 } ?? "")
         let sourceNote=(source.origin == "user" ? "" : " · " + origin) + localOnlyNote
-        let subtitle=first.recordingDateLabel + sourceNote
+        let dateAndOrigin = first.recordingDateLabel + sourceNote
+        let preview = (combined ? expression?.summary : source.contentSummary)?.trimmingCharacters(in:.whitespacesAndNewlines)
+        let subtitle = page == .materials && preview?.isEmpty == false ? [preview ?? "", dateAndOrigin].joined(separator:"\n") : dateAndOrigin
         let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
         // 成品优先：有笔记的行用笔记标题（与首页、笔记页同源）；没有笔记时才
         // 退回原题或原文首句辨认——材料列表是「去查」的视角，行需要可辨识。
         let noteTitle=materialNoteTitle(for: source, expression: expression)
-        let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
+        let trailingText=openCount > 0 ? "\(openCount) 条待办" : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
         return WorkspaceRow(title:noteTitle ?? materialRowTitle(source,expression:expression,leading:first,catalog:catalog),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }

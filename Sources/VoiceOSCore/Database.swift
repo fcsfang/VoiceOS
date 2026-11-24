@@ -20,7 +20,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...77).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...78).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1589,6 +1589,15 @@ final class Database {
             }
         }
 
+        if try query("PRAGMA user_version").first?["user_version"] == "77" {
+            try transaction {
+                let columns = Set(try query("PRAGMA table_info(actions)").compactMap { $0["name"] })
+                for (name, definition) in [("edited_title", "TEXT"), ("edited_note", "TEXT"), ("removed", "INTEGER NOT NULL DEFAULT 0")] where !columns.contains(name) {
+                    try execute("ALTER TABLE actions ADD COLUMN \(name) \(definition)")
+                }
+                try execute("PRAGMA user_version=78")
+            }
+        }
         try ensureSearchTriggers()
     }
 
@@ -1601,7 +1610,7 @@ final class Database {
         let tables = try query("SELECT name FROM sqlite_master WHERE type='table' AND name='search_index_meta'")
         guard !tables.isEmpty else { return }
         try transaction {
-            for (table, columns) in [("sources", "name, state, presentation_json"), ("claims", "statement"), ("actions", "title, note"), ("transcripts", "current_version_id, text")] {
+            for (table, columns) in [("sources", "name, state, presentation_json"), ("claims", "statement"), ("actions", "title, note, edited_title, edited_note, removed"), ("transcripts", "current_version_id, text")] {
                 try execute("DROP TRIGGER IF EXISTS search_dirty_\(table)")
                 try execute("""
                 CREATE TRIGGER search_dirty_\(table) AFTER UPDATE OF \(columns) ON \(table) BEGIN

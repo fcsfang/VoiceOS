@@ -3,7 +3,7 @@
 import argparse, hashlib, math, json, os, re, time, urllib.request, urllib.error, urllib.parse
 from collections import Counter
 from pathlib import Path
-from organizer_quality import review_transcript, reviewed_transcript
+from organizer_quality import completed_full_review, review_transcript, reviewed_transcript
 
 ROOT = Path(__file__).resolve().parents[1]
 TYPES = ["task", "question", "goal", "idea", "uncertain"]
@@ -81,14 +81,18 @@ audio_uncertain仅当该意图确实依赖仍未辨认的音频含义时为true�
     repaired = set()
     for repair in reviewed["citation_repairs"]:
         key = repair["candidate_id"]
-        if key not in by_id or key in repaired or repair["recording"] != by_id[key]["recording"]:
-            raise ValueError("API citation repair changed the recording or candidate identity")
+        # The candidate pins the recording. Accept a suggested quote only
+        # when it can be located in that recording, even if the model mislabels it.
+        if key not in by_id or key in repaired:
+            continue
         item = by_id[key]; transcript = transcripts[item["recording"]]
         found = locate(repair["quote"], transcript["text"], 0)
-        if not found: raise ValueError("API citation repair is not continuous original text")
+        if not found or not repair["quote"].strip():
+            continue
         begin, end = found
         spans = [s for s in transcript["spans"] if s["textEnd"] > begin and s["textStart"] < end]
-        if not spans: raise ValueError("API citation repair has no audio location")
+        if not spans:
+            continue
         item.update(quote=transcript["text"][begin:end], text_start=begin, text_end=end,
                     **citation_location(spans), citation_status="located")
         repaired.add(key)
@@ -432,13 +436,12 @@ target_id必须逐字复制已有任务的id。uncertain=true或任何引用未�
     for decision in result["decisions"]:
         task = by_id[decision["item_id"]]; relation = decision["relation"]
         if relation == "new":
-            if decision["target_id"]: raise ValueError("A new item cannot suppress an existing task")
             continue
         target = targets.get(decision["target_id"])
         if target is None or task["uncertain"] or any(r["citation_status"] != "located" or not r["quote"] for r in task["references"]):
-            raise ValueError("Task continuation is missing a clear target or original quote")
+            continue
         if relation == "repeat" and (target["state"] != "open" or task["intent_type"] != "task" or task["followup_state"] != "pending"):
-            raise ValueError("Only the same pending task can be merged as a repeat")
+            continue
         task["continuation"] = {"relation": relation, "target": target, "notes": decision["notes"]}
     saved = json.loads(receipt.read_text())
     if not saved.get("response_id"): raise ValueError("Task continuation API receipt is missing")
@@ -646,7 +649,7 @@ def merge(folders, items, base, render_only=False):
                 references.append(dict(recording=recording, quote=status_evidence["quote"], citation_status="located",
                                        **citation_location(spans), spoken_deadline=""))
         tasks.append(dict(group, members=ids, references=references, followup_state=state, status_evidence=status_evidence,
-                          uncertain=group["uncertain"] or audio_uncertain or any(r["citation_status"] != "located" for r in references)))
+                          uncertain=group["uncertain"] or audio_uncertain or not any(r["citation_status"] == "located" for r in references)))
     for key in by_id.keys() - seen:
         item = by_id[key]
         tasks.append(dict(title=item["title"], intent_type=item["intent_type"], uncertain=True, followup_state="needs_review", status_evidence=None, notes=item["notes"] + "；保留未合并候选", members=[key], references=[item]))
@@ -729,7 +732,7 @@ def main():
         previous = reviewed_transcript(folder)
         if args.render_only:
             review = previous.get("transcription_review", {})
-            if review.get("review_method") != "direct_ai" or review.get("completed") is not True:
+            if not completed_full_review(review):
                 raise ValueError("Complete AI transcript correction is required before rendering; run normal processing to finish it")
             checked = previous
         else:

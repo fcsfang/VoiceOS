@@ -109,7 +109,10 @@ extension VoiceOSStore {
             let range = ranges.isEmpty ? "" : " [" + ranges.map { time($0.0) + "–" + time($0.1) }.joined(separator: "；") + "]"
             lines.append("来源：" + name + range)
         }
-        if !action.note.isEmpty { lines.append("原话：" + action.note) }
+        if let original = try db.query("SELECT note FROM actions WHERE id=?", [actionID]).first?["note"], !original.isEmpty {
+            lines.append("原话：" + original)
+            if action.note != original, !action.note.isEmpty { lines.append("说明：" + action.note) }
+        } else if !action.note.isEmpty { lines.append("说明：" + action.note) }
         if let detail = claim.statement.components(separatedBy: "\n说明：").dropFirst().first, !detail.isEmpty { lines.append("说明：" + detail) }
         return lines.joined(separator: "\n\n")
     }
@@ -346,6 +349,7 @@ extension VoiceOSStore {
         let clarifiedOpportunities = try clarifiedOpportunityActionIDs(db)
         for link in try db.query("SELECT l.*,a.kind,a.title,a.state AS action_state,a.intent_json,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {
             let metadata=try link["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self,from:Data($0.utf8)) }
+            let editedTitle = try !db.query("SELECT 1 FROM action_revisions WHERE action_id=? AND command_id LIKE 'content:%' AND note=? AND version<=?", [link["action_id"],link["desired_title"],link["action_version"]]).isEmpty
             let historicTitle=metadata?.expressionHistory?.contains { $0.fromTitle == link["desired_title"] } == true
             var withdrawn=false
             if let decision=metadata?.expressionWithdrawal,let version=metadata?.expressionWithdrawalVersionID,
@@ -356,7 +360,7 @@ extension VoiceOSStore {
             }
             guard (link["kind"] == "task" || clarifiedOpportunities.contains(link["action_id"]!)), link["marker"] == "voiceos-action:" + link["id"]!,
                   let pin = link["action_version"].flatMap(Int.init), let latest = link["latest_version"].flatMap(Int.init), pin <= latest,
-                  (link["desired_title"] == link["title"] || historicTitle || withdrawn), !(link["calendar_id"] ?? "").isEmpty else { throw VoiceOSError("迁移提醒事项身份或行动版本不一致") }
+                  (link["desired_title"] == link["title"] || historicTitle || editedTitle || withdrawn), !(link["calendar_id"] ?? "").isEmpty else { throw VoiceOSError("迁移提醒事项身份或行动版本不一致") }
             if pin > 1 { guard try db.query("SELECT id FROM action_revisions WHERE action_id=? AND version=?", [link["action_id"],String(pin)]).count == 1 else { throw VoiceOSError("迁移提醒事项缺少行动版本") } }
             let observations = try db.query("SELECT sequence FROM reminder_observations WHERE link_id=? ORDER BY sequence", [link["id"]])
             for (i, row) in observations.enumerated() { guard row["sequence"] == String(i+1) else { throw VoiceOSError("迁移提醒事项回读历史不连续") } }

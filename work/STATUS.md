@@ -1,5 +1,10 @@
 # 项目状态
 
+- 2026-11-24 主窗口与材料阅读的原生交互首批改动见[任务卡](tasks/20261124-native-materials/TASK.md)。
+
+- 2026-11-24 观点、笔记和行动的可编辑性已进入统一评审，验证记录见[任务卡](tasks/20261124-edit-generated-content/TASK.md)。
+- 同批修复转写疑点提醒与录音提取恢复，见[任务卡](tasks/20261124-transcription-review/TASK.md)。
+
 - 2026-11-24 非笔记功能提示词首批整理与验证见[任务卡](tasks/20261124-model-prompts/TASK.md)。
 
 - 2026-11-24 录音收件箱去重与缺失原件重试状态已在隔离目录验证，见[任务卡](tasks/20261124-inbox-retry/TASK.md)。

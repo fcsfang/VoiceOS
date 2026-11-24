@@ -74,6 +74,15 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertNotNil(saved, "空期望不做拦截")
         let afterSave = try await store.latestMaterialNote(memberSourceIDs: ["a"])
         XCTAssertEqual(afterSave?.note.title, "乙")
+        let base = try XCTUnwrap(afterSave)
+        let edited = try await store.editMaterialNote(note("手改"), replacing: base)
+        let late = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("迟到的结果"),
+                                                   transcriptVersions: base.transcriptVersions, modelIdentity: nil,
+                                                   ifMembersStillMatch: [], replacing: base.id)
+        XCTAssertNil(late)
+        let latest = try await store.latestMaterialNote(memberSourceIDs: ["a"])
+        XCTAssertEqual(latest, edited)
+        XCTAssertEqual(latest?.note.manuallyEdited, true)
     }
 
     func test成员顺序不同命中同一expressionKey() async throws {

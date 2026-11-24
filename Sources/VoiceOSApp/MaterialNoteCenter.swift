@@ -25,7 +25,7 @@ extension ControlCenter {
     /// Concurrent callers join the run in flight instead of starting a second
     /// model call. A forced request that joined a non-forced run starts its
     /// own run once that run finishes.
-    func requestMaterialNote(sourceID: String, force: Bool = false) async {
+    func requestMaterialNote(sourceID: String, force: Bool = false, replacingEdited revisionID: String? = nil) async {
         // 单飞按「一篇笔记」键控：同一表达从任一分段进入都加入同一次运行。
         let runKey = materialNoteMemberIDs(sourceID: sourceID).sorted().joined(separator: "|")
         if let run = Self.materialNoteRuns[runKey] {
@@ -39,17 +39,23 @@ extension ControlCenter {
         }
         guard !Task.isCancelled else { return }
         let token = UUID()
-        let task = Task { await self.runMaterialNoteRequest(sourceID: sourceID, force: force) }
+        let task = Task { await self.runMaterialNoteRequest(sourceID: sourceID, force: force, replacingEdited: revisionID) }
         Self.materialNoteRuns[runKey] = MaterialNoteRun(token: token, force: force, entrySourceID: sourceID, task: task)
         await task.value
         if Self.materialNoteRuns[runKey]?.token == token { Self.materialNoteRuns[runKey] = nil }
     }
 
-    private func runMaterialNoteRequest(sourceID: String, force: Bool) async {
+    private func runMaterialNoteRequest(sourceID: String, force: Bool, replacingEdited revisionID: String?) async {
         guard let store else { materialNoteStates[sourceID] = .unavailable("资料库尚未打开"); return }
-        guard let port = materialNoteModel else { materialNoteStates[sourceID] = .unavailable("文本模型未配置"); return }
         let memberIDs = materialNoteMemberIDs(sourceID: sourceID)
         do {
+            let base = try await store.latestMaterialNote(memberSourceIDs: memberIDs)
+            if let base, base.note.manuallyEdited == true, base.id != revisionID {
+                materialNoteStates[sourceID] = .idle
+                materialNotePresence[sourceID] = true
+                return
+            }
+            guard let port = materialNoteModel else { materialNoteStates[sourceID] = .unavailable("文本模型未配置"); return }
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             if let reason = MaterialNoteGating.unavailableReason(memberIDs: memberIDs, catalog: catalog) {
                 materialNoteStates[sourceID] = .unavailable(reason)
@@ -57,7 +63,7 @@ extension ControlCenter {
             }
             let members = memberIDs.compactMap { catalog[$0] }
             let versions = MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog)
-            if !force, let stored = try await store.latestMaterialNote(memberSourceIDs: memberIDs),
+            if !force, let stored = base,
                await store.materialNoteIsCurrent(stored, currentTranscriptVersions: versions) {
                 materialNoteStates[sourceID] = .idle
                 materialNotePresence[sourceID] = true
@@ -80,8 +86,8 @@ extension ControlCenter {
             var allClaims: [String: CandidateClaim] = [:]
             for sourceID in memberIDs {
                 for claim in currentClaimsBySource[sourceID] ?? [] {
+                    guard claim.validity == "current", claim.reviewState != "rejected", seenClaims.insert(claim.id).inserted else { continue }
                     allClaims[claim.id] = claim
-                    guard claim.validity == "current", seenClaims.insert(claim.id).inserted else { continue }
                     claimRefs.append(NoteBoardClaimRef(id: claim.id, statement: claim.statement))
                 }
             }
@@ -101,10 +107,10 @@ extension ControlCenter {
             let saved = try await store.saveMaterialNote(
                 memberSourceIDs: memberIDs, note: anchored, transcriptVersions: versions,
                 modelIdentity: identity.provider + " / " + identity.model + " / " + identity.promptVersion + " / " + identity.schemaVersion,
-                ifMembersStillMatch: snapshots)
+                ifMembersStillMatch: snapshots, replacing: base?.id)
             // 新笔记立刻进入首页缓存，生成后第一次返回首页就能用笔记标题渲染。
             if let saved { materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] = saved }
-            materialNotePresence[sourceID] = saved != nil
+            if saved != nil { materialNotePresence[sourceID] = true }
             if saved != nil { materialNoteDidSave() }
             materialNoteStates[sourceID] = saved == nil ? .failed("材料在生成期间有变化，请重试") : .idle
         } catch is CancellationError {
