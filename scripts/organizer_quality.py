@@ -137,6 +137,17 @@ def _merge_repair(first, repaired, span_ids):
     return {"corrections": merged, "remaining_issues": issues}
 
 
+def completed_full_review(review):
+    receipts = {value for value in review.get("response_ids", []) if value and value.strip()}
+    if not (review.get("completed") and review.get("scope") == "complete_expression_knowledge_and_intent"
+            and review.get("response_id") in receipts):
+        return False
+    version = review.get("context_review_version")
+    passes = review.get("full_text_independent_passes")
+    return ((version in (3, 4) and review.get("review_method") == "direct_ai" and passes == 1)
+            or (version == 2 and passes == 2 and len(receipts) >= 2))
+
+
 def review_transcript(folder, ask, obj, render_only=False, identity_scope=""):
     original = json.loads((folder / "Qwen完整逐字稿.json").read_text())
     spans_by_id = {span["id"]: span for span in original["spans"]}
@@ -145,7 +156,7 @@ def review_transcript(folder, ask, obj, render_only=False, identity_scope=""):
     existing = reviewed_transcript(folder)
     digest = hashlib.sha256(json.dumps(original, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     review = existing.get("transcription_review", {})
-    if review.get("completed") and review.get("review_method") == "direct_ai" and (review.get("original_digest") == digest or existing == original):
+    if completed_full_review(review) and (review.get("original_digest") == digest or existing == original):
         return adopt_transcript(folder, original, existing)
     # 回执按「原稿 + 端点/模型/强度」命名：改了设置再重试必须重新核对，不能复用旧模型的结果。
     attempt_digest = hashlib.sha256(json.dumps([digest, identity_scope], ensure_ascii=False, sort_keys=True).encode()).hexdigest()

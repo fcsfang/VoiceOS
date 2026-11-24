@@ -3,7 +3,7 @@
 import argparse, hashlib, math, json, os, re, time, urllib.request, urllib.error, urllib.parse
 from collections import Counter
 from pathlib import Path
-from organizer_quality import review_transcript, reviewed_transcript
+from organizer_quality import completed_full_review, review_transcript, reviewed_transcript
 
 ROOT = Path(__file__).resolve().parents[1]
 TYPES = ["task", "question", "goal", "idea", "uncertain"]
@@ -732,7 +732,7 @@ def main():
         previous = reviewed_transcript(folder)
         if args.render_only:
             review = previous.get("transcription_review", {})
-            if review.get("review_method") != "direct_ai" or review.get("completed") is not True:
+            if not completed_full_review(review):
                 raise ValueError("Complete AI transcript correction is required before rendering; run normal processing to finish it")
             checked = previous
         else:
