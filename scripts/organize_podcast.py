@@ -649,7 +649,7 @@ def merge(folders, items, base, render_only=False):
                 references.append(dict(recording=recording, quote=status_evidence["quote"], citation_status="located",
                                        **citation_location(spans), spoken_deadline=""))
         tasks.append(dict(group, members=ids, references=references, followup_state=state, status_evidence=status_evidence,
-                          uncertain=group["uncertain"] or audio_uncertain or any(r["citation_status"] != "located" for r in references)))
+                          uncertain=group["uncertain"] or audio_uncertain or not any(r["citation_status"] == "located" for r in references)))
     for key in by_id.keys() - seen:
         item = by_id[key]
         tasks.append(dict(title=item["title"], intent_type=item["intent_type"], uncertain=True, followup_state="needs_review", status_evidence=None, notes=item["notes"] + "；保留未合并候选", members=[key], references=[item]))
