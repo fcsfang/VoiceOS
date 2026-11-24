@@ -520,7 +520,7 @@ struct WorkspaceView: View {
                         .frame(minWidth:290,idealWidth:320,maxWidth:380)
                 }
             }
-            .navigationTitle(showsBreadcrumb ? breadcrumb : section)
+            .navigationTitle(page == .notes ? model.libraryTitle : (showsBreadcrumb ? breadcrumb : section))
             .toolbar { workspaceToolbar }
         }
         .navigationSplitViewStyle(.balanced)
@@ -826,15 +826,20 @@ struct WorkspaceView: View {
         VStack(alignment:.leading, spacing:8) {
             List(selection: sidebarSelection) {
                 ForEach(sidebarItems, id: \.id) { item in
+                    let selected = sidebarSelection.wrappedValue == item.title
                     Button { openSidebarPage(item.page) } label: {
                         Label(item.title, systemImage:item.icon)
+                            .foregroundStyle(selected ? Color.primary : Color.secondary)
+                            .fontWeight(selected ? .semibold : .regular)
                             .frame(maxWidth:.infinity, alignment:.leading)
                             .padding(.horizontal, 4).padding(.vertical, 3)
                             .contentShape(Rectangle())
                             .workspaceHoverHighlight()
+                            .background(selected ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain).tag(item.title).badge(item.count)
                     .accessibilityIdentifier("nav." + item.id)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
                 if !savedViews.isEmpty {
                     Section("视图") {

@@ -42,10 +42,15 @@ struct NotesLibraryView: View {
     var body: some View {
         let pendingMaterials = self.pendingMaterials
         let filtered = self.filtered
-        return LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            WorkspacePageHeading(title: "笔记", subtitle: notes.isEmpty ? "" : "共 \(notes.count) 篇") {
+        return LazyVStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 9) {
+                Text("笔记").vosFont(WorkspaceText.pageTitle).accessibilityAddTraits(.isHeader)
+                if !notes.isEmpty {
+                    Text("\(notes.count) 篇").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
+                Spacer(minLength: 8)
                 WorkspaceSearchField(text: $query, placeholder: "搜索笔记")
-                    .frame(maxWidth: 240)
+                    .frame(maxWidth: 200)
                     .accessibilityIdentifier("notes.search")
             }
             if notes.isEmpty {
@@ -57,22 +62,26 @@ struct NotesLibraryView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { index, stored in
                         if index == 0 || stored.day != filtered[index - 1].day {
-                            WorkspaceListGroupHeader(title: stored.day?.formatted(date: .long, time: .omitted) ?? "日期未知")
+                            Text(stored.day?.formatted(date: .long, time: .omitted) ?? "日期未知")
+                                .vosFont(WorkspaceText.caption, monospacedDigit: true)
+                                .foregroundStyle(palette.secondaryText)
+                                .accessibilityAddTraits(.isHeader)
                                 .padding(.top, index == 0 ? 0 : 14)
+                                .padding(.bottom, 4)
                         }
                         Button { open(stored) } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 13) {
                                 VStack(alignment: .leading, spacing: 5) {
                                     // 标题不截断：长短由内容决定，列表用换行与滚动适配。
                                     Text(stored.title)
-                                        .vosFont(WorkspaceText.rowTitle)
+                                        .vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                                         .foregroundStyle(palette.text)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .multilineTextAlignment(.leading)
                                     if let preview = stored.preview {
                                         Text(preview).vosFont(WorkspaceText.meta)
                                             .foregroundStyle(palette.secondaryText)
-                                            .lineLimit(2)
+                                            .lineLimit(1)
                                             .fixedSize(horizontal: false, vertical: true)
                                             .multilineTextAlignment(.leading)
                                     }
@@ -80,8 +89,7 @@ struct NotesLibraryView: View {
                                 Spacer(minLength: 8)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 13)
-                            .padding(.horizontal, 6)
+                            .padding(.vertical, 9)
                             .contentShape(Rectangle()).workspaceHoverHighlight()
                         }
                         .buttonStyle(.plain)
@@ -162,6 +170,7 @@ struct NotesLibraryView: View {
                 }
             }
         }
+        .frame(maxWidth: 690, alignment: .leading)
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
             guard let store = model.store else { return }
             let trashed = Set(model.records.lazy.filter(\.isTrashed).map(\.id))
