@@ -148,7 +148,7 @@ extension VoiceOSStore {
         return SearchTokens(drivable: drivable, filters: filters)
     }
 
-    private var searchIndexShape: String { "cjk-spaced-v4-notes-" + TimeZone.current.identifier }
+    private var searchIndexShape: String { "cjk-spaced-v5-notes-" + TimeZone.current.identifier }
 
     private func searchSpaced(_ text: String) -> String {
         var result = ""
@@ -303,6 +303,7 @@ extension VoiceOSStore {
             }
             return map
         }()
+        let searchableSourceIDs = Set(groups.compactMap { $0.row["id"] })
         try db.transaction {
             try db.execute("DELETE FROM search_index")
             for group in groups {
@@ -327,7 +328,8 @@ extension VoiceOSStore {
                     let external = (expression.externalVersions ?? [:]).keys.sorted()
                     memberIDs = expression.sourceIDs + external.filter { !expression.sourceIDs.contains($0) }
                 } else { memberIDs = [id] }
-                let noteText = noteTexts[Self.materialNoteExpressionKey(memberIDs)]
+                let noteText = memberIDs.allSatisfy(searchableSourceIDs.contains)
+                    ? noteTexts[Self.materialNoteExpressionKey(memberIDs)] : nil
                 var selected = group.transcripts.last
                 if let version = presentation?.transcriptVersionID,
                    let match = group.transcripts.last(where: { $0.versionID == version }) {

@@ -14,7 +14,7 @@ extension VoiceOSStore {
         guard ready, !sourceIDs.isEmpty else { throw VoiceOSError("请先打开资料库并选择材料") }
         let ids = Set(sourceIDs)
         guard ids.isDisjoint(with: activeCaptures) else { throw VoiceOSError("请先停止并保存正在录制或导入的材料") }
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog = Dictionary(try sourceRecords(ids: Array(ids)).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let selected = try ids.sorted().map { id in
             guard let source = catalog[id], ["saved", "reference_only", "quarantined", "trashed"].contains(source.state) else { throw VoiceOSError("材料尚未保存完成，请完成导入后再管理") }
             return source

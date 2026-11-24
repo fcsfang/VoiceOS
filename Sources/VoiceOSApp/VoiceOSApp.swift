@@ -222,17 +222,16 @@ final class ControlCenter: ObservableObject {
     }
     @discardableResult
     func manageMaterial(_ record: SourceRecord, disposition: MaterialDisposition) async -> String? {
-        guard let store else { return nil }
+        guard let store else { return "资料库尚未打开，请打开后重试" }
         do {
-            let catalog=Dictionary(uniqueKeysWithValues:records.map { ($0.id,$0) })
-            let ids=record.recordingExpression(in:catalog)?.sourceIDs ?? [record.id]
+            let ids=sourcePageIndex.expression(for:record.id)?.sourceIDs ?? [record.id]
             try await store.setMaterialDisposition(sourceIDs:ids,disposition:disposition)
             actionUndoStack.record(.materialDisposition(MaterialDispositionChange(sourceIDs:ids,title:record.displayTitle,from:record.disposition,to:disposition)))
             await refresh()
             switch disposition {
             case .archived: status="材料已归档，可在材料页的“已归档”中恢复；历史依据仍保留。"
             case .trashed: status="材料已移入回收站；原件与历史保留，系统提醒事项未修改。"
-            case .active: status="材料已恢复；从回收站恢复的内容仅本机保存，旧理解不自动启用。"
+            case .active: status = record.isTrashed ? "材料已恢复，仅本机保存，旧理解不自动启用。" : "已取消归档，材料已回到日常列表。"
             }
             return nil
         } catch {

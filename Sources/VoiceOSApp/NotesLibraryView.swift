@@ -22,6 +22,7 @@ struct NotesLibraryView: View {
     private var pendingMaterials: [SourceRecord] {
         model.records.filter { record in
             ["saved", "reference_only"].contains(record.state)
+                && !record.isArchived
                 && record.origin == "user" && record.speaker == "user"
                 && record.feedbackKind == nil && !record.name.hasPrefix("行动反馈")
                 && (readingStates[record.id] ?? .unread) != .read
@@ -166,7 +167,8 @@ struct NotesLibraryView: View {
         }
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
             guard let store = model.store else { return }
-            let rows = try? await store.noteLibraryRows()
+            let trashed = Set(model.records.lazy.filter(\.isTrashed).map(\.id))
+            let rows = try? await store.noteLibraryRows(excluding: trashed)
             if !Task.isCancelled, let rows { notes = rows }
         }
         .task(id: model.recordsRevision) { readingStates = await model.readingStates() }
@@ -204,9 +206,10 @@ private struct NoteLibraryRow: Identifiable, Sendable {
 }
 
 private extension VoiceOSStore {
-    func noteLibraryRows() throws -> [NoteLibraryRow] {
-        try recentMaterialNotes(limit: nil).map { stored in
-            NoteLibraryRow(id: stored.id, expressionKey: stored.expressionKey,
+    func noteLibraryRows(excluding trashed: Set<String>) throws -> [NoteLibraryRow] {
+        try recentMaterialNotes(limit: nil).compactMap { stored in
+            guard !stored.expressionKey.split(separator: "|").contains(where: { trashed.contains(String($0)) }) else { return nil }
+            return NoteLibraryRow(id: stored.id, expressionKey: stored.expressionKey,
                            title: MaterialNoteHomeText.title(stored.note) ?? "未命名笔记",
                            preview: MaterialNoteHomeText.preview(stored.note),
                            createdAt: stored.createdAt, searchableText: stored.note.searchableText)

@@ -51,14 +51,14 @@ extension ControlCenter {
             return .applied("已撤销「\(entry.title)」的变更" + (receipt?.keptSuccessorID == nil ? "" : " · 下一次已保留"))
         case .materialDisposition(let change):
             let sources: [SourceRecord]
-            do { sources = try await store.sources() } catch { return .failed(error.localizedDescription) }
-            guard change.skipReason(current: Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0.disposition) })) == nil else { return .skipped }
+            do { sources = try await store.sourceRecords(ids: change.sourceIDs) } catch { return .failed(error.localizedDescription) }
+            guard change.skipReason(current: Dictionary(sources.map { ($0.id, $0.disposition) }, uniquingKeysWith: { first, _ in first })) == nil else { return .skipped }
             do { try await store.setMaterialDisposition(sourceIDs: change.sourceIDs, disposition: change.from) } catch { return .failed(error.localizedDescription) }
             await refresh()
             return .applied("已撤销处置；理解与暂停不会回滚")
         case .materialTitle(let change):
             let sources: [SourceRecord]
-            do { sources = try await store.sources() } catch { return .failed(error.localizedDescription) }
+            do { sources = try await store.sourceRecords(ids: [change.sourceID]) } catch { return .failed(error.localizedDescription) }
             guard let source = sources.first(where: { $0.id == change.sourceID }),
                   change.skipReason(currentTitle: source.presentation?.manualTitle) == nil else { return .skipped }
             do { try await store.renameRecording(sourceID: change.sourceID, title: change.from) } catch { return .failed(error.localizedDescription) }
