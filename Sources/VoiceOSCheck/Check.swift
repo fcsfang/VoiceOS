@@ -8,7 +8,7 @@ struct Check {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            let usage = "usage: voiceos-check <read|board|search|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]\n       voiceos-check ax <dump|click|set-value|wait|scroll-to> --pid <pid> ..."
+            let usage = "usage: voiceos-check <read|board|note-status|search|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]\n       voiceos-check ax <dump|click|set-value|wait|scroll-to> --pid <pid> ..."
             if args.first == "ax" {
                 try AXCommands.run(Array(args.dropFirst()))
                 return
@@ -35,6 +35,8 @@ struct Check {
                 guard args.count == 3 else { throw VoiceOSError("search <data-dir> <query>") }
             case "board":
                 guard args.count == 2 else { throw VoiceOSError("board <data-dir>") }
+            case "note-status":
+                guard args.count == 2 else { throw VoiceOSError("note-status <data-dir>") }
             case "import", "import-personal-audio":
                 guard (3...4).contains(args.count) else { throw VoiceOSError(usage) }
             case "export":
@@ -52,6 +54,24 @@ struct Check {
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             try await store.recover()
             switch command {
+            case "note-status":
+                // 用真实门控判定每份个人材料能否生成笔记，输出阻塞原因。
+                let all = try await store.sources()
+                let catalog = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                var ready = 0, blocked: [String: Int] = [:]
+                for record in all where ["saved","reference_only"].contains(record.state)
+                    && record.origin == "user" && record.speaker == "user" {
+                    if let reason = MaterialNoteGating.unavailableReason(memberIDs: [record.id], catalog: catalog) {
+                        blocked[reason, default: 0] += 1
+                        print("blocked\t\(record.id)\t\(record.displayTitle)\t\(reason)")
+                    } else {
+                        ready += 1
+                        print("ready\t\(record.id)\t\(record.displayTitle)")
+                    }
+                }
+                print("ready=\(ready)")
+                for (reason, count) in blocked.sorted(by: { $0.value > $1.value }) { print("blocked-summary\t\(count)\t\(reason)") }
+                return
             case "board":
                 // 解析每篇最新笔记的板内引用（todo→行动、claim→观点），输出可读清单；
                 // 用于在无 GUI 时验证「引用实时数据」这条链路。

@@ -1783,25 +1783,38 @@ final class ControlCenter: ObservableObject {
     /// 设置页保存内部配置：校验 → 密钥进钥匙串 → 配置存应用内 → 安装端口。
     func applyTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> Bool {
         guard let url = URL(string: config.baseURL) else { status = "服务地址无效"; return false }
+        // 先落盘再构建端口：钥匙串授权被拒绝或端口构建失败时，用户的输入不会丢，
+        // 也不会出现「配置已存、密钥为空」的半保存状态。
+        do {
+            try TextModelKeychain.save(apiKey)
+        } catch {
+            status = "无法把密钥保存到系统钥匙串：" + error.localizedDescription + "（请在弹窗中点「允许」后重试）"
+            return false
+        }
+        config.save()
         do {
             let suite = try LocalTextModel.loadSuite(
                 settings: LocalTextModel.Settings(address: url, key: apiKey, model: config.model,
                                                   noteEffort: config.noteEffort, topicEffort: config.topicEffort),
                 segmentRequestTimeout: 600, segmentStreaming: true)
-            try TextModelKeychain.save(apiKey)
-            config.save()
             UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
             installTextModelSuite(suite, configurationName: config.model, resume: true)
             return true
         } catch {
-            status = "模型配置无效：" + error.localizedDescription
+            status = "已保存配置，但端口初始化失败：" + error.localizedDescription + "；可先点「测试连接」确认服务"
             return false
         }
+    }
+    /// 探针结果里带上规范化的候选地址，便于诊断 /v1 重复拼接这类问题。
+    func textModelEndpointHint(_ baseURL: String) -> String {
+        guard let url = URL(string: baseURL) else { return "服务地址无效" }
+        return url.appendingPathComponent("responses").absoluteString
     }
     /// 用给定配置发一次极小请求，验证地址、密钥与模型可用；返回面向用户的结果与延迟。
     func testTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> String {
         guard let url = URL(string: config.baseURL)?.appendingPathComponent("responses") else { return "服务地址无效" }
+        guard !apiKey.isEmpty else { return "没有可用的密钥：请填写后点「保存并启用」（若已在弹窗中拒绝钥匙串访问，请允许后重试）" }
         let payload: [String: Any] = ["model": config.model, "store": false,
             "reasoning": ["effort": "minimal"], "max_output_tokens": 32, "truncation": "disabled",
             "instructions": "你是连通性探针。只回复两个字符：ok",
@@ -1815,12 +1828,15 @@ final class ControlCenter: ObservableObject {
             let started = Date()
             let reply = try await DirectModelHTTPTransport().send(request)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
-            guard reply.status == 200 else { return "连接失败：HTTP \(reply.status)" }
+            guard reply.status == 200 else {
+                let body = String(decoding: reply.body.prefix(200), as: UTF8.self)
+                return "连接失败：HTTP \(reply.status) · \(url.absoluteString)" + (body.isEmpty ? "" : " · " + body)
+            }
             guard let object = try JSONSerialization.jsonObject(with: reply.body) as? [String: Any],
-                  object["status"] is String else { return "连接失败：响应格式无效" }
-            return "连接正常 · \(config.model) · \(ms) ms"
+                  object["status"] is String else { return "连接失败：响应格式无效 · \(url.absoluteString)" }
+            return "连接正常 · \(config.model) · \(ms) ms · \(url.absoluteString)"
         } catch {
-            return "连接失败：" + error.localizedDescription
+            return "连接失败：" + error.localizedDescription + " · \(url.absoluteString)"
         }
     }
     /// 启动时优先使用应用内部配置；没有时才回退到开发用的配置文件路径。
