@@ -297,8 +297,10 @@ private struct WorkspaceAttentionDot: View {
                         .frame(width:6,height:6).accessibilityHidden(true)
                     Text("需要查看").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
                     Spacer(minLength:4)
-                    if total > 0 { WorkspaceBadge(text:"\(total)",tone:.warning) }
-                    else if !inbox.folderErrors.isEmpty { WorkspaceBadge(text:"!",tone:.warning) }
+                    // The dot carries the warning hue; the count stays neutral so
+                    // 11pt digits keep AA contrast (warning-on-tint is ~4.1:1).
+                    if total > 0 { WorkspaceBadge(text:"\(total)") }
+                    else if !inbox.folderErrors.isEmpty { WorkspaceBadge(text:"!") }
                 }.padding(.horizontal,8).padding(.vertical,6)
                     .contentShape(Rectangle()).workspaceHoverHighlight()
             }.buttonStyle(.plain).help(title).accessibilityLabel(title + "，打开处理情况")
