@@ -833,9 +833,9 @@ struct WorkspaceView: View {
                         } icon: {
                             Image(systemName:item.icon)
                                 .symbolRenderingMode(.monochrome)
-                                .foregroundStyle(selected ? Color.primary : Color.secondary)
+                                .foregroundStyle(palette.text)
                         }
-                            .foregroundStyle(selected ? Color.primary : Color.secondary)
+                            .foregroundStyle(palette.text)
                             .fontWeight(selected ? .semibold : .regular)
                             .frame(maxWidth:.infinity, alignment:.leading)
                             .padding(.horizontal, 4).padding(.vertical, 3)
@@ -1048,7 +1048,7 @@ struct WorkspaceView: View {
         }
     }
     private func scrolled<Content:View>(scroll: Binding<ScrollPosition>? = nil, @ViewBuilder content: () -> Content) -> some View {
-        ScrollView { content().frame(maxWidth: WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top) }
+        ScrollView { content().frame(maxWidth: WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.topLeading) }
             .scrollPosition(scroll ?? scrollBinding(for: scrollKey))
     }
     private func scrollBinding(for key: WorkspaceNavigationEntry) -> Binding<ScrollPosition> {

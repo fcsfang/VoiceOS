@@ -69,6 +69,7 @@ struct NotesLibraryView: View {
                                 .padding(.top, index == 0 ? 0 : 14)
                                 .padding(.bottom, 4)
                         }
+                        if index > 0, stored.day == filtered[index - 1].day { WorkspaceListDivider() }
                         Button { open(stored) } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 13) {
                                 VStack(alignment: .leading, spacing: 5) {
@@ -84,12 +85,13 @@ struct NotesLibraryView: View {
                                             .lineLimit(1)
                                             .fixedSize(horizontal: false, vertical: true)
                                             .multilineTextAlignment(.leading)
+                                            .frame(maxWidth: 660, alignment: .leading)
                                     }
                                 }
                                 Spacer(minLength: 8)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 9)
+                            .padding(.horizontal, 8).padding(.vertical, 11)
                             .contentShape(Rectangle()).workspaceHoverHighlight()
                         }
                         .buttonStyle(.plain)
@@ -170,7 +172,6 @@ struct NotesLibraryView: View {
                 }
             }
         }
-        .frame(maxWidth: 690, alignment: .leading)
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
             guard let store = model.store else { return }
             let trashed = Set(model.records.lazy.filter(\.isTrashed).map(\.id))

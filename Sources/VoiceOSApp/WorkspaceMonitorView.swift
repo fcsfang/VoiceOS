@@ -34,6 +34,7 @@ struct WorkspaceMonitorView: View {
     @State private var qqSaveFeedback = ""
     @State private var qqSaveFailed = false
 
+    @State private var expandedItemDetails = Set<String>()
     private enum MonitorLoadState: Equatable { case loading, loaded, failed }
 
     private var monitorLoaded: Bool { monitorLoadState == .loaded }
@@ -61,7 +62,7 @@ struct WorkspaceMonitorView: View {
                     historySection
                 }
             }
-            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
             model.monitorPageVisible = true
@@ -302,10 +303,16 @@ struct WorkspaceMonitorView: View {
             if isLatest { earlierOpenItemsHint }
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: 10) {
-                Text(report.headline.isEmpty ? "没有标题" : report.headline).vosFont(WorkspaceText.rowTitle)
-                if !report.summary.isEmpty {
+                if report.state == .failed {
+                    Text(report.headline).vosFont(WorkspaceText.rowTitle)
                     Text(report.summary).vosFont(WorkspaceText.body)
-                        .foregroundStyle(palette.secondaryText).lineSpacing(4)
+                } else if !report.headline.isEmpty || !report.summary.isEmpty {
+                    DisclosureGroup("报告摘要") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if !report.headline.isEmpty { Text(report.headline).vosFont(WorkspaceText.rowTitle) }
+                            if !report.summary.isEmpty { Text(report.summary).vosFont(WorkspaceText.body) }
+                        }.textSelection(.enabled).padding(.vertical, 6)
+                    }
                 }
                 HStack(spacing: 16) {
                     Text(itemCountText(report)).vosFont(WorkspaceText.meta)
@@ -538,67 +545,71 @@ struct WorkspaceMonitorView: View {
     }
 
     private func itemView(_ item: MonitorItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: item.status == .done ? "checkmark.circle.fill"
-                        : item.status == .dismissed ? "xmark.circle" : "circle")
-                    .foregroundStyle(item.status == .done ? palette.success : palette.secondaryText)
-                    .accessibilityHidden(true)
-                Text(item.title).vosFont(WorkspaceText.rowTitle)
-                    .strikethrough(item.status == .dismissed)
-                Spacer()
-                Text(item.deadlineText ?? (item.deadlineDate.map { "截止 " + $0 } ?? "截止待核对"))
-                    .vosFont(WorkspaceText.meta)
-                    .foregroundStyle(item.deadlineDate == nil && item.deadlineText == nil
-                                     ? palette.warning : palette.secondaryText)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(itemRowAccessibilityLabel(item))
-            if !item.suggestedAction.isEmpty {
-                Text(item.suggestedAction).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-            }
-            if let uncertainty = item.uncertainty, !uncertainty.isEmpty {
-                Text(uncertainty).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-            }
-            evidenceView(item)
-            HStack(spacing: 12) {
-                if item.status == .open {
-                    Button("标记完成") {
-                        Task {
-                            await model.setMonitorItemStatus(item, status: .done)
-                            await refreshEarlierOpenSummary()
-                        }
-                    }
-                        .buttonStyle(.workspaceSecondaryCompact)
-                        .accessibilityIdentifier("monitor.item." + item.id + ".complete")
-                    Button("不适用") {
-                        Task {
-                            await model.setMonitorItemStatus(item, status: .dismissed)
-                            await refreshEarlierOpenSummary()
-                        }
-                    }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .accessibilityIdentifier("monitor.item." + item.id + ".dismiss")
-                } else {
-                    Button("重新打开") {
-                        Task {
-                            await model.setMonitorItemStatus(item, status: .open)
-                            await refreshEarlierOpenSummary()
-                        }
-                    }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .accessibilityIdentifier("monitor.item." + item.id + ".reopen")
+        let expanded = expandedItemDetails.contains(item.id)
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                if expanded { expandedItemDetails.remove(item.id) } else { expandedItemDetails.insert(item.id) }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.caption).foregroundStyle(palette.secondaryText).frame(width: 12)
+                    Text(item.title).vosFont(WorkspaceText.rowTitle)
+                        .strikethrough(item.status == .dismissed)
+                    Spacer()
+                    Text(item.deadlineText ?? (item.deadlineDate.map { "截止 " + $0 } ?? "截止待核对"))
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(item.deadlineDate == nil && item.deadlineText == nil
+                                         ? palette.warning : palette.secondaryText)
                 }
-                Spacer()
+                .padding(.vertical, 10).padding(.horizontal, 6)
+                .contentShape(Rectangle()).workspaceHoverHighlight()
+            }.buttonStyle(.plain)
+                .accessibilityLabel(itemRowAccessibilityLabel(item))
+                .accessibilityValue(expanded ? "已展开" : "已收起")
+                .accessibilityIdentifier("monitor.item." + item.id + ".details")
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !item.suggestedAction.isEmpty {
+                        Text(item.suggestedAction).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    }
+                    if let uncertainty = item.uncertainty, !uncertainty.isEmpty {
+                        Text(uncertainty).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    }
+                    evidenceView(item)
+                    HStack(spacing: 12) {
+                        if item.status == .open {
+                            Button("标记完成") {
+                                Task {
+                                    await model.setMonitorItemStatus(item, status: .done)
+                                    await refreshEarlierOpenSummary()
+                                }
+                            }
+                                .buttonStyle(.workspaceSecondaryCompact)
+                                .accessibilityIdentifier("monitor.item." + item.id + ".complete")
+                            Button("不适用") {
+                                Task {
+                                    await model.setMonitorItemStatus(item, status: .dismissed)
+                                    await refreshEarlierOpenSummary()
+                                }
+                            }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("monitor.item." + item.id + ".dismiss")
+                        } else {
+                            Button("重新打开") {
+                                Task {
+                                    await model.setMonitorItemStatus(item, status: .open)
+                                    await refreshEarlierOpenSummary()
+                                }
+                            }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("monitor.item." + item.id + ".reopen")
+                        }
+                        Spacer()
+                    }
+                }.padding(.leading, 28).padding(.bottom, 10)
             }
+            WorkspaceListDivider()
         }
-        .padding(14)
-        .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
-                .strokeBorder(palette.border.opacity(0.7), lineWidth: 1)
-        }
-        .padding(.bottom, 6)
     }
 
     private func itemRowAccessibilityLabel(_ item: MonitorItem) -> String {
