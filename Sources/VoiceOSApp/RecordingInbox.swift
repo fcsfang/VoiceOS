@@ -379,12 +379,15 @@ final class RecordingInbox: ObservableObject {
             // Only its original recording files at this level are input material.
             if voiceMemos && url.deletingLastPathComponent().standardizedFileURL != directory.standardizedFileURL { continue }
             guard extensions.contains(url.pathExtension.lowercased()) else { continue }
-            let value = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey])
-            guard value.isRegularFile == true, let size = value.fileSize, size > 0, let modified = value.contentModificationDate else { continue }
-            result[url.path] = "\(size):\(modified.timeIntervalSince1970)"
+            result[url.path] = try fileStamp(url)
         }
         if let failure { throw failure }
         return result
+    }
+    nonisolated private static func fileStamp(_ url: URL) throws -> String? {
+        let value = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey])
+        guard value.isRegularFile == true, let size = value.fileSize, size > 0, let modified = value.contentModificationDate else { return nil }
+        return "\(size):\(modified.timeIntervalSince1970)"
     }
     func scan() async {
         guard !scanning else { rescanRequested = true; return }
@@ -427,13 +430,17 @@ final class RecordingInbox: ObservableObject {
                     }.value
                         contentDigests[path] = (stamp, digest)
                     }
-                    let currentFiles = try await Self.readFiles(in: URL(fileURLWithPath: folder.path), voiceMemos: folder.voiceMemos)
-                    guard canProcess(), folders.contains(where: { $0.id == folder.id && $0.enabled && $0.path == folder.path }), currentFiles[path] == stamp else { continue }
+                    let currentStamp = try await Task.detached(priority: .utility) {
+                        do { return try Self.fileStamp(url) }
+                        catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile { return nil }
+                    }.value
+                    guard currentStamp == stamp else { unstable = true; continue }
+                    guard canProcess(), folders.contains(where: { $0.id == folder.id && $0.enabled && $0.path == folder.path }) else { continue }
                     if receipts.contains(digest) {
                         if let index = folders.firstIndex(where: { $0.id == folder.id }) {
                             folders[index].baseline[path] = stamp; save()
                         }
-                        status = "已跳过重复内容：\(URL(fileURLWithPath: path).lastPathComponent)（同一份录音在另一个入口处理过）"
+                        status = "已跳过处理过的录音：\(url.lastPathComponent)"
                         continue
                     }
                     if failures.contains(digest) {
@@ -445,7 +452,7 @@ final class RecordingInbox: ObservableObject {
                         }
                         continue
                     }
-                    if let pending = items[digest], pending.state == .needsAttention || (pending.nextAttempt ?? .distantPast) > now() { continue }
+                    if let pending = items[digest], pending.state != .retryScheduled || (pending.nextAttempt ?? .distantPast) > now() { continue }
                     let attempt = (items[digest]?.attempts ?? 0) + 1
                     items[digest] = .init(id: digest, folderID: folder.id, path: path, state: .processing, attempts: attempt, explanation: "正在整理", updatedAt: now(), fileStamp: stamp)
                     batch.append(.init(url:url,voiceMemos:folder.voiceMemos,digest:digest,inbox:folder.path))
@@ -474,6 +481,7 @@ final class RecordingInbox: ObservableObject {
             }
         }
         observed = nextObserved
+        var missingItemsChanged = false
         // 文件被移走或删除后，条目原本会永远停在「将在…自动重试」；放到「需要处理」里说清楚。
         for id in Array(items.keys) {
             guard var item = items[id], item.state != .processing,
@@ -484,8 +492,10 @@ final class RecordingInbox: ObservableObject {
             item.updatedAt = now()
             items[id] = item
             failures.insert(id)
+            missingItemsChanged = true
             status = "「\(URL(fileURLWithPath: item.path).lastPathComponent)」已不在入口目录；等待放回或不再处理"
         }
+        if missingItemsChanged && batch.isEmpty { save() }
         if blocked, waitingForCondition > 0 {
             status = "发现 \(waitingForCondition) 份新录音，等待处理条件：文本模型或本地转写就绪、另一段整理完成"
         }
