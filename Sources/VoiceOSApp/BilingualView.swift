@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import VoiceOSCore
+import VoiceOSPlatform
 
 enum BilingualPhase: Equatable {
     case idle, loading, ready, failed(String)
@@ -140,20 +141,21 @@ struct BilingualClient {
     private let transport: any ModelHTTPTransport
 
     init(transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
-        guard let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") else {
+        guard let config = TextModelConfiguration.load(),
+              let address = URL(string: config.baseURL) else {
             throw VoiceOSError("先在设置中选择文本模型")
         }
-        let settings = try Self.settings(from: URL(fileURLWithPath: path))
-        endpoint = settings.0.appendingPathComponent("responses")
-        apiKey = settings.1
-        model = settings.2 ?? "gpt-6.1-sol"
+        guard let key = TextModelKeychain.apiKey(), !key.isEmpty else {
+            throw VoiceOSError("钥匙串中的模型密钥不可用；请在设置中重新保存模型配置")
+        }
+        endpoint = address.appendingPathComponent("responses")
+        apiKey = key
+        model = config.model
         self.transport = transport
     }
 
     static var configuredModelName: String? {
-        guard let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1"),
-              let loaded = try? settings(from: URL(fileURLWithPath: path)) else { return nil }
-        return loaded.2 ?? "gpt-6.1-sol"
+        TextModelConfiguration.load()?.model
     }
 
     func translate(_ paragraphs: [BilingualParagraph]) async throws -> [String?] {
@@ -173,37 +175,5 @@ struct BilingualClient {
         guard reply.status == 200 else { throw VoiceOSError("文本模型返回 HTTP \(reply.status)") }
         let text = try Bilingual.translationText(from: reply.body)
         return Bilingual.combine(text, paragraphCount: paragraphs.count)
-    }
-
-    private static func settings(from file: URL) throws -> (URL, String, String?) {
-        let data: Data
-        do { data = try Data(contentsOf: file) }
-        catch { throw VoiceOSError("无法读取文本模型配置") }
-        guard data.count <= 16384, let text = String(data: data, encoding: .utf8) else { throw VoiceOSError("文本模型配置无效") }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("{") {
-            guard let root = try JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [String: Any],
-                  let providers = root["provider"] as? [String: Any],
-                  let openAI = providers["openai"] as? [String: Any],
-                  let options = openAI["options"] as? [String: Any],
-                  let address = (options["baseURL"] as? String).flatMap(URL.init(string:)),
-                  let key = options["apiKey"] as? String, !key.isEmpty, key != "REPLACE_LOCALLY" else {
-                throw VoiceOSError("文本模型配置缺少连接信息")
-            }
-            return (address, key, options["model"] as? String)
-        }
-        var values: [String: String] = [:]
-        for raw in text.split(separator: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            let fields = line.split(separator: "=", maxSplits: 1)
-            guard fields.count == 2 else { throw VoiceOSError("文本模型配置无效") }
-            values[fields[0].trimmingCharacters(in: .whitespaces)] = try JSONDecoder().decode(String.self, from: Data(fields[1].utf8))
-        }
-        guard let address = values["OPENAI_BASE_URL"].flatMap(URL.init(string:)),
-              let key = values["OPENAI_API_KEY"], !key.isEmpty, key != "REPLACE_LOCALLY" else {
-            throw VoiceOSError("文本模型配置缺少连接信息")
-        }
-        return (address, key, values["OPENAI_MODEL"])
     }
 }

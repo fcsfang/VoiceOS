@@ -704,6 +704,15 @@ struct WorkspaceProcessingView: View {
                                 WorkspaceSectionHeading("录音自动入口")
                                 WorkspaceListDivider()
                                 Text(inbox.status).vosFont(WorkspaceText.meta)
+                                let inboxAttention = inbox.pendingItems.filter { $0.state == .needsAttention }
+                                if !inboxAttention.isEmpty {
+                                    ForEach(inboxAttention) { item in
+                                        VStack(alignment:.leading,spacing:2) {
+                                            Text(URL(fileURLWithPath:item.path).lastPathComponent).vosFont(WorkspaceText.meta)
+                                            Text(item.explanation).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).lineLimit(3)
+                                        }
+                                    }
+                                }
                                 Button("查看接收、重试与权限状态",action:openInbox)
                                     .buttonStyle(.workspaceSecondary)
                                     .accessibilityIdentifier("processing.inbox.open")

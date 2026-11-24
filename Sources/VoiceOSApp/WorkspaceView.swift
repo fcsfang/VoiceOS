@@ -281,11 +281,14 @@ private struct WorkspaceAttentionDot: View {
     var body: some View {
         let attention = model.workspaceAttentionSnapshot
         let count = attention.count
-        let inboxNeedsAttention = inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty
+        let inboxAttentionCount = inbox.pendingItems.filter { $0.state == .needsAttention }.count
+        let inboxNeedsAttention = inboxAttentionCount > 0 || !inbox.folderErrors.isEmpty
         if count > 0 || inboxNeedsAttention {
             let parts = [attention.transcriptIssueCount > 0 ? "转写疑点 \(attention.transcriptIssueCount)" : nil,
-                         attention.otherCount > 0 ? "其他 \(attention.otherCount)" : nil].compactMap { $0 }
-            let title = count > 0 ? "需要查看" + (parts.isEmpty ? "" : " · " + parts.joined(separator:" · ")) : "有事项需要查看"
+                         attention.otherCount > 0 ? "其他 \(attention.otherCount)" : nil,
+                         inboxAttentionCount > 0 ? "录音 \(inboxAttentionCount)" : nil,
+                         !inbox.folderErrors.isEmpty ? "入口读取失败" : nil].compactMap { $0 }
+            let title = "需要查看" + (parts.isEmpty ? "" : " · " + parts.joined(separator:" · "))
             Button(action:open) {
                 HStack(alignment:.firstTextBaseline,spacing:6) {
                     Circle().fill(attention.transcriptIssueCount > 0 ? palette.warning : palette.accent)

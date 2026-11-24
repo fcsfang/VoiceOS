@@ -69,5 +69,37 @@ class ApplySpanCorrectionsTests(unittest.TestCase):
         self.assertIn("用户更正原文保持不变；模型建议需结合原话核对：疑似漏字", issues[0]["reason"])
 
 
+class MergeRepairTests(unittest.TestCase):
+    SPAN_IDS = {"span-a", "span-b"}
+
+    def merge(self, first, repaired):
+        return organizer_quality._merge_repair(first, repaired, self.SPAN_IDS)
+
+    def test_keeps_first_round_correction_repair_dropped(self):
+        first = {"corrections": [{"span_id": "span-a", "text": "改好的第一段。", "note": "术语"}],
+                 "remaining_issues": [{"span_id": "span-b", "reason": "听不清"}]}
+        repaired = {"corrections": [], "remaining_issues": []}
+        merged = self.merge(first, repaired)
+        self.assertEqual([entry["span_id"] for entry in merged["corrections"]], ["span-a"])
+        self.assertEqual(merged["corrections"][0]["text"], "改好的第一段。")
+        self.assertEqual(merged["remaining_issues"], [{"span_id": "span-b", "reason": "听不清"}])
+
+    def test_rejects_repair_rewriting_a_valid_first_round_entry(self):
+        first = {"corrections": [{"span_id": "span-a", "text": "改好的第一段。", "note": ""}], "remaining_issues": []}
+        repaired = {"corrections": [{"span_id": "span-a", "text": "另一段话。", "note": ""}], "remaining_issues": []}
+        with self.assertRaises(organizer_quality._TranscriptCorrectionError):
+            self.merge(first, repaired)
+
+    def test_repair_fixes_flagged_entry_and_drops_unknown(self):
+        first = {"corrections": [{"span_id": "span-a", "text": "  ", "note": "空文字被报错"},
+                                 {"span_id": "missing", "text": "未知片段。", "note": ""}],
+                 "remaining_issues": [{"span_id": "missing", "reason": "未知疑点"}]}
+        repaired = {"corrections": [{"span_id": "span-a", "text": "补好的第一段。", "note": "空文字被报错"}],
+                    "remaining_issues": []}
+        merged = self.merge(first, repaired)
+        self.assertEqual(merged["corrections"], [{"span_id": "span-a", "text": "补好的第一段。", "note": "空文字被报错"}])
+        self.assertEqual(merged["remaining_issues"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

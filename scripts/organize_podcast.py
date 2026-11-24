@@ -39,7 +39,7 @@ RECORDING_CONTEXTS = []
 def quality_directory(base, items, folders, render_only=False):
     # Added candidates need their own downstream receipts; keep older completed reviews intact.
     context = [{"transcript": reviewed_transcript(folder), "source": json.loads((folder / "source.json").read_text())} for folder in folders]
-    digest = hashlib.sha256(json.dumps([items, context, EXPRESSION_CONTEXT], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps([items, context, EXPRESSION_CONTEXT, model_identity()], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     directory = base / "质量核对-v7" / digest[:16]
     if render_only and not directory.exists(): return base / "质量核对-v5"
     return directory
@@ -103,29 +103,44 @@ DEFAULT_TEXT_MODEL = "gpt-6.2-sol"
 def settings():
     # The in-app settings page passes the endpoint and key through the child
     # process environment; the key is never written to disk or printed.
-    address = os.environ.get("VOICEOS_TEXT_BASE_URL", "").strip()
-    key = os.environ.get("VOICEOS_TEXT_API_KEY", "").strip()
-    model = os.environ.get("VOICEOS_TEXT_MODEL", "").strip()
-    effort = os.environ.get("VOICEOS_TEXT_EFFORT", "").strip()
-    if not (address and key):
-        text = Path(os.environ.get("VOICEOS_MODEL_CONFIG_FILE", ROOT / ".env")).read_text().strip()
-        if text.startswith("{"):
-            root = json.loads(text)
-            options = root["provider"]["openai"]["options"]
-            address, key = options["baseURL"], options["apiKey"]
-            model = root.get("model") or ""
-            effort = root.get("reviewEffort") or root.get("organizeEffort") or ""
-        else:
-            values = {}
-            for line in text.splitlines():
-                if "=" in line and not line.lstrip().startswith("#"):
-                    k, v = line.split("=", 1)
-                    values[k.strip().removeprefix("export ")] = v.strip().strip('"\'')
-            address, key = values["OPENAI_BASE_URL"], values["OPENAI_API_KEY"]
-            model = values.get("OPENAI_MODEL", "")
-            effort = values.get("OPENAI_REVIEW_EFFORT", "")
-    address = (address or "").strip().rstrip("/")
-    key = (key or "").strip()
+    # Environment and file values merge per field: an injected address or key is
+    # never replaced by a stale value from the file, and the file fills whatever
+    # the environment does not carry (model, effort).
+    env_address = os.environ.get("VOICEOS_TEXT_BASE_URL", "").strip()
+    env_key = os.environ.get("VOICEOS_TEXT_API_KEY", "").strip()
+    env_model = os.environ.get("VOICEOS_TEXT_MODEL", "").strip()
+    env_effort = os.environ.get("VOICEOS_TEXT_EFFORT", "").strip()
+    file_address = file_key = file_model = file_effort = ""
+    if not (env_address and env_key and env_model and env_effort):
+        try:
+            text = Path(os.environ.get("VOICEOS_MODEL_CONFIG_FILE", ROOT / ".env")).read_text().strip()
+        except OSError:
+            text = ""
+        try:
+            if text.startswith("{"):
+                root = json.loads(text)
+                options = root["provider"]["openai"]["options"]
+                file_address = options.get("baseURL") or ""
+                file_key = options.get("apiKey") or ""
+                file_model = root.get("model") or ""
+                file_effort = root.get("reviewEffort") or root.get("organizeEffort") or ""
+            elif text:
+                values = {}
+                for line in text.splitlines():
+                    if "=" in line and not line.lstrip().startswith("#"):
+                        k, v = line.split("=", 1)
+                        values[k.strip().removeprefix("export ")] = v.strip().strip('"\'')
+                file_address = values.get("OPENAI_BASE_URL", "")
+                file_key = values.get("OPENAI_API_KEY", "")
+                # Accept the same aliases the in-app importer understands.
+                file_model = values.get("OPENAI_MODEL") or values.get("VOICEOS_TEXT_MODEL", "")
+                file_effort = values.get("OPENAI_REVIEW_EFFORT") or values.get("VOICEOS_REVIEW_EFFORT", "")
+        except (ValueError, KeyError, TypeError):
+            file_address = file_key = file_model = file_effort = ""
+    address = (env_address or file_address).strip().rstrip("/")
+    key = (env_key or file_key).strip()
+    model = env_model or file_model
+    effort = env_effort or file_effort
     parsed = urllib.parse.urlparse(address)
     if parsed.scheme not in ["http", "https"] or not parsed.netloc:
         raise ValueError("文本服务地址必须是带主机名的 http/https 地址")
@@ -134,6 +149,13 @@ def settings():
     if effort not in TEXT_EFFORTS:
         effort = "high"
     return address, key, model or DEFAULT_TEXT_MODEL, effort
+
+
+def model_identity():
+    """Which endpoint and model produced a result; cache keys include it so a
+    settings change re-runs work instead of replaying another model's output."""
+    address, _, model, effort = settings()
+    return json.dumps([address, model, effort], ensure_ascii=False, sort_keys=True)
 
 
 def transient_service_error(error):
@@ -183,7 +205,10 @@ def preserve_rejected(cache, content, error):
 
 
 def ask(payload, instructions, cache, schema=SCHEMA, max_output_tokens=65536, read_only=False):
-    identity = hashlib.sha256(json.dumps([payload, instructions, schema], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    address, key, model, effort = settings()
+    # The cache identity names the endpoint, model and effort that produced the
+    # result: changing any of them must re-run, not replay an old response.
+    identity = hashlib.sha256(json.dumps([payload, instructions, schema, address, model, effort], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     if cache.exists():
         content = cache.read_bytes()
         try:
@@ -221,7 +246,6 @@ def ask(payload, instructions, cache, schema=SCHEMA, max_output_tokens=65536, re
         except ResponseContractError as error:
             preserve_rejected(cache, content, error)
             discard_response_copies(cache)
-    address, key, model, effort = settings()
     # Keep Responses as the production default; the gateway comparison did not establish full-pipeline superiority.
     body = {"model": model, "store": False, "stream": True, "truncation": "disabled",
             "reasoning": {"effort": effort}, "max_output_tokens": max(65536, max_output_tokens),
@@ -419,7 +443,7 @@ def save_checkpoint(path, value):
 
 def organize(folder):
     transcript = reviewed_transcript(folder)
-    transcript_digest = hashlib.sha256(json.dumps([transcript, PROMPT, EXPRESSION_CONTEXT], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    transcript_digest = hashlib.sha256(json.dumps([transcript, PROMPT, EXPRESSION_CONTEXT, model_identity()], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     source = json.loads((folder / "source.json").read_text())
     text, spans = transcript["text"], transcript["spans"]
     if not transcript.get("complete") and (transcript.get("processed_chunks") is None or transcript.get("processed_chunks") != transcript.get("total_chunks")):
@@ -699,7 +723,7 @@ def main():
             checked = previous
         else:
             # Reuse the complete ASR; correction is text-only.
-            checked = review_transcript(folder.resolve(), ask, obj, args.render_only)
+            checked = review_transcript(folder.resolve(), ask, obj, args.render_only, identity_scope=model_identity())
         if args.review_transcript_only:
             continue
         if args.render_only:

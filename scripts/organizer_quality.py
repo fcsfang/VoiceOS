@@ -82,8 +82,51 @@ def adopt_transcript(folder, original, checked):
     return checked
 
 
-def review_transcript(folder, ask, obj, render_only=False):
+def _merge_repair(first, repaired, span_ids):
+    """修复轮只准修正第一轮报错的条目，其余校正必须原样保留。
+
+    第一轮里引用合法、文字非空且只出现一次的条目已经通过校验，是这一稿的
+    实质校正；修复轮如果丢掉它们或改写成别的话，最终原文就和模型首轮判断
+    不一致了。这里拒绝这种修复，让整个流程显式失败而不是静默换稿。
+    """
+    def entries(value):
+        return [entry for entry in value.get("corrections", []) if isinstance(entry, dict)]
+    first_entries = entries(first)
+    counts = {}
+    for entry in first_entries:
+        counts[entry.get("span_id")] = counts.get(entry.get("span_id"), 0) + 1
+    kept = {}
+    for entry in first_entries:
+        span_id = entry.get("span_id")
+        text = entry.get("text")
+        if span_id not in span_ids or not isinstance(text, str) or not text.strip() or counts[span_id] != 1:
+            continue
+        kept[span_id] = entry
+    merged = [dict(entry) for entry in entries(repaired)]
+    repaired_by_id = {}
+    for entry in merged:
+        repaired_by_id.setdefault(entry.get("span_id"), entry)
+    for span_id, entry in kept.items():
+        current = repaired_by_id.get(span_id)
+        if current is None:
+            merged.append(dict(entry))
+        elif current.get("text") != entry.get("text"):
+            raise _TranscriptCorrectionError(f"修复轮改动了第一轮已通过校验的片段 {span_id}，拒绝采用这一轮结果")
+    issues = [dict(issue) for issue in repaired.get("remaining_issues", []) if isinstance(issue, dict)]
+    seen = {(issue.get("span_id"), issue.get("reason")) for issue in issues}
+    for issue in first.get("remaining_issues", []):
+        if not isinstance(issue, dict) or issue.get("span_id") not in span_ids:
+            continue
+        key = (issue.get("span_id"), issue.get("reason"))
+        if key not in seen:
+            seen.add(key)
+            issues.append(dict(issue))
+    return {"corrections": merged, "remaining_issues": issues}
+
+
+def review_transcript(folder, ask, obj, render_only=False, identity_scope=""):
     original = json.loads((folder / "Qwen完整逐字稿.json").read_text())
+    spans_by_id = {span["id"]: span for span in original["spans"]}
     manifest = json.loads((folder / "source.json").read_text())
     user_corrected = manifest.get("user_corrected_transcript") is True
     existing = reviewed_transcript(folder)
@@ -91,7 +134,9 @@ def review_transcript(folder, ask, obj, render_only=False):
     review = existing.get("transcription_review", {})
     if review.get("completed") and review.get("review_method") == "direct_ai" and (review.get("original_digest") == digest or existing == original):
         return adopt_transcript(folder, original, existing)
-    receipt = folder / "全文AI校正" / digest[:16] / "模型结果.json"
+    # 回执按「原稿 + 端点/模型/强度」命名：改了设置再重试必须重新核对，不能复用旧模型的结果。
+    attempt_digest = hashlib.sha256(json.dumps([digest, identity_scope], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    receipt = folder / "全文AI校正" / attempt_digest[:16] / "模型结果.json"
     schema = obj({"corrections": {"type": "array", "items": obj({
         "span_id": {"type": "string"}, "text": {"type": "string"}, "note": {"type": "string"}})},
         "remaining_issues": {"type": "array", "items": obj({
@@ -123,12 +168,14 @@ remaining_issues 记录读完后仍不能确定、并且影响意思的地方：
         if render_only and not repair.exists():
             raise ValueError(f"全文校正未通过校验，缺少已完成的校验修复缓存 {repair.name}；请先运行校正再渲染。具体反馈：{error}") from error
         print("AI 全文校正正在修复片段引用（第 1 轮）…", flush=True)
+        first_result = result
         result = ask({"complete_ordered_transcript": passages, "previous_review": result,
                       "validation_feedback": str(error)},
                      prompt + "\n上一轮返回未通过校验：只修复 span_id 引用与空文字，保留全部校正内容，不重新校订。",
                      repair, schema, max_output_tokens=65536, read_only=render_only)
         response_ids.append(json.loads(repair.read_text())["response_id"])
         try:
+            result = _merge_repair(first_result, result, set(spans_by_id))
             checked, changes, issues = _apply_span_corrections(original, result, user_corrected)
         except _TranscriptCorrectionError as final_error:
             raise ValueError(f"AI 全文校正未通过校验，原稿和来源记录保持不变。最后反馈：{final_error}") from final_error

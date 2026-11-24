@@ -125,12 +125,32 @@ extension ControlCenter {
         var made = 0, blocked = 0, failed = 0
         for (index, record) in records.enumerated() {
             status = "正在整理第 \(index + 1)/\(records.count) 份：\(record.displayTitle)"
-            if record.needsTranscriptionReview {
-                transcriptReviewStatus = "第 \(index + 1)/\(records.count) 份 · 正在核对完整转写…"
-                do { try await ensureTranscriptReviewed(sourceID: record.id, retry: true) }
-                catch {
+            // 一篇笔记可能由本人录音与配对节目轨共同构成；门控要求每个成员都完成核对，
+            // 只核对被选中的本人材料会让配对成员把笔记永远挡在门外。
+            var reviewsNeeded: [String] = record.needsTranscriptionReview ? [record.id] : []
+            var memberTitles: [String: String] = [record.id: record.displayTitle]
+            if let store, let catalog = try? await store.sources() {
+                let byID = Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                let members = materialNoteMemberIDs(sourceID: record.id)
+                for memberID in members where memberID != record.id { memberTitles[memberID] = byID[memberID]?.displayTitle }
+                reviewsNeeded = members.filter { memberID in
+                    memberID == record.id ? record.needsTranscriptionReview : byID[memberID]?.needsTranscriptionReview == true
+                }
+            }
+            if !reviewsNeeded.isEmpty {
+                var reviewFailure: String?
+                for memberID in reviewsNeeded {
+                    let name = memberTitles[memberID] ?? "配对成员"
+                    transcriptReviewStatus = "第 \(index + 1)/\(records.count) 份 · 正在核对完整转写：\(name)"
+                    do { try await ensureTranscriptReviewed(sourceID: memberID, retry: true) }
+                    catch {
+                        reviewFailure = "「\(name)」核对未完成：" + error.localizedDescription
+                        break
+                    }
+                }
+                if let reviewFailure {
                     failed += 1
-                    transcriptReviewStatus = "「\(record.displayTitle)」核对未完成：" + error.localizedDescription
+                    transcriptReviewStatus = reviewFailure
                     continue
                 }
             }
