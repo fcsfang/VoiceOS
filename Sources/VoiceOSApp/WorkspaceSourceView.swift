@@ -528,7 +528,7 @@ struct WorkspaceSourceView: View {
                 WorkspaceExpandableText(text:summary,label:"完整摘要",size:WorkspaceText.body.size).padding(.top,10)
             }
         }
-        if !notePresent,!thoughts.isEmpty {
+        if !thoughts.isEmpty {
             SourceFold(title:"核心要点",icon:"lightbulb",count:thoughts.count,isExpanded:foldExpanded(\.thoughts)) {
                 let digest=readingDigest
                 if !digest.isEmpty {
@@ -551,50 +551,53 @@ struct WorkspaceSourceView: View {
                     }.padding(.bottom,14)
                     WorkspaceListDivider()
                 }
-                ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
-                    HStack(alignment:.top,spacing:14) {
-                        Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced).foregroundStyle(palette.secondaryText).padding(.top,3)
-                        VStack(alignment:.leading,spacing:8) {
-                            WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:WorkspaceText.body.size)
+                ForEach(showAllThoughts ? thoughts : Array(thoughts.prefix(3))) { thought in
+                    let commands = ClaimActionsMenu(edit: { claimEditor=thought }, delete: { pendingRejection=thought;confirmingRejection=true }, createAction: { actionClaim=thought })
+                    VStack(alignment:.leading,spacing:8) {
+                        WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:WorkspaceText.body.size)
+                        HStack {
                             Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : thought.ownership == "unresolved" ? "归属待确认" : "我的观点").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                            ClaimActionsMenu(edit: { claimEditor=thought }, delete: { pendingRejection=thought;confirmingRejection=true }, createAction: { actionClaim=thought })
-                                .disabled(model.reviewingClaim)
-                            DisclosureGroup {
-                                VStack(alignment:.leading,spacing:10) {
-                                    ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
-                                        if let member=catalog[ref.sourceID],expressionIDs.contains(member.id),ref.transcriptVersionID == member.transcriptVersionID,
-                                           let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
-                                            if expressionIDs.count > 1 {
-                                                QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
-                                                    Text(MaterialNaming.displayName(member.name)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                                                }
+                            Spacer()
+                            Button("编辑", systemImage:"pencil", action:commands.edit).labelStyle(.titleAndIcon)
+                                .buttonStyle(.borderless).disabled(model.reviewingClaim)
+                            commands.disabled(model.reviewingClaim)
+                        }
+                        DisclosureGroup {
+                            VStack(alignment:.leading,spacing:10) {
+                                ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
+                                    if let member=catalog[ref.sourceID],expressionIDs.contains(member.id),ref.transcriptVersionID == member.transcriptVersionID,
+                                       let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
+                                        if expressionIDs.count > 1 {
+                                            QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
+                                                Text(MaterialNaming.displayName(member.name)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                             }
-                                            if let start=span.startMS,let end=span.endMS {
-                                                Button { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } label: {
-                                                    Text(quote(span,text:text)).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
-                                                }.buttonStyle(.plain)
-                                            } else {
-                                                Text(quote(span,text:text)).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).textSelection(.enabled)
-                                            }
-                                            if let start=span.startMS,let end=span.endMS { Button("回听这段原话",systemImage:"play.circle") { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } }.buttonStyle(.workspaceQuietCompact) }
                                         }
+                                        if let start=span.startMS,let end=span.endMS {
+                                            Button { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } label: {
+                                                Text(quote(span,text:text)).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                                            }.buttonStyle(.plain)
+                                        } else {
+                                            Text(quote(span,text:text)).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).textSelection(.enabled)
+                                        }
+                                        if let start=span.startMS,let end=span.endMS { Button("回听这段原话",systemImage:"play.circle") { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } }.buttonStyle(.workspaceQuietCompact) }
                                     }
-                                    ClaimNoteRow(model:model,claimID:thought.id,notes:$claimNotes)
-                                    HStack {
-                                        Button("审阅历史") { Task { await model.reviewHistory(thought); historyClaimID=thought.id; loadedClaimHistory=model.claimHistory } }.buttonStyle(.workspaceQuietCompact)
-                                    }
-                                    if historyClaimID == thought.id {
-                                        ForEach(loadedClaimHistory) { revision in Text("第 \(revision.version) 版 · " + revision.statement).vosFont(WorkspaceText.meta).textSelection(.enabled) }
-                                    }
-                                    if let origin=model.claimOrigins.first(where: { $0.claimID == thought.id }) {
-                                        Button("查看原讨论") { openDiscussion(origin.conversationID) }.buttonStyle(.workspaceQuietCompact)
-                                    }
-                                }.padding(.top,9)
-                            } label: {
-                                Text("原话依据、旁注与调整").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                            }
+                                }
+                                ClaimNoteRow(model:model,claimID:thought.id,notes:$claimNotes)
+                                HStack {
+                                    Button("审阅历史") { Task { await model.reviewHistory(thought); historyClaimID=thought.id; loadedClaimHistory=model.claimHistory } }.buttonStyle(.workspaceQuietCompact)
+                                }
+                                if historyClaimID == thought.id {
+                                    ForEach(loadedClaimHistory) { revision in Text("第 \(revision.version) 版 · " + revision.statement).vosFont(WorkspaceText.meta).textSelection(.enabled) }
+                                }
+                                if let origin=model.claimOrigins.first(where: { $0.claimID == thought.id }) {
+                                    Button("查看原讨论") { openDiscussion(origin.conversationID) }.buttonStyle(.workspaceQuietCompact)
+                                }
+                            }.padding(.top,9)
+                        } label: {
+                            Text("原话与旁注").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                         }
                     }.padding(.vertical,8)
+                        .contextMenu { commands.actions.disabled(model.reviewingClaim) }
                     if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { WorkspaceListDivider() }
                 }
                 if thoughts.count > 3 {
@@ -1851,13 +1854,14 @@ struct ClaimActionsMenu: View {
     let delete: () -> Void
     var createAction: (() -> Void)? = nil
     var body: some View {
-        Menu {
-            Button("编辑", systemImage: "pencil", action: edit)
-            if let createAction { Button("创建行动", systemImage: "plus", action: createAction) }
-            Button("删除", systemImage: "trash", role: .destructive, action: delete)
-        } label: { Image(systemName:"ellipsis.circle") }
+        Menu { actions } label: { Image(systemName:"ellipsis.circle") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help("观点操作").accessibilityLabel("观点操作")
+    }
+    @ViewBuilder var actions: some View {
+        Button("编辑", systemImage: "pencil", action: edit)
+        if let createAction { Button("创建行动", systemImage: "plus", action: createAction) }
+        Button("删除", systemImage: "trash", role: .destructive, action: delete)
     }
 }
 
