@@ -373,7 +373,7 @@ struct WorkspaceView: View {
     @State private var pendingURL: URL?
     @State private var showingOutcome = false
     @State private var materialFilter = "日常材料"
-    @State private var actionFilter = "全部"
+    @State private var actionFilter = "我的待办"
     @State private var savedViews: [SavedWorkspaceView] = []
     @State private var showingSaveView = false
     @State private var savingView = false
@@ -811,7 +811,7 @@ struct WorkspaceView: View {
          (.themes, "主题", "circle.hexagongrid", "themes", 0),
          (.materials, "材料", "books.vertical", "materials", 0),
          (.monitor, "消息监测", "bell.badge", "monitor", model.monitorOpenItemCount),
-         (.actions, "行动", "checkmark.circle", "actions", model.unreadDeliveryCount),
+         (.actions, "行动", "checkmark.circle", "actions", 0),
          (.initiate, "启动", "arrow.up.forward", "initiate", 0)]
     }
 
@@ -895,7 +895,7 @@ struct WorkspaceView: View {
             }
         }
         ToolbarItemGroup(placement:.primaryAction) {
-            Button("搜索", systemImage:"magnifyingglass") {
+            Button("搜索全部内容", systemImage:"magnifyingglass") {
                 if page == .search { searchFocused = true } else { go(.search) }
             }.help("搜索全部内容（⌘F）")
             Button("讨论", systemImage:"sidebar.right") { Task { await toggleDiscussion() } }
@@ -1624,9 +1624,9 @@ struct WorkspaceView: View {
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"行动") {
                 HStack(spacing:8) {
-                    if model.unreadDeliveryCount > 0 {
+                    Group {
                         Button { actionFilter = "AI 助理"; error = "" } label: {
-                            WorkspaceBadge(text:"AI 交付 \(model.unreadDeliveryCount) 份待读", tone:.neutral)
+                            WorkspaceBadge(text:model.unreadDeliveryCount > 0 ? "AI 交付 \(model.unreadDeliveryCount) 份待读" : "AI 交付", tone:.neutral)
                                 .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
                                 .padding(.horizontal, 6)
                                 .contentShape(Capsule())
@@ -1654,7 +1654,11 @@ struct WorkspaceView: View {
                     }
                 }
             }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model, scope:clarifyScope) }
-            WorkspaceFilterTabs(items: SavedViewPage.actions.filters.map { WorkspaceFilterTabItem(filter: $0, title: $0) }, selection: actionFilter, onSelect: { actionFilter = $0 })
+            Picker("行动视图", selection: $actionFilter) {
+                ForEach(SavedViewPage.actions.filters, id: \.self) { filter in
+                    Text(filter == "AI 助理" ? "AI 交付" : filter).tag(filter)
+                }
+            }.pickerStyle(.menu).fixedSize().accessibilityIdentifier("actions.view")
             if let offer = localCompletionOffer {
                 HStack(spacing:12) {
                     WorkspaceNoticeText(message: model.status.isEmpty ? "提醒事项不可用；可以先本地完成，稍后核对。" : model.status, severity:.warning)
@@ -4381,7 +4385,6 @@ private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
             .animation(reduceMotion ? nil : WorkspaceMotion.hover,value:menuVisible)
     }
 }
-
 struct MaterialRowFailurePreferenceKey: PreferenceKey {
     static var defaultValue: Bool { false }
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
@@ -4435,62 +4438,5 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
             }
             .onHover { hovered=$0 }
             .animation(reduceMotion ? nil : WorkspaceMotion.hover,value:menuVisible)
-    }
-}
-
-private struct WorkspaceFilterTabItem: Identifiable {
-    let filter: String
-    let title: String
-    var count: String? = nil
-    var help: String = ""
-    var id: String { filter }
-    var label: String { count.map { title + " " + $0 } ?? title }
-}
-
-/// One underline per selected filter: ink for the active label, accent for the rule.
-/// The identifier keeps the old combined label so saved UI checks still resolve.
-private struct WorkspaceFilterTabs: View {
-    @Environment(\.workspacePalette) private var palette
-    @Environment(\.vosTextScale) private var textScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let items: [WorkspaceFilterTabItem]
-    let selection: String
-    let onSelect: (String) -> Void
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 18) {
-                ForEach(items) { item in tab(item) }
-            }.fixedSize(horizontal: true, vertical: false)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 56 * vosLayoutScale(textScale)), spacing: 14)], alignment: .leading, spacing: 10) {
-                ForEach(items) { item in tab(item, fill: true) }
-            }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func tab(_ item: WorkspaceFilterTabItem, fill: Bool = false) -> some View {
-        let selected = selection == item.filter
-        return Button { onSelect(item.filter) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Text(item.title)
-                        .vosFont(WorkspaceText.meta.size, weight: selected ? .semibold : .regular)
-                        .foregroundStyle(selected ? palette.text : palette.secondaryText)
-                        .lineLimit(1)
-                    if let count = item.count {
-                        Text(count).vosFont(WorkspaceText.meta.size, monospacedDigit: true)
-                            .foregroundStyle(palette.tertiaryText).lineLimit(1)
-                    }
-                }
-                Rectangle().fill(selected ? palette.accent : Color.clear).frame(height: 2)
-            }
-            .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityAddTraits(selected ? [.isSelected] : [])
-            .help(item.help)
-            .accessibilityIdentifier("workspace.tab." + item.label)
-            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: selection)
     }
 }

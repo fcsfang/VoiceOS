@@ -315,8 +315,6 @@ struct WorkspaceMonitorView: View {
                     }
                 }
                 HStack(spacing: 16) {
-                    Text(itemCountText(report)).vosFont(WorkspaceText.meta)
-                        .foregroundStyle(palette.secondaryText)
                     Text(ControlCenter.monitorDeliveryText(report)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(report.deliveryState == "failed" ? palette.warning : palette.secondaryText)
                     Spacer()
@@ -408,15 +406,17 @@ struct WorkspaceMonitorView: View {
         case .items:
             let items = model.monitorItemsByReport[report.id] ?? []
             let openItems = items.filter { $0.status == .open }
-            Picker("事项筛选", selection: $showsAllItems) {
-                Text("未处理").tag(false)
-                Text("全部").tag(true)
+            if openItems.count < items.count {
+                Picker("事项筛选", selection: $showsAllItems) {
+                    Text("未处理").tag(false)
+                    Text("全部").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(minWidth: 140)
+                .padding(.top, 4)
+                .accessibilityIdentifier("monitor.filter")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(minWidth: 140)
-            .padding(.top, 4)
-            .accessibilityIdentifier("monitor.filter")
             ForEach([MonitorItemCategory.applicable, .needsCheck], id: \.self) { category in
                 let group = openItems.filter { $0.category == category }
                 if !group.isEmpty {
@@ -556,7 +556,7 @@ struct WorkspaceMonitorView: View {
                     Text(item.title).vosFont(WorkspaceText.rowTitle)
                         .strikethrough(item.status == .dismissed)
                     Spacer()
-                    Text(item.deadlineText ?? (item.deadlineDate.map { "截止 " + $0 } ?? "截止待核对"))
+                    Text(timeLabel(item))
                         .vosFont(WorkspaceText.meta)
                         .foregroundStyle(item.deadlineDate == nil && item.deadlineText == nil
                                          ? palette.warning : palette.secondaryText)
@@ -612,9 +612,21 @@ struct WorkspaceMonitorView: View {
         }
     }
 
+    private func timeLabel(_ item: MonitorItem) -> String {
+        guard let time = item.deadlineText, !time.isEmpty else { return item.deadlineDate ?? "时间待核对" }
+        guard let match = item.evidenceQuote.range(of: time) else { return time }
+        let before = item.evidenceQuote[..<match.lowerBound].suffix(16)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "：: "))
+        for label in ["报名截止", "网申截止", "截止", "宣讲时间", "考试时间", "活动时间"] {
+            if before.hasSuffix(label) || before.hasSuffix(label + "时间") { return label + " · " + time }
+        }
+        if before.hasSuffix("宣讲安排\n时间") { return "宣讲时间 · " + time }
+        return time
+    }
+
     private func itemRowAccessibilityLabel(_ item: MonitorItem) -> String {
         let status = item.status == .done ? "已完成" : item.status == .dismissed ? "已忽略" : "待办"
-        let deadline = item.deadlineText ?? (item.deadlineDate.map { "截止 " + $0 } ?? "截止待核对")
+        let deadline = timeLabel(item)
         return [status, item.title, deadline].joined(separator: "，")
     }
 
