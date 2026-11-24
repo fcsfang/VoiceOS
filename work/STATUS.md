@@ -1,6 +1,6 @@
 # 项目状态
 
-- 2026-11-24 整理结果可编辑性，首批观点菜单和搜索修复见[任务卡](tasks/20261124-edit-generated-content/TASK.md)。
+- 2026-11-24 观点、笔记和行动的可编辑性已进入统一评审，验证记录见[任务卡](tasks/20261124-edit-generated-content/TASK.md)。
 
 - 2026-11-24 非笔记功能提示词首批整理与验证见[任务卡](tasks/20261124-model-prompts/TASK.md)。
 

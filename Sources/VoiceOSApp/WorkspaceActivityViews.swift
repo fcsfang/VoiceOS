@@ -345,6 +345,8 @@ struct WorkspaceTaskView: View {
     @State private var confirming = false
     @State private var askingForResult = false
     @State private var confirmingDismiss = false
+    @State private var editingAction: ActionRecord?
+    @State private var removingAction: ActionRecord?
     @State private var confirmingReopen = false
     @State private var undoReopen = false
     @State private var settings: ReminderSnapshot?
@@ -532,7 +534,42 @@ struct WorkspaceTaskView: View {
     private var pageContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-                WorkspacePageHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
+                HStack(alignment: .top) {
+                    WorkspacePageHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
+                    Spacer()
+                    if action.validity == "current" {
+                        Menu {
+                            Button("编辑…") { editingAction = action }
+                            Button("删除…", role: .destructive) { removingAction = action }
+                        } label: { Image(systemName: "ellipsis.circle") }
+                        .menuIndicator(.hidden).menuStyle(.borderlessButton)
+                        .fixedSize().help("行动操作").accessibilityLabel("行动操作")
+                        .disabled(model.savingAction || model.remindersBusy)
+                    }
+                }
+                .sheet(item: $editingAction) { base in
+                    ActionContentEditor(action: base) { title, note in
+                        guard let store = model.store else { throw VoiceOSError("资料库尚未打开") }
+                        try await store.editAction(base, title: title, note: note)
+                        await model.refresh()
+                    }
+                }
+                .alert("删除这条行动？", isPresented: Binding(get: { removingAction != nil }, set: { if !$0 { removingAction = nil } }), presenting: removingAction) { base in
+                    Button("取消", role: .cancel) {}
+                    Button("删除", role: .destructive) {
+                        Task {
+                            do {
+                                guard let store = model.store else { throw VoiceOSError("资料库尚未打开") }
+                                try await store.removeAction(base)
+                                await model.refresh()
+                            } catch { self.error = error.localizedDescription }
+                        }
+                    }
+                } message: { base in
+                    Text(model.reminderLinks.contains { $0.actionID == base.id }
+                         ? "保留原始材料和历史记录。已写入 Apple 提醒事项的提醒需单独删除。"
+                         : "将从行动列表和搜索中移除，原始材料和历史记录会保留。")
+                }
                 if let observed = reminderObservedSummary {
                     Label("已回读 · " + observed, systemImage: "calendar").vosFont(WorkspaceText.meta)
                     if let desired = reminderDesiredSummary, desired != observed {
@@ -623,7 +660,7 @@ struct WorkspaceTaskView: View {
                         HStack(spacing:10) {
                             Button("这是我的承诺") { clarify(.commit) }.buttonStyle(.workspaceSecondary)
                             Button("放到问题与目标") { clarify(.opportunity) }.buttonStyle(.workspaceSecondary)
-                            Button("不是") { clarify(.not) }.buttonStyle(.workspaceSecondary)
+                            Button("不再跟进") { clarify(.not) }.buttonStyle(.workspaceSecondary)
                         }.disabled(model.savingAction)
                     }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }

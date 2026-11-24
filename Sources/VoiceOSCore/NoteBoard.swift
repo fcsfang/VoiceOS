@@ -6,15 +6,15 @@ import Foundation
 public struct NoteBlock: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let kind: String
-    public let heading: String?
-    public let paragraphs: [MaterialNote.Paragraph]?
+    public var heading: String?
+    public var paragraphs: [MaterialNote.Paragraph]?
     public let annotation: MaterialNote.Annotation?
     public let actionID: String?
     public let claimID: String?
     public let sourceID: String?
     public let spanID: String?
     public let quote: String?
-    public let text: String?
+    public var text: String?
     public let tone: String?
     public let titleOverride: String?
 

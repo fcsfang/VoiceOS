@@ -1884,6 +1884,20 @@ final class CoreFlowTests: XCTestCase {
         catch { XCTAssertEqual(error.localizedDescription, "文字未改变，无需保存更正") }
         let unchanged = try await store.transcriptHistory(sourceID: sourceID)
         XCTAssertEqual(unchanged.count, 2)
+        let extracted = try await store.actions()
+        let task = try XCTUnwrap(extracted.first)
+        try await store.editAction(task, title: "手改标题查验", note: "手改说明")
+        let editedTasks = try await store.actions()
+        let edited = try XCTUnwrap(editedTasks.first { $0.id == task.id })
+        XCTAssertEqual(edited.note, "手改说明")
+        let taskHits = try await store.search(query: "手改标题查验")
+        XCTAssertTrue(taskHits.contains { $0.kind == .action && $0.refID == task.id })
+        do { try await store.removeAction(task); XCTFail("过期详情不能删除新版任务") } catch {}
+        try await store.removeAction(edited)
+        let remainingHits = try await store.search(query: "手改标题查验")
+        XCTAssertFalse(remainingHits.contains { $0.refID == task.id })
+        let revisions = try await store.actionRevisions(actionID: task.id)
+        XCTAssertEqual(revisions.first?.note, "已删除")
         let claim = try XCTUnwrap(current.first)
         _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: claim.reviewVersion, action: .correct,
                                         statement: "检索质量是待研究因素，并非已验证的结论。", ownership: .external)

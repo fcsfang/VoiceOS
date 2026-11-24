@@ -108,7 +108,7 @@ extension VoiceOSStore {
         LEFT JOIN actions ac ON ranked.kind='action' AND ac.id=ranked.ref_id
         LEFT JOIN reflection_questions rq ON ranked.kind='topic' AND rq.id=ranked.ref_id
         WHERE (ranked.kind!='claim' OR (cl.validity='current' AND COALESCE(cr.decision,'pending')!='rejected'))
-          AND (ranked.kind!='action' OR ac.id IS NOT NULL)
+          AND (ranked.kind!='action' OR ac.removed=0)
         ORDER BY CASE WHEN julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) >= julianday('now', '-30 days') THEN ranked.score * 1.05 ELSE ranked.score END,
                  ranked.ref_id
         """, [tokens.matchExpression] + tokens.filterBinds).map(decodeSearchRow)
@@ -130,7 +130,7 @@ extension VoiceOSStore {
         LEFT JOIN reflection_questions rq ON s.kind='topic' AND rq.id=s.ref_id
         WHERE \(tokens.filterClause(qualifyingWith: "s."))
           AND (s.kind!='claim' OR (cl.validity='current' AND COALESCE(cr.decision,'pending')!='rejected'))
-          AND (s.kind!='action' OR ac.id IS NOT NULL)
+          AND (s.kind!='action' OR ac.removed=0)
         ORDER BY CASE WHEN instr(s.title, ?) > 0 THEN 0 ELSE 1 END,
                  julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) DESC,
                  s.ref_id
@@ -287,7 +287,7 @@ extension VoiceOSStore {
             FROM claims c LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version
             WHERE c.validity='current' AND COALESCE(r.decision, 'pending') != 'rejected'
             """)
-        let actions = try db.query("SELECT id, title, note AS body FROM actions")
+        let actions = try db.query("SELECT id, COALESCE(edited_title,title) AS title, COALESCE(edited_note,note) AS body FROM actions WHERE removed=0")
         let topics = try db.query("SELECT id, title, title AS body FROM reflection_questions")
         // 首页显示的是笔记标题；把每个表达最新一版的标题、导语与正文并入材料
         // 条目的搜索正文，否则按屏幕上看到的标题搜不到东西。

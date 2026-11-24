@@ -5,6 +5,7 @@ import Foundation
 /// ID records an anchor that could not be located, while a missing transcript
 /// version records an anchor whose version was not known at generation time.
 public struct MaterialNote: Codable, Sendable, Equatable {
+    public var manuallyEdited: Bool?
     public var searchableText: String {
         var parts = [title]
         if let lead { parts.append(lead) }
@@ -60,7 +61,7 @@ public struct MaterialNote: Codable, Sendable, Equatable {
         }
     }
     public struct Paragraph: Codable, Sendable, Equatable {
-        public let text: String
+        public var text: String
         public let anchors: [Anchor]
         /// 段落包含整理时补充的关联（不是材料明说的意思），阅读界面可轻标。
         public let inferred: Bool?
@@ -97,8 +98,8 @@ public struct MaterialNote: Codable, Sendable, Equatable {
             self.paragraphs = paragraphs
         }
     }
-    public let title: String
-    public let lead: String?
+    public var title: String
+    public var lead: String?
     public let sections: [Section]
     /// 文末长文：跨段综合、理论讲授、长回应或发散。
     public let closing: [Annotation]?
@@ -116,7 +117,7 @@ public struct MaterialNote: Codable, Sendable, Equatable {
 
 /// One saved revision. Saves are append-only: `expressionKey` identifies the
 /// member set and `createdAt` (with rowid as tie-breaker) picks the latest.
-public struct StoredMaterialNote: Sendable, Equatable {
+public struct StoredMaterialNote: Sendable, Equatable, Identifiable {
     public let id: String
     public let expressionKey: String
     public let note: MaterialNote
@@ -154,11 +155,26 @@ extension VoiceOSStore {
     /// the library. The snapshot comparison and the insert run in one actor
     /// turn, so a transcript or permission change cannot land in between.
     @discardableResult
-    public func saveMaterialNote(memberSourceIDs: [String], note: MaterialNote, transcriptVersions: [String: String], modelIdentity: String?, ifMembersStillMatch expected: [MaterialNoteMemberSnapshot]) throws -> StoredMaterialNote? {
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        guard expected.allSatisfy({ $0.matches(catalog[$0.sourceID]) }) else { return nil }
-        return try saveMaterialNote(memberSourceIDs: memberSourceIDs, note: note,
-                                    transcriptVersions: transcriptVersions, modelIdentity: modelIdentity)
+    public func saveMaterialNote(memberSourceIDs: [String], note: MaterialNote, transcriptVersions: [String: String], modelIdentity: String?, ifMembersStillMatch expected: [MaterialNoteMemberSnapshot], replacing revisionID: String? = nil) throws -> StoredMaterialNote? {
+        try db.transaction {
+            let catalog = Dictionary(try sourceRecords(ids: expected.map(\.sourceID)).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            guard expected.allSatisfy({ $0.matches(catalog[$0.sourceID]) }),
+                  try latestMaterialNote(memberSourceIDs: memberSourceIDs)?.id == revisionID else { return nil }
+            return try saveMaterialNote(memberSourceIDs: memberSourceIDs, note: note,
+                                        transcriptVersions: transcriptVersions, modelIdentity: modelIdentity)
+        }
+    }
+
+    public func editMaterialNote(_ draft: MaterialNote, replacing base: StoredMaterialNote) throws -> StoredMaterialNote {
+        try db.transaction {
+            let ids = base.expressionKey.components(separatedBy: "|")
+            guard try latestMaterialNote(memberSourceIDs: ids)?.id == base.id else {
+                throw VoiceOSError("笔记已有新版本，请重新打开编辑。")
+            }
+            var note = draft
+            note.manuallyEdited = true
+            return try saveMaterialNote(memberSourceIDs: ids, note: note, transcriptVersions: base.transcriptVersions, modelIdentity: base.modelIdentity)
+        }
     }
 
     /// The newest revision for the member set; empty members have no note.
