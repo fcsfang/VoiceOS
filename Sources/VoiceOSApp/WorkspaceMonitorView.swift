@@ -40,7 +40,7 @@ struct WorkspaceMonitorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            WorkspacePageHeading(eyebrow: "每日消息监测", title: "消息监测", subtitle: headingSubtitle) {
+            WorkspacePageHeading(title: "消息监测") {
                 Picker("消息监测页面", selection: $showsSettings) {
                     Text("报告").tag(false)
                     Text("设置").tag(true)
@@ -126,10 +126,6 @@ struct WorkspaceMonitorView: View {
     private func localizedReportDate(_ key: String) -> String {
         guard let date = ActionTimeFormatting.dayKey.date(from: key) else { return key }
         return date.formatted(date: .abbreviated, time: .omitted)
-    }
-
-    private var headingSubtitle: String {
-        "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进。"
     }
 
     private var qqNeedsFullDiskAccess: Bool {
@@ -714,7 +710,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var sourceStatusSection: some View {
-        WorkspaceSettingsCard(title: "来源状态", subtitle: "显示本地库最新消息时间；失败会单独标出") {
+        WorkspaceSettingsCard(title: "来源状态") {
             if monitorLoadState == .loading {
                 if showSlowLoad {
                     monitorLoadingRow("正在读取来源状态…")

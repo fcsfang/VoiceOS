@@ -162,7 +162,6 @@ struct WorkspaceThemeOption: View {
                     Spacer()
                     if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent) }
                 }
-                Text(theme.subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.canvas, in: RoundedRectangle(cornerRadius: 9))
                 .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(selected ? palette.accent : palette.border, lineWidth: selected ? 1.5 : 1) }

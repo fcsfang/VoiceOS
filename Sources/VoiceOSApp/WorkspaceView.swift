@@ -1133,7 +1133,7 @@ struct WorkspaceView: View {
                 }
             }
             if materialFilter == "日常材料", !todayReading.isEmpty {
-                WorkspaceListSection(title:"今日阅读",subtitle:"上次停下的地方，接着读。",count:todayReading.count) {
+                WorkspaceListSection(title:"今日阅读",count:todayReading.count) {
                     VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                         ForEach(todayReading) { item in
                             WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
@@ -1317,14 +1317,14 @@ struct WorkspaceView: View {
                         Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。")
                     }.foregroundStyle(palette.secondaryText)
                 } else if filter.isEmpty && themeListings.isEmpty {
-                    Text("还没有达到主题判据的关切。线索会随材料积累成为主题。").foregroundStyle(palette.secondaryText)
+                    Text("暂时没有主题。").foregroundStyle(palette.secondaryText)
                 }
                 if !clueListings.isEmpty {
                     VStack(alignment:.leading,spacing:8) {
                         DisclosureGroup(isExpanded: Binding(get: { showingClues || !filter.isEmpty }, set: { showingClues = $0 })) {
                             VStack(alignment:.leading,spacing:0) {
                                 ForEach(clueListings) { listing in
-                                    WorkspaceRow(title:listing.topic.title,subtitle:"\(listing.materialCount) 份材料 · 最近 " + clueDateLabel(listing.latestMaterialDate),icon:"circle.dotted",trailing:"查看") { selectTopic(listing.topic.id) }
+                                    WorkspaceRow(title:listing.topic.title,subtitle:"\(listing.materialCount) 份材料 · 最近 " + clueDateLabel(listing.latestMaterialDate),icon:"circle.dotted") { selectTopic(listing.topic.id) }
                                         .workspaceSelectionHighlight(clueKeyboardFocus.id == listing.id)
                                         .id(listing.id)
                                     if listing.id != clueListings.last?.id { WorkspaceListDivider() }
@@ -1464,7 +1464,7 @@ struct WorkspaceView: View {
         case "材料":
             let catalog = recordCatalog
             let expressions = distinctExpressions(reading.sources)
-            WorkspaceSection(title:"主题材料",subtitle:"完整原话与资料，按时间延续",icon:"books.vertical",count:reading.sources.count) {
+            WorkspaceSection(title:"主题材料",icon:"books.vertical",count:reading.sources.count) {
                 VStack(spacing:0) {
                     ForEach(expressions) { source in
                         sourceRow(source,catalog:catalog)
@@ -1700,7 +1700,7 @@ struct WorkspaceView: View {
                     }
                 }
                 if !dueToday.isEmpty {
-                    WorkspaceListSection(title:"今天",subtitle:"今天到期",count:dueToday.count) {
+                    WorkspaceListSection(title:"今天",count:dueToday.count) {
                         ActionCardList {
                             ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
@@ -1714,7 +1714,7 @@ struct WorkspaceView: View {
                     }
                 }
                 if !surface.anytime.isEmpty {
-                    WorkspaceListSection(title:"随时",subtitle:"没有日期或更远",count:surface.anytime.count) {
+                    WorkspaceListSection(title:"以后或未定日期",count:surface.anytime.count) {
                         ActionCardList {
                             ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
@@ -1725,7 +1725,7 @@ struct WorkspaceView: View {
                     WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
                 }
             } else if !listed.isEmpty {
-                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "全部" ? "7 天内与没有日期的待办" : actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
+                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,count:listed.count) {
                     ActionCardList {
                         ForEach(listed) { action in actionRow(action,timeEntry:timeEntries[action.id],group:listGroup,nature:listNature,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
@@ -1735,7 +1735,7 @@ struct WorkspaceView: View {
             // overview they sit below the backlog as one quiet line.
             if actionFilter == "全部", !model.stalledOutcomes.isEmpty { stalledBanner }
             if actionFilter == "全部", !paused.isEmpty {
-                WorkspaceListSection(title:"需要核对的待办",subtitle:"打开任务查看原因。",count:paused.count) {
+                WorkspaceListSection(title:"需要核对的待办",count:paused.count) {
                     ActionCardList {
                         ForEach(paused) { action in actionRow(action,group:.needsReview,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
@@ -1744,7 +1744,7 @@ struct WorkspaceView: View {
             }
             let overviewQuestions = actionFilter == "全部" ? model.openQuestions : []
             if !overviewQuestions.isEmpty {
-                WorkspaceListSection(title:"问题",subtitle:"VoiceOS 先回答；想清楚了可以转成下一步。",count:overviewQuestions.count,collapsible:true) {
+                WorkspaceListSection(title:"问题",count:overviewQuestions.count,collapsible:true) {
                     ActionCardList {
                         ForEach(overviewQuestions.prefix(3)) { action in
                             actionRow(action,nature:.question,nextStepCounts:nextStepCounts,reads:rowReads)
@@ -1758,7 +1758,7 @@ struct WorkspaceView: View {
             }
             let overviewGoals = actionFilter == "全部" ? model.openGoals : []
             if !overviewGoals.isEmpty {
-                WorkspaceListSection(title:"目标",subtitle:"你要长期达到的结果；转成待办后可提醒。",count:overviewGoals.count,collapsible:true) {
+                WorkspaceListSection(title:"目标",count:overviewGoals.count,collapsible:true) {
                     ActionCardList {
                         ForEach(overviewGoals.prefix(3)) { action in
                             actionRow(action,nature:.goal,nextStepCounts:nextStepCounts,reads:rowReads)
@@ -2310,10 +2310,11 @@ struct WorkspaceView: View {
     }
     private var settings: some View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
-            WorkspacePageHeading(title:"设置", subtitle:"模型、连接、外观与资料维护")
-            WorkspaceSearchField(text: $settingsQuery, placeholder: "搜索设置：模型、备份、权限、快捷键…")
-                .frame(maxWidth: 680, alignment: .leading)
-                .accessibilityIdentifier("settings.search")
+            WorkspacePageHeading(title:"设置") {
+                WorkspaceSearchField(text:$settingsQuery, placeholder:"搜索设置")
+                    .frame(maxWidth:240)
+                    .accessibilityIdentifier("settings.search")
+            }.frame(maxWidth:680, alignment:.leading)
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
                 let searching = !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 if !searching {
@@ -2358,7 +2359,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsModelsCard: some View {
-        WorkspaceSettingsCard(title:"模型与服务", subtitle:"本机转写，以及用来理解与核对材料的文本模型") {
+        WorkspaceSettingsCard(title:"模型与服务") {
             WorkspaceSettingsRow(title:"语音转文字", subtitle:model.speechSummary, showsDivider:false) {
                 Button("更改") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改语音转文字")
             }
@@ -2470,7 +2471,7 @@ struct WorkspaceView: View {
     }
     /// 概览与健康：进设置十秒内回答「模型可用吗、资料多大、后台忙什么」。
     private var settingsHealthCard: some View {
-        WorkspaceSettingsCard(title:"概览与健康", subtitle:"一眼看清现在能不能用、后台在忙什么") {
+        WorkspaceSettingsCard(title:"运行状态") {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Circle().fill(model.speechConfigured ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
                 Text("本地转写").vosFont(WorkspaceText.body)
@@ -2556,7 +2557,7 @@ struct WorkspaceView: View {
 
         var sections: [SettingsSection] {
             switch self {
-            case .common: [.health, .connections, .appearance, .reading]
+            case .common: [.appearance, .reading, .connections, .health]
             case .model: [.models, .permissions, .privacy]
             case .library: [.exportBackup, .library, .storage]
             case .tools: [.review, .keyboard, .maintenance]
@@ -2570,7 +2571,7 @@ struct WorkspaceView: View {
 
         private var searchText: String {
             switch self {
-            case .health: "概览 健康 状态 队列 监控 概览与健康 后台队列 最近模型调用"
+            case .health: "概览 健康 运行状态 队列 监控 概览与健康 后台队列 最近模型调用"
             case .models: "模型与服务 语音转文字 转写 理解、核对与AI助理 应用内模型配置 服务地址 型号 密钥 API Key 笔记思考强度 主题整理思考强度 核对与整理思考强度 连接测试 测试连接 保存并启用 从文件导入"
             case .privacy: "隐私 数据 上传 云端 权限 数据与隐私"
             case .connections: "连接 收件箱 文件夹 提醒 监测 自动 连接与自动入口 自动接收录音 语音备忘录 消息监测 微信推送 QQ群 Apple提醒事项 登录时启动 开机启动"
@@ -2606,7 +2607,7 @@ struct WorkspaceView: View {
         return parts.isEmpty ? "空闲" : parts.joined(separator: " · ")
     }
     private var settingsPrivacyCard: some View {
-        WorkspaceSettingsCard(title:"数据与隐私", subtitle:"哪些只留在这台 Mac，哪些会发送给模型") {
+        WorkspaceSettingsCard(title:"数据与隐私") {
             VStack(alignment:.leading, spacing:6) {
                 Text("只在本机：录音与原件、资料库、模型密钥、QQ 密钥文件").vosFont(WorkspaceText.body)
                 Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
@@ -2632,7 +2633,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsConnectionsCard: some View {
-        WorkspaceSettingsCard(title:"连接与自动入口", subtitle:"录音、消息与提醒从哪里进来") {
+        WorkspaceSettingsCard(title:"连接与自动入口") {
             WorkspaceSettingsNavRow(title:"自动接收录音", subtitle:"VoiceOS 收件箱与语音备忘录", showsDivider:false) { go(.tool("自动入口")) }
             WorkspaceSettingsNavRow(title:"消息监测", subtitle:"QQ 群与学院官网 · 检查时间、推送与依赖") { model.monitorSettingsRequested = true; go(.monitor) }
             WorkspaceSettingsRow(title:"Apple 提醒事项", subtitle:reminderConnectionStatus) {
@@ -2662,7 +2663,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsPermissionsCard: some View {
-        WorkspaceSettingsCard(title:"系统权限", subtitle:"麦克风、通知、屏幕录制与完全磁盘访问") {
+        WorkspaceSettingsCard(title:"系统权限") {
             WorkspaceSettingsRow(title:"麦克风", subtitle:microphoneStatus, showsDivider:false) {
                 if model.microphoneAuthorization == .notDetermined {
                     Button("授权") { Task { _ = await model.requestMicrophoneAccess() } }.buttonStyle(.workspacePrimary)
@@ -2690,8 +2691,8 @@ struct WorkspaceView: View {
         }
     }
     private var settingsReadingCard: some View {
-        WorkspaceSettingsCard(title:"阅读与生成", subtitle:"笔记页与最近笔记的显示偏好") {
-            WorkspaceSettingsRow(title:"显示 AI 批注", subtitle:"笔记里的启发层；关掉只留你的正文", showsDivider:false) {
+        WorkspaceSettingsCard(title:"阅读与生成") {
+            WorkspaceSettingsRow(title:"显示 AI 批注", showsDivider:false) {
                 Toggle("显示 AI 批注", isOn: $showNoteAnnotations)
                     .toggleStyle(.switch).labelsHidden()
                     .accessibilityIdentifier("settings.showAnnotations")
@@ -2699,7 +2700,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsAppearanceCard: some View {
-        WorkspaceSettingsCard(title:"外观", subtitle:"主题与文字大小") {
+        WorkspaceSettingsCard(title:"外观") {
             HStack(spacing:12) {
                 ForEach(WorkspaceTheme.allCases) { option in
                     WorkspaceThemeOption(theme:option,selected:theme == option) { theme=option }
@@ -2715,7 +2716,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsExportBackupCard: some View {
-        WorkspaceSettingsCard(title:"导出与备份", subtitle:"整库导出、自动备份与保留份数") {
+        WorkspaceSettingsCard(title:"导出与备份") {
             WorkspaceSettingsRow(title:"导出结构化资料", subtitle:"不含录音与视频原件", showsDivider:false) {
                 Button("导出") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondaryCompact).disabled(model.exporting).accessibilityLabel("导出结构化资料")
             }
@@ -2747,7 +2748,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsLibraryCard: some View {
-        WorkspaceSettingsCard(title:"资料库", subtitle:"检查、打开、从备份或迁移包恢复") {
+        WorkspaceSettingsCard(title:"资料库") {
             WorkspaceSettingsRow(title:"检查资料库", showsDivider:false) {
                 Button(model.checkingLibraryHealth ? "正在检查…" : "检查") { model.checkLibraryHealth() }
                     .buttonStyle(.workspaceSecondaryCompact).disabled(model.checkingLibraryHealth || model.libraryRoot == nil)
@@ -2771,7 +2772,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsStorageCard: some View {
-        WorkspaceSettingsCard(title:"存储", subtitle:"这台 Mac 上的占用") {
+        WorkspaceSettingsCard(title:"存储") {
             WorkspaceSettingsValueRow(label:"资料库（含 WAL）", value:storageReadoutText(storageReadout { $0.databaseBytes }), showsDivider:false)
             WorkspaceSettingsValueRow(label:"原件", value:storageReadoutText(storageReadout { $0.assetsBytes }))
             WorkspaceSettingsValueRow(label:"备份", detail:model.storageUsage.flatMap { $0.backupBytes == nil ? nil : "\($0.backupCount) 份" }, value:storageReadoutText(storageReadout { $0.backupBytes }))
@@ -2798,14 +2799,14 @@ struct WorkspaceView: View {
         }
     }
     private var settingsReviewCard: some View {
-        WorkspaceSettingsCard(title:"回顾与查找", subtitle:"围绕已有材料的三种读法") {
+        WorkspaceSettingsCard(title:"回顾与查找") {
             WorkspaceSettingsNavRow(title:"静默回顾", subtitle:"看到相关原文", showsDivider:false) { go(.tool("静默回顾")) }
             WorkspaceSettingsNavRow(title:"查找历史文字", subtitle:"按关键词查找") { go(.tool("查找历史文字")) }
             WorkspaceSettingsNavRow(title:"英文表达反馈", subtitle:"英文原话反馈") { go(.tool("英文表达反馈")) }
         }
     }
     private var settingsKeyboardCard: some View {
-        WorkspaceSettingsCard(title:"键盘快捷键", subtitle:"列表聚焦时的按键") {
+        WorkspaceSettingsCard(title:"键盘快捷键") {
             VStack(alignment:.leading, spacing:6) {
                 Text("列表聚焦时：↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进")
                 Text("任务详情：x 或空格 完成 · s 改期 · f 记结果")
@@ -2824,7 +2825,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsMaintenanceCard: some View {
-        WorkspaceSettingsCard(title:"其他工作与维护", subtitle:"低频工具与运行状态") {
+        WorkspaceSettingsCard(title:"其他工作与维护") {
             DisclosureGroup {
                 VStack(alignment:.leading, spacing: WorkspaceMetrics.rowGap) {
                     Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }.buttonStyle(.workspaceQuietCompact)

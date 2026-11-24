@@ -103,22 +103,19 @@ struct TaskInitiationView: View {
     }
 
     private var composer: some View {
-        WorkspaceSection(title: "问一个问题，或说清楚要开始什么", icon: "square.and.pencil") {
+        WorkspaceSection(title: "新的问题或任务", icon: "square.and.pencil") {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.initiationText).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 120)
                         .workspaceEditorSurface().accessibilityLabel("要启动的原话")
                         .accessibilityIdentifier("initiation.input")
                     if model.initiationText.isEmpty {
-                        Text("例如：什么是 Git Hook？或者：老师让我做一份 PPT，我不会，也不知道怎么开始。").vosFont(WorkspaceText.body)
+                        Text("你想了解什么，或从哪里开始？").vosFont(WorkspaceText.body)
                             .foregroundStyle(palette.tertiaryText).padding(.horizontal, 15).padding(.vertical, 16).allowsHitTesting(false)
                     }
                 }
                 HStack(spacing: 12) {
-                    if materialSources.isEmpty {
-                        Text("还没有可带入的个人原话；先录制或保存一段你说出的材料。")
-                            .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    } else {
+                    if !materialSources.isEmpty {
                         Menu {
                             ForEach(materialSources.prefix(20)) { source in
                                 Button(source.displayTitle) {
@@ -131,21 +128,21 @@ struct TaskInitiationView: View {
                         }.menuStyle(.button).buttonStyle(.workspaceSecondary).fixedSize()
                     }
                     Spacer()
-                    Text("\(model.initiationText.unicodeScalars.count) / 4000 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true)
-                        .foregroundStyle(overLimit ? palette.danger : palette.tertiaryText)
+                    if !model.initiationText.isEmpty {
+                        Text("\(model.initiationText.unicodeScalars.count) / 4000 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true)
+                            .foregroundStyle(overLimit ? palette.danger : palette.tertiaryText)
+                    }
                 }
                 Picker("生成方式", selection: $mode) {
                     Text("直接给草稿").tag(TaskInitiationMode.direct)
                     Text("先问一个关键问题").tag(TaskInitiationMode.interactive)
                 }.pickerStyle(.segmented)
-                Toggle("允许发送给云端模型", isOn: $allowCloud)
-                Text("只发送这段原话给模型；不读取其他材料，也不创建任务或提醒。")
-                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                Toggle("允许将这段文字发送给云端模型", isOn: $allowCloud)
                 if !model.modelConfigured {
                     Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
                 HStack(spacing: 12) {
-                    Button(model.initiationBusy ? "正在处理…" : "看看该怎么处理") { generate() }
+                    Button(model.initiationBusy ? "正在处理…" : "开始") { generate() }
                     .buttonStyle(generateStyle)
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.generate")
@@ -210,7 +207,6 @@ struct TaskInitiationView: View {
     private func clarify(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(record.proposal.clarifyQuestion).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
-            Text("回答会更准确；也可以跳过，按假设给出草稿。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             TextEditor(text: $answer).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 100)
                 .workspaceEditorSurface().accessibilityLabel("澄清回答")
             HStack(spacing: 12) {
@@ -502,7 +498,7 @@ struct TaskInitiationView: View {
     }
 
     private var history: some View {
-        WorkspaceListSection(title: "启动记录", subtitle: "生成过的材料都在这里。", count: visibleRecords.count) {
+        WorkspaceListSection(title: "启动记录", count: visibleRecords.count) {
             Toggle("查看归档", isOn: $showArchived)
                 .toggleStyle(.switch)
                 .padding(.vertical, 8)
