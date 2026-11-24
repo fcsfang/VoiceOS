@@ -1315,3 +1315,7 @@
 - Python：地址密钥不得跨主机配对；损坏文件容错；修复轮禁止新片段、重复去重、首轮修正必须保留；render-only 去掉无身份回退；只读渲染错误带缓存路径。缓存身份口径写入设计文档。
 - 验证：python 19/19、py_compile 0；build_exit=0；swift test 592/592、test_exit=0；dist 重建。
 - 未做：starting 闸门等待同一启动任务（复审 4.7）；settings 进程级快照（3.5）。
+## 波 222：启动对账退役过期摘要条目（2026-11-24）
+- 现象：已处理成功的录音因文件时间戳未变，扫描在 baseline 判定处跳过，221 的 receipts 清理永不触发，旧摘要的 needsAttention 条目长期滞留。
+- 启动时对非处理中条目按当前内容重算摘要（后台线程），摘要已在 receipts 且与条目 id 不同即退役并清 failures。
+- 验证：build_exit=0；swift test 592/592、test_exit=0；dist 重建；重启后实时 pending 应从 2 降到 1。

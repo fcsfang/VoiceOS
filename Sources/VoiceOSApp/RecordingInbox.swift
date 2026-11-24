@@ -112,6 +112,7 @@ final class RecordingInbox: ObservableObject {
                 }
             }
         }
+        Task { [weak self] in await self?.reconcileProcessedItems() }
         publishItems()
         save()
         status = folders.isEmpty ? "尚未连接自动入口" : (pendingItems.isEmpty ? "等待新录音 · 有新文件时自动检查" : "已恢复 \(pendingItems.count) 份未完成素材 · 同时接收新录音")
@@ -297,6 +298,28 @@ final class RecordingInbox: ObservableObject {
         item.nextAttempt = now(); item.explanation = "已请求重试；复用已保存的音轨和转写进度"
         items[id] = item
         save(); Task { await scan() }
+    }
+    /// 启动对账：条目上保存的摘要可能早于文件最终内容（文件时间戳没变时扫描会直接跳过），
+    /// 但 receipts 说明当前内容已经处理过；这类条目应退役，而不是永远停在列表里。
+    private func reconcileProcessedItems() async {
+        guard !receipts.isEmpty else { return }
+        var changed = false
+        for id in Array(items.keys) {
+            guard let item = items[id], item.state != .processing, item.fileStamp != nil,
+                  FileManager.default.fileExists(atPath: item.path) else { continue }
+            let url = URL(fileURLWithPath: item.path)
+            let digest = await Task.detached(priority: .utility) { () -> String? in
+                do {
+                    let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+                    var hash = SHA256()
+                    while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
+                    return hash.finalize().map { String(format: "%02x", $0) }.joined()
+                } catch { return nil }
+            }.value
+            guard let digest, digest != id, receipts.contains(digest) else { continue }
+            items[id] = nil; failures.remove(id); changed = true
+        }
+        if changed { save() }
     }
     private func publishItems() {
         pendingItems = items.values.sorted { $0.updatedAt > $1.updatedAt }
