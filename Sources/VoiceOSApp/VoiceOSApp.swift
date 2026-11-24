@@ -1262,9 +1262,12 @@ final class ControlCenter: ObservableObject {
         return dictationActive ? dictationSource : nil
     }
     private var worker: Task<Void, Never>?
+    private var starting = false
     private var resumedSavedRecordingExpressions = false
     func start() async {
-        guard store == nil else { return }
+        guard store == nil, !starting else { return }
+        starting = true
+        defer { starting = false }
         StartupTrace.mark("start.begin")
         startupIssue = ""
         do {
@@ -1286,14 +1289,17 @@ final class ControlCenter: ObservableObject {
             initialized = true; status = "准备就绪 · 媒体只在本机处理"
             StartupTrace.mark("start.initialized")
             restoreSpeechSelection()
-            if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
-                configureTextModel(URL(fileURLWithPath: path), resume: false)
-            } else if restoreInternalTextModelConfiguration() {
-                // 应用内部配置优先：模型、地址、强度都在设置页维护。
+            if TextModelConfiguration.load() != nil {
+                // 应用内部配置是权威：存在但读不到密钥时明确报告，绝不回退去覆盖它。
+                if !restoreInternalTextModelConfiguration() {
+                    modelConfigured = false
+                    modelSummary = "模型配置需要重新保存"
+                    status = "文本模型配置存在，但钥匙串中的密钥或服务地址不可用；请在设置中重新保存"
+                }
             } else if UserDefaults.standard.bool(forKey: "voiceos.textModelConfigurationCleared.v1") {
                 // The user cleared the configuration in settings; do not fall
                 // back to the bundle's development .env on the next launch.
-            } else if let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
+            } else if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] ?? UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
                 configureTextModel(URL(fileURLWithPath: path), resume: false)
             }
             await refresh(.full)
@@ -4355,6 +4361,13 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         observeDictationIcon()
         // The scene model may be created after the delegate finishes launching.
         Task { @MainActor in self.observeDictationIcon() }
+        // 资料库与自动入口不依赖主窗口出现：菜单栏口述与收件箱发现要在窗口关闭时也能工作。
+        Task { @MainActor in
+            for _ in 0..<100 {
+                if let model = ControlCenter.primary { await model.start(); return }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
         clipboardMonitor.start()
         NSApp.servicesProvider = self
         // SwiftUI accepts only the import command on this scene, so Command-Shift-R is handled here.

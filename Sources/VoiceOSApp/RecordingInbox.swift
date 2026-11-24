@@ -431,6 +431,7 @@ final class RecordingInbox: ObservableObject {
                         if let index = folders.firstIndex(where: { $0.id == folder.id }) {
                             folders[index].baseline[path] = stamp; save()
                         }
+                        status = "已跳过重复内容：\(URL(fileURLWithPath: path).lastPathComponent)（同一份录音在另一个入口处理过）"
                         continue
                     }
                     if failures.contains(digest) {
@@ -447,7 +448,24 @@ final class RecordingInbox: ObservableObject {
                 }
             } catch {
                 guard folders.contains(where: { $0.id == folder.id && $0.enabled && $0.path == folder.path }) else { continue }
-                let message = folder.voiceMemos ? "语音备忘录目录受 macOS 隐私权限保护，尚未接通。请在系统设置中允许 VoiceOS 读取后重试。" : "无法读取文件夹：" + error.localizedDescription
+                // 目录读取失败时启用轮询：目录被系统重建或权限恢复后，无需用户重启应用。
+                installPollingFallback()
+                let ns = error as NSError
+                let missing = ns.domain == NSCocoaErrorDomain && (ns.code == NSFileReadNoSuchFileError || ns.code == NSFileNoSuchFileError)
+                let denied = (ns.domain == NSCocoaErrorDomain && ns.code == NSFileReadNoPermissionError)
+                    || (ns.domain == NSPOSIXErrorDomain && ns.code == EACCES)
+                let message: String
+                if folder.voiceMemos {
+                    if missing {
+                        message = "找不到语音备忘录目录；它可能被系统重建或移动。请移除入口后重新连接。"
+                    } else if denied {
+                        message = "语音备忘录目录受 macOS 隐私权限保护，尚未接通。请在系统设置中允许 VoiceOS 读取后重试。"
+                    } else {
+                        message = "无法读取语音备忘录目录：" + error.localizedDescription
+                    }
+                } else {
+                    message = "无法读取文件夹：" + error.localizedDescription
+                }
                 if folderErrors[folder.id] != message { folderErrors[folder.id] = message }
             }
         }

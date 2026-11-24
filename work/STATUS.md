@@ -1296,3 +1296,8 @@
 - 笔记批量：核对一篇笔记的全部成员（本人 + 配对节目轨）。
 - Python：settings() 按字段合并环境与文件并接受别名；缓存身份（ask input_digest、质量核对目录、意图候选 digest、全文校正回执目录）加入端点/模型/强度；格式修复轮本地校验，首轮已通过的校正必须原样保留。
 - 验证：python unittest 15/15（新增修复轮合并 3、settings 合并 4、校正流程 2）；build_exit=0（两次）；swift test 591/591、test_exit=0。
+## 波 218：启动权威与入口启动时序（2026-11-24）
+- 启动链改为内部配置权威：内部配置存在时不再被 `VOICEOS_MODEL_CONFIG_FILE` 或打包 `.env` 覆盖；钥匙串读不到时明确提示重新保存，不回退。环境变量与历史路径只在无内部配置且未清除时做一次性迁移。
+- `start()` 增加并发闸门；`applicationDidFinishLaunching` 等待 `ControlCenter.primary` 后启动资料库，主窗口从未出现或立即关闭时菜单栏口述与自动入口也能工作。
+- 收件箱目录错误分类：目录不存在提示重新连接，权限错误才引导隐私授权；任何读取失败启用轮询，恢复后自动续上；跳过重复内容时写入状态行。
+- 验证：build_exit=0；swift test 591/591、test_exit=0；dist 重建。
