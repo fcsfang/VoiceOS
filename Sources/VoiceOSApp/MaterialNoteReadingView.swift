@@ -37,6 +37,7 @@ struct MaterialNoteReadingView: View {
     var openTask: (String) -> Void = { _ in }
     var openDiscussion: (String) -> Void = { _ in }
     var openHistoryNote: ((String) -> Void)? = nil
+    var scrollToHistoryParagraph: ((String) -> Void)? = nil
     var relatedActions: [ActionRecord] = []
     var relatedDiscussions: [ConversationRecord] = []
     @Binding var hasNote: Bool
@@ -115,6 +116,9 @@ struct MaterialNoteReadingView: View {
         .inspector(isPresented: $historyPresented) {
             historyInspector
                 .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
+        }
+        .onChange(of: historyPresented) { _, presented in
+            if !presented { historySelection = nil }
         }
         .task(id: requestKey) { await requestNote() }
         .sheet(item: $editing) { base in
@@ -238,10 +242,9 @@ struct MaterialNoteReadingView: View {
     /// 成品视图：段落只有正文与「整理时补充的关联」标记。逐段原话与回听
     /// 属于原材料侧的信息，只在「查看材料与原文」里出现，不挂在成品上。
     private func paragraphView(_ paragraph: MaterialNote.Paragraph, anchor: String) -> some View {
-        let hasHistory = validHistory?.annotations.contains { $0.paragraphID == anchor } == true
+        let number = orderedHistory.firstIndex { $0.paragraphID == anchor }.map { $0 + 1 }
         let selected = historyPresented && historySelection == anchor
-        return
-        VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 Text(attributedParagraph(paragraph))
                     .vosFont(WorkspaceText.body)
@@ -256,26 +259,19 @@ struct MaterialNoteReadingView: View {
                                 .padding(-5)
                         }
                     }
-                if validHistory?.annotations.isEmpty == false {
+                if historyPresented && !orderedHistory.isEmpty {
                     Group {
-                        if hasHistory {
+                        if let number {
                             Button {
                                 historySelection = anchor
-                                historyPresented = true
                             } label: {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(palette.accent)
-                                    .frame(width: 32, height: 30)
-                                    .background(palette.selection, in: RoundedRectangle(cornerRadius: 6))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .strokeBorder(selected ? palette.accent : palette.border)
-                                    }
+                                historyIndex(number, selected: selected)
+                                    .frame(minWidth: 28, minHeight: 28)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .workspaceHoverHighlight()
-                            .accessibilityLabel("阅读这段的历史批注")
+                            .accessibilityLabel("历史批注 \(number)")
                             .accessibilityAddTraits(selected ? .isSelected : [])
                             .accessibilityIdentifier("note.history.marker")
                             .help("历史批注")
@@ -283,7 +279,7 @@ struct MaterialNoteReadingView: View {
                             Color.clear.frame(height: 0).accessibilityHidden(true)
                         }
                     }
-                    .frame(width: 32)
+                    .frame(width: 28)
                 }
             }
             if paragraph.inferred == true {
@@ -598,6 +594,14 @@ struct MaterialNoteReadingView: View {
                 .foregroundStyle(palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
+            if !orderedHistory.isEmpty {
+                Button("历史批注", systemImage: "sidebar.right") {
+                    historyPresented.toggle()
+                }
+                .buttonStyle(.workspaceQuietCompact)
+                .accessibilityIdentifier("note.history.toggle")
+                .accessibilityValue(historyPresented ? "已展开" : "已收起")
+            }
             // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
             Menu {
                 if historyPilot != nil {
@@ -835,52 +839,106 @@ struct MaterialNoteReadingView: View {
     }
 
     private var historyInspector: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                WorkspaceSectionHeading(title: "历史批注") {
-                    Button("关闭", systemImage: "xmark") { historyPresented = false }
-                        .labelStyle(.iconOnly).buttonStyle(.workspaceQuietCompact)
-                }
-                if let result = validHistory,
-                   let annotation = result.annotations.first(where: { $0.id == historySelection }) {
-                    Text(annotation.text)
-                        .vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
-                        .accessibilityIdentifier("note.history.annotation")
-                    Divider().padding(.top, 4)
-                    Text("相关笔记").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                        .accessibilityAddTraits(.isHeader)
-                    ForEach(Array(Set(annotation.sourceIDs)).sorted(), id: \.self) { id in
-                        if let title = result.sourceTitles[id] {
-                            Button {
-                                historyPresented = false
-                                openHistoryNote?(id)
-                            } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Image(systemName: "doc.text")
-                                    Text(title).fixedSize(horizontal: false, vertical: true)
-                                        .multilineTextAlignment(.leading)
-                                    Spacer(minLength: 0)
-                                    Image(systemName: "arrow.up.right")
-                                        .accessibilityHidden(true)
-                                }
-                                .vosFont(WorkspaceText.meta)
-                                .foregroundStyle(palette.accent)
-                                .padding(8)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .workspaceHoverHighlight()
-                            .accessibilityIdentifier("note.history.source")
+        VStack(alignment: .leading, spacing: 0) {
+            WorkspaceSectionHeading(title: "历史批注") {
+                Button("关闭", systemImage: "xmark") { historyPresented = false }
+                    .labelStyle(.iconOnly).buttonStyle(.workspaceQuietCompact)
+            }
+            .padding(16)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(orderedHistory.enumerated()), id: \.element.id) { index, annotation in
+                            historyCard(annotation, number: index + 1)
+                                .id(annotation.id)
                         }
                     }
-                } else {
-                    noteText("这段批注已失效，可重新回看相关历史。")
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onChange(of: historySelection) { _, anchor in
+                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(palette.canvas)
+    }
+
+    private var orderedHistory: [NoteHistoryAnnotation] {
+        guard let annotations = validHistory?.annotations, !annotations.isEmpty, let display else { return [] }
+        let byParagraph = Dictionary(annotations.map { ($0.paragraphID, $0) }, uniquingKeysWith: { first, _ in first })
+        return NoteBoardAdapting.blocks(for: display.note.note).flatMap { block in
+            (block.paragraphs ?? []).indices.compactMap { byParagraph[blockParagraphAnchor(block, $0)] }
+        }
+    }
+
+    private func historyIndex(_ number: Int, selected: Bool) -> some View {
+        Text(number.formatted())
+            .font(.system(.caption, design: .monospaced).weight(.semibold))
+            .foregroundStyle(selected ? palette.surface : palette.accent)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(selected ? palette.accent : palette.selection, in: Capsule())
+    }
+
+    private func historyCard(_ annotation: NoteHistoryAnnotation, number: Int) -> some View {
+        let selected = historySelection == annotation.id
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                historySelection = annotation.id
+                scrollToHistoryParagraph?(annotation.paragraphID)
+            } label: {
+                HStack(spacing: 8) {
+                    historyIndex(number, selected: selected)
+                    Text("查看对应段落").vosFont(WorkspaceText.meta)
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.left").accessibilityHidden(true)
+                }
+                .foregroundStyle(palette.accent)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .workspaceHoverHighlight()
+            .accessibilityLabel("查看历史批注 \(number) 对应段落")
+            .accessibilityIdentifier("note.history.jump")
+            Text(annotation.text)
+                .vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
+                .accessibilityIdentifier("note.history.annotation")
+            Divider().padding(.top, 4)
+            Text("相关笔记").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(Array(Set(annotation.sourceIDs)).sorted(), id: \.self) { id in
+                if let title = validHistory?.sourceTitles[id] {
+                    Button {
+                        historyPresented = false
+                        openHistoryNote?(id)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "doc.text")
+                            Text(title).fixedSize(horizontal: false, vertical: true)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.right")
+                                .accessibilityHidden(true)
+                        }
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.accent)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .workspaceHoverHighlight()
+                    .accessibilityIdentifier("note.history.source")
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? palette.accent : palette.border)
+        }
     }
 
     private func loadHistory() async {
@@ -983,10 +1041,8 @@ struct MaterialNoteReadingView: View {
             try result.save(root: root, sourceID: source.id)
             historyResult = result
             historyNotice = annotations.isEmpty ? "没有找到值得补充的前情。" : nil
-            if annotations.first(where: { $0.id == historySelection }) == nil {
-                historySelection = nil
-                historyPresented = false
-            }
+            if !annotations.contains(where: { $0.id == historySelection }) { historySelection = nil }
+            if annotations.isEmpty { historyPresented = false }
         } catch is CancellationError {
             return
         } catch {

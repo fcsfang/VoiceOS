@@ -796,7 +796,12 @@ struct WorkspaceView: View {
                             Spacer()
                             Button("查看材料与原文",systemImage:"books.vertical") { go(.source(id)) }.buttonStyle(.workspaceQuietCompact)
                         }
-                        MaterialNoteReadingView(model:model,source:source,openSource:{ go(.source($0)) },openTask:{ go(.task($0)) },openDiscussion:{ conv in Task { await openSavedDiscussion(conv) } },openHistoryNote:{ go(.note($0)) },hasNote:$notePageHasNote,restoreScroll:sourceScrollBinding("note-reading:" + id))
+                        MaterialNoteReadingView(model: model, source: source,
+                            openSource: { go(.source($0)) }, openTask: { go(.task($0)) },
+                            openDiscussion: { conv in Task { await openSavedDiscussion(conv) } },
+                            openHistoryNote: { go(.note($0)) },
+                            scrollToHistoryParagraph: { proxy.scrollTo($0, anchor: .center) },
+                            hasNote: $notePageHasNote, restoreScroll: sourceScrollBinding("note-reading:" + id))
                     }
                 }
             }
