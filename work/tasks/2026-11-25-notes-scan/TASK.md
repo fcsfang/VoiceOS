@@ -1,5 +1,5 @@
 ---
-status: in_review
+status: done
 started: 2026-11-25
 updated: 2026-11-26
 branch: codex/edit-generated-content
