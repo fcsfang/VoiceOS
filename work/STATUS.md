@@ -1338,3 +1338,9 @@
 - 现象：已处理成功的录音因文件时间戳未变，扫描在 baseline 判定处跳过，221 的 receipts 清理永不触发，旧摘要的 needsAttention 条目长期滞留。
 - 启动时对非处理中条目按当前内容重算摘要（后台线程），摘要已在 receipts 且与条目 id 不同即退役并清 failures。
 - 验证：build_exit=0；swift test 592/592、test_exit=0；dist 重建；重启后实时 pending 应从 2 降到 1。
+
+## 2026-11-25 UI 审美 C 档（合并 53a081b）
+
+- 审查→实现→截图验证见 work/tasks/2026-11-25-ui-polish/TASK.md。
+- 集成：main 快进到 origin/main（PR #250）后 --no-ff 合入 ui-polish-20261125，连带 Codex 分支 e176d9b..42c8023 的 10 个提交。
+- 集成构建 build_exit=0；全量 test_exit=0（592 tests）；dist_build_exit=0。
