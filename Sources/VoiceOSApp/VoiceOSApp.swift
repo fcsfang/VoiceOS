@@ -164,7 +164,14 @@ final class ControlCenter: ObservableObject {
     /// Advances when a note revision is saved, so the home timeline picks up a
     /// title or preview that changed while it stayed open.
     @Published private(set) var materialNotesRevision = 0
-    func materialNoteDidSave() { materialNotesRevision &+= 1 }
+    func materialNoteDidSave() {
+        materialNotesRevision &+= 1
+        scheduleNoteHistorySync()
+    }
+    @Published var noteHistorySyncIssue: String?
+    @Published var noteHistorySyncing = false
+    var noteHistorySyncWorker: Task<Void, Never>?
+    var noteHistorySyncPending = false
     @Published var recordingTitleStatus = ""
     @Published var generatingRecordingTitles = false
     private var recordingTitleModel: ResponsesRecordingTitlePort?
@@ -1355,6 +1362,7 @@ final class ControlCenter: ObservableObject {
         }
         refreshWorker = work
         let didWork = await work.value
+        if didWork || scope == .full { scheduleNoteHistorySync() }
         guard didWork else { StartupTrace.mark("refresh.idleSkip"); return }
         StartupTrace.mark("refresh.reloaded")
         if monitorPageVisible { await reloadMonitorState() }
