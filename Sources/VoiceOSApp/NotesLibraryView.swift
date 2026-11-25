@@ -1,7 +1,7 @@
 import SwiftUI
 import VoiceOSCore
 
-/// 笔记页：每个表达的最新一篇笔记，按整理时间倒序列出。材料页回答「我有
+/// 笔记页：每个表达的最新一篇笔记，按原始素材时间倒序列出。材料页回答「我有
 /// 什么材料」，主题页回答「我在关心什么」，笔记页回答「我整理出了什么」。
 /// 点开任一篇都落到与首页、材料页相同的正文与阅读位置。
 struct NotesLibraryView: View {
@@ -172,7 +172,9 @@ struct NotesLibraryView: View {
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
             guard let store = model.store else { return }
             let trashed = Set(model.records.lazy.filter(\.isTrashed).map(\.id))
-            let rows = try? await store.noteLibraryRows(excluding: trashed)
+            let rows = try? await store.noteLibraryRows(
+                sources: model.sourcePageIndex.recordsByID, excluding: trashed
+            )
             if !Task.isCancelled, let rows { notes = rows; notesLoaded = true }
         }
     }
@@ -283,19 +285,30 @@ private struct NoteLibraryRow: Identifiable, Sendable {
     let expressionKey: String
     let title: String
     let preview: String?
-    let day: Date?
+    let sourceDate: Date?
+    var day: Date? { sourceDate.map { Calendar.current.startOfDay(for: $0) } }
     let searchableText: String
 }
 
 private extension VoiceOSStore {
-    func noteLibraryRows(excluding trashed: Set<String>) throws -> [NoteLibraryRow] {
+    func noteLibraryRows(sources: [String: SourceRecord], excluding trashed: Set<String>) throws -> [NoteLibraryRow] {
         try recentMaterialNotes(limit: nil).compactMap { stored in
-            guard !stored.expressionKey.split(separator: "|").contains(where: { trashed.contains(String($0)) }) else { return nil }
+            let ids = stored.expressionKey.split(separator: "|").map(String.init)
+            guard !ids.contains(where: trashed.contains) else { return nil }
+            let members = ids.compactMap { sources[$0] }
+            let personal = members.filter { $0.origin == "user" }
+            // Multi-part notes belong to the start of the user's material, even
+            // when the expression also references an older external source.
+            let sourceDate = (personal.isEmpty ? members : personal).compactMap {
+                $0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt)
+            }.min()
             return NoteLibraryRow(id: stored.id, expressionKey: stored.expressionKey,
                            title: MaterialNoteHomeText.title(stored.note) ?? "未命名笔记",
                            preview: MaterialNoteHomeText.preview(stored.note),
-                           day: ConversationReflectionFocus.date(stored.createdAt).map { Calendar.current.startOfDay(for: $0) },
+                           sourceDate: sourceDate,
                            searchableText: stored.note.searchableText)
+        }.sorted {
+            ($0.sourceDate ?? .distantPast) > ($1.sourceDate ?? .distantPast)
         }
     }
 }
