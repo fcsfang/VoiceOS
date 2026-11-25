@@ -182,17 +182,22 @@ struct NotesLibraryView: View {
     private func noteRow(_ stored: NoteLibraryRow) -> some View {
         let summary = stored.preview.flatMap { $0 == stored.title ? nil : $0 }
         return Button { open(stored) } label: {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(highlight(stored.title)).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                 if let excerpt = searchExcerpt(for: stored) {
                     Text(highlight(excerpt)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText).lineLimit(2)
+                } else if let summary {
+                    Text(summary).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.tertiaryText)
+                        .lineLimit(1)
+                        .frame(maxWidth: 420 * vosLayoutScale(textScale), alignment: .leading)
                 }
             }
             .multilineTextAlignment(.leading)
-            .padding(.horizontal, 18).padding(.vertical, 13)
+            .padding(.horizontal, 18).padding(.vertical, 15)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle()).workspaceHoverHighlight()
         }
