@@ -102,13 +102,11 @@ struct WorkspaceListGroupHeader: View {
     let title: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold)
-                .foregroundStyle(palette.secondaryText)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.vertical, 8)
-            WorkspaceListDivider()
-        }
+        Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold, monospacedDigit: true)
+            .foregroundStyle(palette.secondaryText)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.top, 18).padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -66,9 +66,9 @@ struct WorkspacePalette {
         }
     }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
-    var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
+    var secondaryText: Color { text.opacity(increasesContrast ? 0.90 : 0.80) }
     /// Counts, footers and third-level facts. One step quieter than `secondaryText`.
-    var tertiaryText: Color { text.opacity(increasesContrast ? 0.80 : 0.70) }
+    var tertiaryText: Color { text.opacity(increasesContrast ? 0.80 : 0.68) }
     var accent: Color {
         switch theme {
         case .graphite: adaptive(0x3A4A5C, 0xAEC3D6)
@@ -93,7 +93,7 @@ struct WorkspacePalette {
             increasesContrast ? adaptive(0xA5B2A2, 0x6C7F72) : adaptive(0xE1E6D8, 0x4A5A4E)
         }
     }
-    var hover: Color { selection.opacity(0.55) }
+    var hover: Color { text.opacity(increasesContrast ? 0.16 : 0.075) }
     var pressed: Color { selection.opacity(0.9) }
     var disabledText: Color { text.opacity(increasesContrast ? 0.6 : 0.35) }
     var focusRing: Color { accent }
@@ -162,7 +162,6 @@ struct WorkspaceThemeOption: View {
                     Spacer()
                     if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent) }
                 }
-                Text(theme.subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.canvas, in: RoundedRectangle(cornerRadius: 9))
                 .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(selected ? palette.accent : palette.border, lineWidth: selected ? 1.5 : 1) }

@@ -518,8 +518,8 @@ struct MaterialNoteReadingView: View {
     private func markToneColor(_ tone: String?) -> Color {
         switch (tone ?? "").lowercased() {
         case "accent": return palette.accent.opacity(0.16)
-        case "muted": return palette.secondaryText.opacity(0.10)
-        default: return palette.warning.opacity(0.20)
+        case "muted": return palette.secondaryText.opacity(0.07)
+        default: return palette.warning.opacity(0.16)
         }
     }
 

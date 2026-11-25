@@ -205,7 +205,7 @@ extension ControlCenter {
 
     /// 参与一篇笔记的成员：本人各段在前，配对的外部来源（访谈对方/节目轨）
 /// 按 sourceID 排序随后；与表达级讨论、知识核查的展开口径一致。
-    private func materialNoteMemberIDs(sourceID: String) -> [String] {
+    func materialNoteMemberIDs(sourceID: String) -> [String] {
         guard let expression = sourcePageIndex.expression(for: sourceID) else { return [sourceID] }
         let external = (expression.externalVersions ?? [:]).keys.sorted()
         return expression.sourceIDs + external.filter { !expression.sourceIDs.contains($0) }

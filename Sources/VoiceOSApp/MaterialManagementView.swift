@@ -72,7 +72,10 @@ struct MaterialManagementControls: View {
                     Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash=true }
                 } label: {
                     Image(systemName:"ellipsis.circle")
+                        .padding(4)
+                        .contentShape(Rectangle())
                 }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .workspaceHoverHighlight()
                     .accessibilityLabel("更多材料操作").help("更多材料操作")
             }
             busyIndicator

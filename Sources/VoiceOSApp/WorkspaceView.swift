@@ -241,7 +241,7 @@ struct WorkspaceRow: View {
     private var titleAndTrailing: some View {
         HStack(alignment:.top,spacing:14) {
             VStack(alignment:.leading,spacing:3) {
-                Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(titleLineLimit ?? (textScale >= 1.3 ? 3 : 2)).fixedSize(horizontal:false,vertical:true).help(title)
+                Text(title).vosFont(WorkspaceText.rowTitle.size, weight: .medium).lineSpacing(3).lineLimit(titleLineLimit ?? (textScale >= 1.3 ? 3 : 2)).fixedSize(horizontal:false,vertical:true).help(title)
                 if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(subtitleTone ?? palette.secondaryText).lineSpacing(3).lineLimit(textScale >= 1.3 ? 3 : 2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
             }
             Spacer(minLength:8)
@@ -288,14 +288,22 @@ private struct WorkspaceAttentionDot: View {
                          inboxAttentionCount > 0 ? "录音 \(inboxAttentionCount)" : nil,
                          !inbox.folderErrors.isEmpty ? "入口读取失败" : nil].compactMap { $0 }
             let title = "需要查看" + (parts.isEmpty ? "" : " · " + parts.joined(separator:" · "))
+            let total = count + inboxAttentionCount
+            // A label plus a count capsule fits the 160pt sidebar on one line;
+            // the full breakdown lives in the tooltip and accessibility label.
             Button(action:open) {
-                HStack(alignment:.firstTextBaseline,spacing:6) {
-                    Circle().fill(palette.accent)
-                        .frame(width:6,height:6).offset(y:-1).accessibilityHidden(true)
-                    Text(title).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                        .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain).help("打开处理情况").accessibilityLabel(title + "，打开处理情况")
+                HStack(spacing:8) {
+                    Circle().fill(palette.warning)
+                        .frame(width:6,height:6).accessibilityHidden(true)
+                    Text("需要查看").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+                    Spacer(minLength:4)
+                    // The dot carries the warning hue; the count stays neutral so
+                    // 11pt digits keep AA contrast (warning-on-tint is ~4.1:1).
+                    if total > 0 { WorkspaceBadge(text:"\(total)") }
+                    else if !inbox.folderErrors.isEmpty { WorkspaceBadge(text:"!") }
+                }.padding(.horizontal,8).padding(.vertical,6)
+                    .contentShape(Rectangle()).workspaceHoverHighlight()
+            }.buttonStyle(.plain).help(title).accessibilityLabel(title + "，打开处理情况")
         }
     }
 }
@@ -373,7 +381,7 @@ struct WorkspaceView: View {
     @State private var pendingURL: URL?
     @State private var showingOutcome = false
     @State private var materialFilter = "日常材料"
-    @State private var actionFilter = "全部"
+    @State private var actionFilter = "我的待办"
     @State private var savedViews: [SavedWorkspaceView] = []
     @State private var showingSaveView = false
     @State private var savingView = false
@@ -520,7 +528,7 @@ struct WorkspaceView: View {
                         .frame(minWidth:290,idealWidth:320,maxWidth:380)
                 }
             }
-            .navigationTitle(showsBreadcrumb ? breadcrumb : section)
+            .navigationTitle(page == .notes ? model.libraryTitle : (showsBreadcrumb ? breadcrumb : section))
             .toolbar { workspaceToolbar }
         }
         .navigationSplitViewStyle(.balanced)
@@ -811,7 +819,7 @@ struct WorkspaceView: View {
          (.themes, "主题", "circle.hexagongrid", "themes", 0),
          (.materials, "材料", "books.vertical", "materials", 0),
          (.monitor, "消息监测", "bell.badge", "monitor", model.monitorOpenItemCount),
-         (.actions, "行动", "checkmark.circle", "actions", model.unreadDeliveryCount),
+         (.actions, "行动", "checkmark.circle", "actions", 0),
          (.initiate, "启动", "arrow.up.forward", "initiate", 0)]
     }
 
@@ -826,16 +834,35 @@ struct WorkspaceView: View {
         VStack(alignment:.leading, spacing:8) {
             List(selection: sidebarSelection) {
                 ForEach(sidebarItems, id: \.id) { item in
+                    let selected = sidebarSelection.wrappedValue == item.title
                     Button { openSidebarPage(item.page) } label: {
-                        Label(item.title, systemImage:item.icon).frame(maxWidth:.infinity, alignment:.leading).contentShape(Rectangle())
+                        Label {
+                            Text(item.title)
+                        } icon: {
+                            Image(systemName:item.icon)
+                                .symbolRenderingMode(.monochrome)
+                                .foregroundStyle(palette.text)
+                        }
+                            .foregroundStyle(palette.text)
+                            .fontWeight(selected ? .semibold : .regular)
+                            .frame(maxWidth:.infinity, alignment:.leading)
+                            .padding(.horizontal, 4).padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                            .workspaceHoverHighlight()
+                            .background(selected ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain).tag(item.title).badge(item.count)
                     .accessibilityIdentifier("nav." + item.id)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
                 if !savedViews.isEmpty {
                     Section("视图") {
                         ForEach(savedViews) { view in
                             Label(view.name, systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
+                                .frame(maxWidth:.infinity, alignment:.leading)
+                                .padding(.horizontal, 4).padding(.vertical, 3)
+                                .contentShape(Rectangle())
+                                .workspaceHoverHighlight()
                                 .tag(view.id)
                                 .help(view.filter)
                                 .accessibilityIdentifier("workspace.savedView." + view.name)
@@ -845,6 +872,7 @@ struct WorkspaceView: View {
                 }
             }
             .listStyle(.sidebar)
+            .tint(.primary)
             VStack(alignment:.leading,spacing:8) {
                 if model.organizingTopics || model.assistantBusy || model.followupBusy {
                     HStack {
@@ -855,8 +883,12 @@ struct WorkspaceView: View {
                 if page != .tool("处理情况") {
                     WorkspaceAttentionDot(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
                 }
-                Button("设置", systemImage:"gearshape") { go(.settings);showingDiscussion=false }
-                    .buttonStyle(.borderless)
+                Button { go(.settings);showingDiscussion=false } label: {
+                    Label("设置", systemImage:"gearshape")
+                        .frame(maxWidth:.infinity, alignment:.leading)
+                        .padding(5).contentShape(Rectangle()).workspaceHoverHighlight()
+                }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("nav.settings")
                     .accessibilityAddTraits(page == .settings ? .isSelected : [])
             }.padding([.horizontal,.bottom], 14)
@@ -871,7 +903,7 @@ struct WorkspaceView: View {
             }
         }
         ToolbarItemGroup(placement:.primaryAction) {
-            Button("搜索", systemImage:"magnifyingglass") {
+            Button("搜索全部内容", systemImage:"magnifyingglass") {
                 if page == .search { searchFocused = true } else { go(.search) }
             }.help("搜索全部内容（⌘F）")
             Button("讨论", systemImage:"sidebar.right") { Task { await toggleDiscussion() } }
@@ -1024,7 +1056,7 @@ struct WorkspaceView: View {
         }
     }
     private func scrolled<Content:View>(scroll: Binding<ScrollPosition>? = nil, @ViewBuilder content: () -> Content) -> some View {
-        ScrollView { content().frame(maxWidth: WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top) }
+        ScrollView { content().frame(maxWidth: WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.topLeading) }
             .scrollPosition(scroll ?? scrollBinding(for: scrollKey))
     }
     private func scrollBinding(for key: WorkspaceNavigationEntry) -> Binding<ScrollPosition> {
@@ -1113,11 +1145,6 @@ struct WorkspaceView: View {
     private var materials: some View {
         let catalog = recordCatalog
         let page = materialPage
-        // Counts stay on the tabs as a quiet number; the page title carries no floating total.
-        let tabs = SavedViewPage.materials.filters.map { filter in
-            WorkspaceFilterTabItem(filter: filter, title: filter, count: String(page.counts[filter] ?? 0),
-                                   help: filter == "回收站" ? "Apple 提醒事项未被删除或取消。" : "")
-        }
         let rows = page.rows
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"材料") {
@@ -1126,7 +1153,7 @@ struct WorkspaceView: View {
                 }
             }
             if materialFilter == "日常材料", !todayReading.isEmpty {
-                WorkspaceListSection(title:"今日阅读",subtitle:"上次停下的地方，接着读。",count:todayReading.count) {
+                WorkspaceListSection(title:"今日阅读",count:todayReading.count) {
                     VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                         ForEach(todayReading) { item in
                             WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
@@ -1135,7 +1162,23 @@ struct WorkspaceView: View {
                     }
                 }
             }
-            WorkspaceFilterTabs(items: tabs, selection: materialFilter, onSelect: { materialFilter = $0 })
+            HStack {
+                Picker("阅读状态", selection: $materialFilter) {
+                    ForEach(["日常材料", "未读", "在读"], id: \.self) { filter in
+                        Text("\(filter)  \(page.counts[filter] ?? 0)").tag(filter)
+                    }
+                    if materialFilter == "已归档" || materialFilter == "回收站" {
+                        Text("\(materialFilter)  \(rows.count)").tag(materialFilter)
+                    }
+                }.pickerStyle(.segmented).labelsHidden().fixedSize()
+                Spacer()
+                Menu {
+                    Button("已归档（\(page.counts["已归档"] ?? 0)）", systemImage:"archivebox") { materialFilter="已归档" }
+                    Button("回收站（\(page.counts["回收站"] ?? 0)）", systemImage:"trash") { materialFilter="回收站" }
+                } label: {
+                    Label("归档与回收站", systemImage:"archivebox")
+                }.fixedSize()
+            }
             if !rows.isEmpty, ["已归档","回收站"].contains(materialFilter) {
                 Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
@@ -1263,7 +1306,7 @@ struct WorkspaceView: View {
                 let themeListings = visibleListings.filter { $0.level == .theme }
                 let clueListings = visibleListings.filter { $0.level == .clue }
                 HStack { WorkspaceHeading(eyebrow:"",title:"主题")
-                    Spacer();Button("新建主题") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }
+                    Spacer();Button("新建主题",systemImage:"plus") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }.buttonStyle(.workspaceSecondary)
                 }
                 WorkspaceSearchField(text:$topicQuery,placeholder:"搜索主题标题或摘要")
                     .accessibilityIdentifier("topics.search")
@@ -1272,7 +1315,7 @@ struct WorkspaceView: View {
                         ForEach(Array(domainSections(themeListings).enumerated()), id: \.offset) { _, section in
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading(section.title, count:"\(section.listings.count)")
-                                LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing: WorkspaceMetrics.groupGap)],alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
+                                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                                     ForEach(section.listings) { listing in themeCard(listing) }
                                 }
                             }
@@ -1294,14 +1337,14 @@ struct WorkspaceView: View {
                         Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。")
                     }.foregroundStyle(palette.secondaryText)
                 } else if filter.isEmpty && themeListings.isEmpty {
-                    Text("还没有达到主题判据的关切。线索会随材料积累成为主题。").foregroundStyle(palette.secondaryText)
+                    Text("暂时没有主题。").foregroundStyle(palette.secondaryText)
                 }
                 if !clueListings.isEmpty {
                     VStack(alignment:.leading,spacing:8) {
                         DisclosureGroup(isExpanded: Binding(get: { showingClues || !filter.isEmpty }, set: { showingClues = $0 })) {
                             VStack(alignment:.leading,spacing:0) {
                                 ForEach(clueListings) { listing in
-                                    WorkspaceRow(title:listing.topic.title,subtitle:"\(listing.materialCount) 份材料 · 最近 " + clueDateLabel(listing.latestMaterialDate),icon:"circle.dotted",trailing:"查看") { selectTopic(listing.topic.id) }
+                                    WorkspaceRow(title:listing.topic.title,subtitle:"\(listing.materialCount) 份材料 · 最近 " + clueDateLabel(listing.latestMaterialDate),icon:"circle.dotted") { selectTopic(listing.topic.id) }
                                         .workspaceSelectionHighlight(clueKeyboardFocus.id == listing.id)
                                         .id(listing.id)
                                     if listing.id != clueListings.last?.id { WorkspaceListDivider() }
@@ -1441,7 +1484,7 @@ struct WorkspaceView: View {
         case "材料":
             let catalog = recordCatalog
             let expressions = distinctExpressions(reading.sources)
-            WorkspaceSection(title:"主题材料",subtitle:"完整原话与资料，按时间延续",icon:"books.vertical",count:reading.sources.count) {
+            WorkspaceSection(title:"主题材料",icon:"books.vertical",count:reading.sources.count) {
                 VStack(spacing:0) {
                     ForEach(expressions) { source in
                         sourceRow(source,catalog:catalog)
@@ -1589,9 +1632,9 @@ struct WorkspaceView: View {
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"行动") {
                 HStack(spacing:8) {
-                    if model.unreadDeliveryCount > 0 {
+                    Group {
                         Button { actionFilter = "AI 助理"; error = "" } label: {
-                            WorkspaceBadge(text:"AI 交付 \(model.unreadDeliveryCount) 份待读", tone:.neutral)
+                            WorkspaceBadge(text:model.unreadDeliveryCount > 0 ? "AI 交付 \(model.unreadDeliveryCount) 份待读" : "AI 交付", tone:.neutral)
                                 .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
                                 .padding(.horizontal, 6)
                                 .contentShape(Capsule())
@@ -1619,7 +1662,11 @@ struct WorkspaceView: View {
                     }
                 }
             }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model, scope:clarifyScope) }
-            WorkspaceFilterTabs(items: SavedViewPage.actions.filters.map { WorkspaceFilterTabItem(filter: $0, title: $0) }, selection: actionFilter, onSelect: { actionFilter = $0 })
+            Picker("行动视图", selection: $actionFilter) {
+                ForEach(SavedViewPage.actions.filters, id: \.self) { filter in
+                    Text(filter == "AI 助理" ? "AI 交付" : filter).tag(filter)
+                }
+            }.pickerStyle(.menu).fixedSize().accessibilityIdentifier("actions.view")
             if let offer = localCompletionOffer {
                 HStack(spacing:12) {
                     WorkspaceNoticeText(message: model.status.isEmpty ? "提醒事项不可用；可以先本地完成，稍后核对。" : model.status, severity:.warning)
@@ -1677,7 +1724,7 @@ struct WorkspaceView: View {
                     }
                 }
                 if !dueToday.isEmpty {
-                    WorkspaceListSection(title:"今天",subtitle:"今天到期",count:dueToday.count) {
+                    WorkspaceListSection(title:"今天",count:dueToday.count) {
                         ActionCardList {
                             ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
@@ -1691,7 +1738,7 @@ struct WorkspaceView: View {
                     }
                 }
                 if !surface.anytime.isEmpty {
-                    WorkspaceListSection(title:"随时",subtitle:"没有日期或更远",count:surface.anytime.count) {
+                    WorkspaceListSection(title:"以后或未定日期",count:surface.anytime.count) {
                         ActionCardList {
                             ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
@@ -1702,7 +1749,7 @@ struct WorkspaceView: View {
                     WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
                 }
             } else if !listed.isEmpty {
-                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "全部" ? "7 天内与没有日期的待办" : actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
+                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,count:listed.count) {
                     ActionCardList {
                         ForEach(listed) { action in actionRow(action,timeEntry:timeEntries[action.id],group:listGroup,nature:listNature,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
@@ -1712,7 +1759,7 @@ struct WorkspaceView: View {
             // overview they sit below the backlog as one quiet line.
             if actionFilter == "全部", !model.stalledOutcomes.isEmpty { stalledBanner }
             if actionFilter == "全部", !paused.isEmpty {
-                WorkspaceListSection(title:"需要核对的待办",subtitle:"打开任务查看原因。",count:paused.count) {
+                WorkspaceListSection(title:"需要核对的待办",count:paused.count) {
                     ActionCardList {
                         ForEach(paused) { action in actionRow(action,group:.needsReview,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
@@ -1721,7 +1768,7 @@ struct WorkspaceView: View {
             }
             let overviewQuestions = actionFilter == "全部" ? model.openQuestions : []
             if !overviewQuestions.isEmpty {
-                WorkspaceListSection(title:"问题",subtitle:"VoiceOS 先回答；想清楚了可以转成下一步。",count:overviewQuestions.count,collapsible:true) {
+                WorkspaceListSection(title:"问题",count:overviewQuestions.count,collapsible:true) {
                     ActionCardList {
                         ForEach(overviewQuestions.prefix(3)) { action in
                             actionRow(action,nature:.question,nextStepCounts:nextStepCounts,reads:rowReads)
@@ -1735,7 +1782,7 @@ struct WorkspaceView: View {
             }
             let overviewGoals = actionFilter == "全部" ? model.openGoals : []
             if !overviewGoals.isEmpty {
-                WorkspaceListSection(title:"目标",subtitle:"你要长期达到的结果；转成待办后可提醒。",count:overviewGoals.count,collapsible:true) {
+                WorkspaceListSection(title:"目标",count:overviewGoals.count,collapsible:true) {
                     ActionCardList {
                         ForEach(overviewGoals.prefix(3)) { action in
                             actionRow(action,nature:.goal,nextStepCounts:nextStepCounts,reads:rowReads)
@@ -2287,10 +2334,11 @@ struct WorkspaceView: View {
     }
     private var settings: some View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
-            WorkspacePageHeading(title:"设置", subtitle:"模型、连接、外观与资料维护")
-            WorkspaceSearchField(text: $settingsQuery, placeholder: "搜索设置：模型、备份、权限、快捷键…")
-                .frame(maxWidth: 680, alignment: .leading)
-                .accessibilityIdentifier("settings.search")
+            WorkspacePageHeading(title:"设置") {
+                WorkspaceSearchField(text:$settingsQuery, placeholder:"搜索设置")
+                    .frame(maxWidth:240)
+                    .accessibilityIdentifier("settings.search")
+            }
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
                 let searching = !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 if !searching {
@@ -2321,7 +2369,7 @@ struct WorkspaceView: View {
                     case .maintenance: settingsMaintenanceCard
                     }
                 }
-            }.frame(maxWidth: 680, alignment: .leading)
+            }
         }
         .onAppear {
             model.refreshStorageUsage()
@@ -2335,7 +2383,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsModelsCard: some View {
-        WorkspaceSettingsCard(title:"模型与服务", subtitle:"本机转写，以及用来理解与核对材料的文本模型") {
+        WorkspaceSettingsCard(title:"模型与服务") {
             WorkspaceSettingsRow(title:"语音转文字", subtitle:model.speechSummary, showsDivider:false) {
                 Button("更改") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改语音转文字")
             }
@@ -2447,7 +2495,7 @@ struct WorkspaceView: View {
     }
     /// 概览与健康：进设置十秒内回答「模型可用吗、资料多大、后台忙什么」。
     private var settingsHealthCard: some View {
-        WorkspaceSettingsCard(title:"概览与健康", subtitle:"一眼看清现在能不能用、后台在忙什么") {
+        WorkspaceSettingsCard(title:"运行状态") {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Circle().fill(model.speechConfigured ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
                 Text("本地转写").vosFont(WorkspaceText.body)
@@ -2533,7 +2581,7 @@ struct WorkspaceView: View {
 
         var sections: [SettingsSection] {
             switch self {
-            case .common: [.health, .connections, .appearance, .reading]
+            case .common: [.appearance, .reading, .connections, .health]
             case .model: [.models, .permissions, .privacy]
             case .library: [.exportBackup, .library, .storage]
             case .tools: [.review, .keyboard, .maintenance]
@@ -2547,7 +2595,7 @@ struct WorkspaceView: View {
 
         private var searchText: String {
             switch self {
-            case .health: "概览 健康 状态 队列 监控 概览与健康 后台队列 最近模型调用"
+            case .health: "概览 健康 运行状态 队列 监控 概览与健康 后台队列 最近模型调用"
             case .models: "模型与服务 语音转文字 转写 理解、核对与AI助理 应用内模型配置 服务地址 型号 密钥 API Key 笔记思考强度 主题整理思考强度 核对与整理思考强度 连接测试 测试连接 保存并启用 从文件导入"
             case .privacy: "隐私 数据 上传 云端 权限 数据与隐私"
             case .connections: "连接 收件箱 文件夹 提醒 监测 自动 连接与自动入口 自动接收录音 语音备忘录 消息监测 微信推送 QQ群 Apple提醒事项 登录时启动 开机启动"
@@ -2583,7 +2631,7 @@ struct WorkspaceView: View {
         return parts.isEmpty ? "空闲" : parts.joined(separator: " · ")
     }
     private var settingsPrivacyCard: some View {
-        WorkspaceSettingsCard(title:"数据与隐私", subtitle:"哪些只留在这台 Mac，哪些会发送给模型") {
+        WorkspaceSettingsCard(title:"数据与隐私") {
             VStack(alignment:.leading, spacing:6) {
                 Text("只在本机：录音与原件、资料库、模型密钥、QQ 密钥文件").vosFont(WorkspaceText.body)
                 Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
@@ -2609,7 +2657,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsConnectionsCard: some View {
-        WorkspaceSettingsCard(title:"连接与自动入口", subtitle:"录音、消息与提醒从哪里进来") {
+        WorkspaceSettingsCard(title:"连接与自动入口") {
             WorkspaceSettingsNavRow(title:"自动接收录音", subtitle:"VoiceOS 收件箱与语音备忘录", showsDivider:false) { go(.tool("自动入口")) }
             WorkspaceSettingsNavRow(title:"消息监测", subtitle:"QQ 群与学院官网 · 检查时间、推送与依赖") { model.monitorSettingsRequested = true; go(.monitor) }
             WorkspaceSettingsRow(title:"Apple 提醒事项", subtitle:reminderConnectionStatus) {
@@ -2639,7 +2687,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsPermissionsCard: some View {
-        WorkspaceSettingsCard(title:"系统权限", subtitle:"麦克风、通知、屏幕录制与完全磁盘访问") {
+        WorkspaceSettingsCard(title:"系统权限") {
             WorkspaceSettingsRow(title:"麦克风", subtitle:microphoneStatus, showsDivider:false) {
                 if model.microphoneAuthorization == .notDetermined {
                     Button("授权") { Task { _ = await model.requestMicrophoneAccess() } }.buttonStyle(.workspacePrimary)
@@ -2667,8 +2715,8 @@ struct WorkspaceView: View {
         }
     }
     private var settingsReadingCard: some View {
-        WorkspaceSettingsCard(title:"阅读与生成", subtitle:"笔记页与最近笔记的显示偏好") {
-            WorkspaceSettingsRow(title:"显示 AI 批注", subtitle:"笔记里的启发层；关掉只留你的正文", showsDivider:false) {
+        WorkspaceSettingsCard(title:"阅读与生成") {
+            WorkspaceSettingsRow(title:"显示 AI 批注", showsDivider:false) {
                 Toggle("显示 AI 批注", isOn: $showNoteAnnotations)
                     .toggleStyle(.switch).labelsHidden()
                     .accessibilityIdentifier("settings.showAnnotations")
@@ -2676,14 +2724,15 @@ struct WorkspaceView: View {
         }
     }
     private var settingsAppearanceCard: some View {
-        WorkspaceSettingsCard(title:"外观", subtitle:"主题与文字大小") {
+        WorkspaceSettingsCard(title:"外观") {
             HStack(spacing:12) {
                 ForEach(WorkspaceTheme.allCases) { option in
                     WorkspaceThemeOption(theme:option,selected:theme == option) { theme=option }
                 }
             }
-            .frame(maxWidth:560)
+            .frame(maxWidth:560,alignment:.leading)
             .padding(.horizontal,20).padding(.vertical,12)
+            .frame(maxWidth:.infinity,alignment:.leading)
             WorkspaceSettingsRow(title:"文字大小") {
                 Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
                     ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
@@ -2692,7 +2741,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsExportBackupCard: some View {
-        WorkspaceSettingsCard(title:"导出与备份", subtitle:"整库导出、自动备份与保留份数") {
+        WorkspaceSettingsCard(title:"导出与备份") {
             WorkspaceSettingsRow(title:"导出结构化资料", subtitle:"不含录音与视频原件", showsDivider:false) {
                 Button("导出") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondaryCompact).disabled(model.exporting).accessibilityLabel("导出结构化资料")
             }
@@ -2724,7 +2773,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsLibraryCard: some View {
-        WorkspaceSettingsCard(title:"资料库", subtitle:"检查、打开、从备份或迁移包恢复") {
+        WorkspaceSettingsCard(title:"资料库") {
             WorkspaceSettingsRow(title:"检查资料库", showsDivider:false) {
                 Button(model.checkingLibraryHealth ? "正在检查…" : "检查") { model.checkLibraryHealth() }
                     .buttonStyle(.workspaceSecondaryCompact).disabled(model.checkingLibraryHealth || model.libraryRoot == nil)
@@ -2748,7 +2797,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsStorageCard: some View {
-        WorkspaceSettingsCard(title:"存储", subtitle:"这台 Mac 上的占用") {
+        WorkspaceSettingsCard(title:"存储") {
             WorkspaceSettingsValueRow(label:"资料库（含 WAL）", value:storageReadoutText(storageReadout { $0.databaseBytes }), showsDivider:false)
             WorkspaceSettingsValueRow(label:"原件", value:storageReadoutText(storageReadout { $0.assetsBytes }))
             WorkspaceSettingsValueRow(label:"备份", detail:model.storageUsage.flatMap { $0.backupBytes == nil ? nil : "\($0.backupCount) 份" }, value:storageReadoutText(storageReadout { $0.backupBytes }))
@@ -2775,14 +2824,14 @@ struct WorkspaceView: View {
         }
     }
     private var settingsReviewCard: some View {
-        WorkspaceSettingsCard(title:"回顾与查找", subtitle:"围绕已有材料的三种读法") {
+        WorkspaceSettingsCard(title:"回顾与查找") {
             WorkspaceSettingsNavRow(title:"静默回顾", subtitle:"看到相关原文", showsDivider:false) { go(.tool("静默回顾")) }
             WorkspaceSettingsNavRow(title:"查找历史文字", subtitle:"按关键词查找") { go(.tool("查找历史文字")) }
             WorkspaceSettingsNavRow(title:"英文表达反馈", subtitle:"英文原话反馈") { go(.tool("英文表达反馈")) }
         }
     }
     private var settingsKeyboardCard: some View {
-        WorkspaceSettingsCard(title:"键盘快捷键", subtitle:"列表聚焦时的按键") {
+        WorkspaceSettingsCard(title:"键盘快捷键") {
             VStack(alignment:.leading, spacing:6) {
                 Text("列表聚焦时：↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进")
                 Text("任务详情：x 或空格 完成 · s 改期 · f 记结果")
@@ -2801,7 +2850,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsMaintenanceCard: some View {
-        WorkspaceSettingsCard(title:"其他工作与维护", subtitle:"低频工具与运行状态") {
+        WorkspaceSettingsCard(title:"其他工作与维护") {
             DisclosureGroup {
                 VStack(alignment:.leading, spacing: WorkspaceMetrics.rowGap) {
                     Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }.buttonStyle(.workspaceQuietCompact)
@@ -2967,11 +3016,17 @@ struct WorkspaceView: View {
         let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
         // 成品优先：有笔记的行用笔记标题（与首页、笔记页同源）；没有笔记时才
         // 退回原题或原文首句辨认——材料列表是「去查」的视角，行需要可辨识。
-        let noteTitle=materialNoteTitle(for: source, expression: expression)
+        let rawTitle = materialNoteTitle(for: source, expression: expression) ?? materialRowTitle(source,expression:expression,leading:first,catalog:catalog)
+        let title: String
+        if rawTitle.contains("**"), let inline = try? AttributedString(markdown:rawTitle, options:.init(interpretedSyntax:.inlineOnlyPreservingWhitespace)) {
+            title = String(inline.characters)
+        } else {
+            title = rawTitle
+        }
         let trailingText=openCount > 0 ? "\(openCount) 条待办" : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:noteTitle ?? materialRowTitle(source,expression:expression,leading:first,catalog:catalog),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
+        return WorkspaceRow(title:title,subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
@@ -3010,7 +3065,9 @@ struct WorkspaceView: View {
         switch readingStates[id] ?? .unread {
         case .unread: return nil
         case .reading: return ("在读",palette.accent)
-        case .read: return ("已读",palette.tertiaryText)
+        // Finished reading is the resting state; only work in progress earns a
+        // mark, so the 在读 dot is not lost among dozens of 已读 dots.
+        case .read: return nil
         }
     }
     private func setMaterialReading(_ id:String,_ state:SourceReadingState) {
@@ -3139,7 +3196,7 @@ struct WorkspaceView: View {
                     } else { go(.task(action.id)) }
                 }
             })
-            .materialCard(highlighted: keyboardHighlighted)
+            .background(keyboardHighlighted ? palette.selection : .clear)
             .contextMenu {
                 actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable)
             }
@@ -4096,16 +4153,20 @@ private struct TopicPreviewCard: View {
     var body: some View {
         Button(action:open) {
             VStack(alignment:.leading,spacing:10) {
-                Text(topic.title).vosFont(WorkspaceText.sectionTitle)
-                    .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                if topic.organizationStale == true { TopicStaleBanner() }
-                if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
+                HStack(alignment:.firstTextBaseline,spacing:8) {
+                    Text(topic.title).vosFont(WorkspaceText.rowTitle)
+                        .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                    Spacer(minLength:4)
+                    // States ride the title line as small marks; a banner inside a
+                    // list card outweighed the topic it annotated.
+                    if topic.organizationStale == true { WorkspaceBadge(text:"待重新整理",tone:.accent).help("材料已更新，待重新整理") }
+                    if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
+                }
                 if let preview { previewBody(preview) }
-                Spacer(minLength:0)
                 Text(metaLine).vosFont(WorkspaceText.meta,monospacedDigit:true)
                     .foregroundStyle(palette.tertiaryText)
-            }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-                .padding(20)
+            }.frame(maxWidth:.infinity,alignment:.topLeading)
+                .padding(.horizontal, 16).padding(.vertical, 12)
                 .background(highlighted ? palette.selection : hovered ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
                 .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(highlighted ? palette.focusRing : palette.border,lineWidth:1) }
                 .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
@@ -4339,7 +4400,6 @@ private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
             .animation(reduceMotion ? nil : WorkspaceMotion.hover,value:menuVisible)
     }
 }
-
 struct MaterialRowFailurePreferenceKey: PreferenceKey {
     static var defaultValue: Bool { false }
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
@@ -4348,10 +4408,24 @@ struct MaterialRowFailurePreferenceKey: PreferenceKey {
 private struct ActionCardList<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
+    @Environment(\.workspacePalette) private var palette
+
+    // One surface per group, rows separated by hairlines: a run of eighteen
+    // todos reads as one list instead of eighteen boxes.
     var body: some View {
-        LazyVStack(alignment:.leading,spacing:8) {
-            content()
-        }.padding(.top,8)
+        let shape = RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
+        LazyVStack(alignment:.leading,spacing:0) {
+            Group(subviews: content()) { rows in
+                ForEach(rows) { row in
+                    row
+                    if row.id != rows.last?.id { WorkspaceListDivider().padding(.leading,54) }
+                }
+            }
+        }
+            .background(palette.surface, in: shape)
+            .overlay { shape.strokeBorder(palette.border, lineWidth: 1) }
+            .clipShape(shape)
+            .padding(.top,8)
     }
 }
 
@@ -4393,62 +4467,5 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
             }
             .onHover { hovered=$0 }
             .animation(reduceMotion ? nil : WorkspaceMotion.hover,value:menuVisible)
-    }
-}
-
-private struct WorkspaceFilterTabItem: Identifiable {
-    let filter: String
-    let title: String
-    var count: String? = nil
-    var help: String = ""
-    var id: String { filter }
-    var label: String { count.map { title + " " + $0 } ?? title }
-}
-
-/// One underline per selected filter: ink for the active label, accent for the rule.
-/// The identifier keeps the old combined label so saved UI checks still resolve.
-private struct WorkspaceFilterTabs: View {
-    @Environment(\.workspacePalette) private var palette
-    @Environment(\.vosTextScale) private var textScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let items: [WorkspaceFilterTabItem]
-    let selection: String
-    let onSelect: (String) -> Void
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 18) {
-                ForEach(items) { item in tab(item) }
-            }.fixedSize(horizontal: true, vertical: false)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 56 * vosLayoutScale(textScale)), spacing: 14)], alignment: .leading, spacing: 10) {
-                ForEach(items) { item in tab(item, fill: true) }
-            }
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func tab(_ item: WorkspaceFilterTabItem, fill: Bool = false) -> some View {
-        let selected = selection == item.filter
-        return Button { onSelect(item.filter) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Text(item.title)
-                        .vosFont(WorkspaceText.meta.size, weight: selected ? .semibold : .regular)
-                        .foregroundStyle(selected ? palette.text : palette.secondaryText)
-                        .lineLimit(1)
-                    if let count = item.count {
-                        Text(count).vosFont(WorkspaceText.meta.size, monospacedDigit: true)
-                            .foregroundStyle(palette.tertiaryText).lineLimit(1)
-                    }
-                }
-                Rectangle().fill(selected ? palette.accent : Color.clear).frame(height: 2)
-            }
-            .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityAddTraits(selected ? [.isSelected] : [])
-            .help(item.help)
-            .accessibilityIdentifier("workspace.tab." + item.label)
-            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: selection)
     }
 }

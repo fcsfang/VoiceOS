@@ -9,6 +9,7 @@ struct WorkspaceMonitorView: View {
     @ObservedObject private var operations = ControlCenter.monitorOperations
 
     @State private var selectedReportID: String?
+    @State private var historyExpanded = false
     @State private var expandedItems: Set<String> = []
     @State private var qqPythonPath = ""
     @State private var qqKeyPath = ""
@@ -34,13 +35,14 @@ struct WorkspaceMonitorView: View {
     @State private var qqSaveFeedback = ""
     @State private var qqSaveFailed = false
 
+    @State private var expandedItemDetails = Set<String>()
     private enum MonitorLoadState: Equatable { case loading, loaded, failed }
 
     private var monitorLoaded: Bool { monitorLoadState == .loaded }
 
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            WorkspacePageHeading(eyebrow: "每日消息监测", title: "消息监测", subtitle: headingSubtitle) {
+            WorkspacePageHeading(title: "消息监测") {
                 Picker("消息监测页面", selection: $showsSettings) {
                     Text("报告").tag(false)
                     Text("设置").tag(true)
@@ -53,16 +55,29 @@ struct WorkspaceMonitorView: View {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                 if showsSettings {
                     settingsSection
-                } else {
-                    runBar
-                    pushNotConfiguredBanner
-                    monitorLoadFailureNotice
-                    todayReportSection
-                    historySection
                     sourceStatusSection
+                } else {
+                    monitorLoadFailureNotice
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 24) {
+                            todayReportSection.frame(minWidth: 520)
+                            Divider()
+                            runBar.frame(width: 196, alignment: .leading)
+                        }
+                        VStack(alignment: .leading, spacing: 16) {
+                            todayReportSection
+                            runBar
+                        }
+                    }
+                    DisclosureGroup(isExpanded: $historyExpanded) {
+                        historySection
+                    } label: {
+                        WorkspaceSectionHeading("历史报告", count: monitorLoaded ? String(earlierReports.count) : nil)
+                    }
+                    .accessibilityIdentifier("monitor.history.toggle")
                 }
             }
-            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
             model.monitorPageVisible = true
@@ -128,10 +143,6 @@ struct WorkspaceMonitorView: View {
         return date.formatted(date: .abbreviated, time: .omitted)
     }
 
-    private var headingSubtitle: String {
-        "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进。"
-    }
-
     private var qqNeedsFullDiskAccess: Bool {
         model.monitorQQDiagnostics.contains { !$0.ok && $0.needsFullDiskAccess }
             || QQMonitorPermissionGuidance.matches(model.monitorQQConversationStatus)
@@ -139,7 +150,7 @@ struct WorkspaceMonitorView: View {
 
     private var runBar: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-            HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 Button {
                     Task {
                         await model.runMonitorCheck()
@@ -157,7 +168,6 @@ struct WorkspaceMonitorView: View {
                 .accessibilityLabel(model.monitorChecking ? "正在检查消息监测" : "立即检查消息监测")
                 .accessibilityIdentifier("monitor.runCheck")
                 Text(model.monitorNextRunText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                Spacer(minLength: 0)
             }
             if !model.monitorStatus.isEmpty {
                 Text(model.monitorStatus).vosFont(WorkspaceText.meta)
@@ -186,19 +196,6 @@ struct WorkspaceMonitorView: View {
         return open > 0 ? "\(open) 项待办" : "没有待办"
     }
 
-    @ViewBuilder private var pushNotConfiguredBanner: some View {
-        if monitorLoaded, let report = model.monitorLatestReport, report.reportDate != todayKey,
-           report.state != .failed, !model.monitorPushConfigured {
-            HStack(spacing: 10) {
-                WorkspaceNoticeText(message: "最近一次报告已生成，微信推送尚未配置",
-                                    severity: .warning)
-                Button("配置微信推送") { showsSettings = true }
-                    .buttonStyle(.workspaceQuietCompact)
-                    .accessibilityIdentifier("monitor.push.banner.settings")
-            }
-            .accessibilityIdentifier("monitor.push.banner")
-        }
-    }
 
     @ViewBuilder private var monitorLoadFailureNotice: some View {
         if monitorLoadState == .failed {
@@ -255,9 +252,6 @@ struct WorkspaceMonitorView: View {
                         Text(model.monitorLatestReport.map { "最近一次报告是 " + $0.reportDate + "；今天还没有检查。" }
                              ?? "还没有报告；点击「立即检查」开始第一次检查。")
                             .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                        WorkspaceListDivider()
-                        Text("检查会先从已启用的来源采集，再按授权情况交给模型分析。云端分析未授权时不会发送任何原文。")
-                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                         earlierOpenItemsHint
                     }
                     .padding(.horizontal, 20)
@@ -278,7 +272,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var historySection: some View {
-        WorkspaceSettingsCard(title: "历史报告", subtitle: historyCountText) {
+        Group {
             VStack(alignment: .leading, spacing: 12) {
                 if monitorLoadState == .loading {
                     if showSlowLoad { monitorLoadingRow("正在读取历史报告…") }
@@ -313,25 +307,25 @@ struct WorkspaceMonitorView: View {
         }
     }
 
-    private var historyCountText: String? {
-        monitorLoadState == .loaded || !earlierReports.isEmpty ? "共 \(earlierReports.count) 次，最新在上" : nil
-    }
 
     private func reportCardContent(report: MonitorReport, isLatest: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let generated = ControlCenter.monitorGeneratedText(report) {
-                Text(generated).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
-            }
+            itemsView(report: report)
+            if isLatest { earlierOpenItemsHint }
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: 10) {
-                Text(report.headline.isEmpty ? "没有标题" : report.headline).vosFont(WorkspaceText.rowTitle)
-                if !report.summary.isEmpty {
+                if report.state == .failed {
+                    Text(report.headline).vosFont(WorkspaceText.rowTitle)
                     Text(report.summary).vosFont(WorkspaceText.body)
-                        .foregroundStyle(palette.secondaryText).lineSpacing(4)
+                } else if !report.headline.isEmpty || !report.summary.isEmpty {
+                    DisclosureGroup("报告摘要") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if !report.headline.isEmpty { Text(report.headline).vosFont(WorkspaceText.rowTitle) }
+                            if !report.summary.isEmpty { Text(report.summary).vosFont(WorkspaceText.body) }
+                        }.textSelection(.enabled).padding(.vertical, 6)
+                    }
                 }
                 HStack(spacing: 16) {
-                    Text(itemCountText(report)).vosFont(WorkspaceText.meta)
-                        .foregroundStyle(palette.secondaryText)
                     Text(ControlCenter.monitorDeliveryText(report)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(report.deliveryState == "failed" ? palette.warning : palette.secondaryText)
                     Spacer()
@@ -372,9 +366,9 @@ struct WorkspaceMonitorView: View {
                         .foregroundStyle(palette.secondaryText).textSelection(.enabled)
                 }
                 sourceFailureReasons(report)
-                WorkspaceListDivider()
-                itemsView(report: report)
-                if isLatest { earlierOpenItemsHint }
+                if let generated = ControlCenter.monitorGeneratedText(report) {
+                    Text(generated).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                }
             }
         }
         .padding(.horizontal, 20)
@@ -423,15 +417,17 @@ struct WorkspaceMonitorView: View {
         case .items:
             let items = model.monitorItemsByReport[report.id] ?? []
             let openItems = items.filter { $0.status == .open }
-            Picker("事项筛选", selection: $showsAllItems) {
-                Text("未处理").tag(false)
-                Text("全部").tag(true)
+            if openItems.count < items.count {
+                Picker("事项筛选", selection: $showsAllItems) {
+                    Text("未处理").tag(false)
+                    Text("全部").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.top, 4)
+                .accessibilityIdentifier("monitor.filter")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(minWidth: 140)
-            .padding(.top, 4)
-            .accessibilityIdentifier("monitor.filter")
             ForEach([MonitorItemCategory.applicable, .needsCheck], id: \.self) { category in
                 let group = openItems.filter { $0.category == category }
                 if !group.isEmpty {
@@ -500,6 +496,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private func expandEarlierReport(_ reportID: String) {
+        historyExpanded = true
         guard let report = model.monitorReports.first(where: { $0.id == reportID }) else { return }
         selectedReportID = report.id
         Task { await loadItems(report) }
@@ -560,79 +557,88 @@ struct WorkspaceMonitorView: View {
     }
 
     private func itemView(_ item: MonitorItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: item.status == .done ? "checkmark.circle.fill"
-                        : item.status == .dismissed ? "xmark.circle" : "circle")
-                    .foregroundStyle(item.status == .done ? palette.success : palette.secondaryText)
-                    .accessibilityHidden(true)
-                Text(item.title).vosFont(WorkspaceText.rowTitle)
-                    .strikethrough(item.status == .dismissed)
-                Spacer()
-                Text(item.deadlineText ?? (item.deadlineDate.map { "截止 " + $0 } ?? "截止待核对"))
-                    .vosFont(WorkspaceText.meta)
-                    .foregroundStyle(item.deadlineDate == nil && item.deadlineText == nil
-                                     ? palette.warning : palette.secondaryText)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(itemRowAccessibilityLabel(item))
-            Text("为什么相关：" + item.whyRelevant).vosFont(WorkspaceText.body)
-            Text("建议行动：" + item.suggestedAction).vosFont(WorkspaceText.body)
-                .foregroundStyle(palette.secondaryText)
-            if let conditions = item.conditions, !conditions.isEmpty {
-                Text("条件：" + conditions).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            }
-            if let uncertainty = item.uncertainty, !uncertainty.isEmpty {
-                Text("待核对：" + uncertainty).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-            }
-            if item.relatedItemID != nil {
-                Text("与已有事项关联，本次更新了原事项并保留你的处理状态。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            }
-            evidenceView(item)
-            HStack(spacing: 12) {
-                if item.status == .open {
-                    Button("标记完成") {
-                        Task {
-                            await model.setMonitorItemStatus(item, status: .done)
-                            await refreshEarlierOpenSummary()
-                        }
-                    }
-                        .buttonStyle(.workspaceSecondaryCompact)
-                        .accessibilityIdentifier("monitor.item." + item.id + ".complete")
-                    Button("不适用") {
-                        Task {
-                            await model.setMonitorItemStatus(item, status: .dismissed)
-                            await refreshEarlierOpenSummary()
-                        }
-                    }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .accessibilityIdentifier("monitor.item." + item.id + ".dismiss")
-                } else {
-                    Button("重新打开") {
-                        Task {
-                            await model.setMonitorItemStatus(item, status: .open)
-                            await refreshEarlierOpenSummary()
-                        }
-                    }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .accessibilityIdentifier("monitor.item." + item.id + ".reopen")
+        let expanded = expandedItemDetails.contains(item.id)
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                if expanded { expandedItemDetails.remove(item.id) } else { expandedItemDetails.insert(item.id) }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.caption).foregroundStyle(palette.secondaryText).frame(width: 12)
+                    Text(item.title).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
+                        .strikethrough(item.status == .dismissed)
+                    Spacer(minLength: 12)
+                    Text(timeLabel(item))
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(item.deadlineDate == nil && item.deadlineText == nil
+                                         ? palette.tertiaryText : palette.secondaryText)
                 }
-                Spacer()
+                .padding(.vertical, 10).padding(.horizontal, 6)
+                .contentShape(Rectangle()).workspaceHoverHighlight()
+            }.buttonStyle(.plain)
+                .accessibilityLabel(itemRowAccessibilityLabel(item))
+                .accessibilityValue(expanded ? "已展开" : "已收起")
+                .accessibilityIdentifier("monitor.item." + item.id + ".details")
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !item.suggestedAction.isEmpty {
+                        Text(item.suggestedAction).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    }
+                    if let uncertainty = item.uncertainty, !uncertainty.isEmpty {
+                        Text(uncertainty).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    }
+                    evidenceView(item)
+                    HStack(spacing: 12) {
+                        if item.status == .open {
+                            Button("标记完成") {
+                                Task {
+                                    await model.setMonitorItemStatus(item, status: .done)
+                                    await refreshEarlierOpenSummary()
+                                }
+                            }
+                                .buttonStyle(.workspaceSecondaryCompact)
+                                .accessibilityIdentifier("monitor.item." + item.id + ".complete")
+                            Button("不适用") {
+                                Task {
+                                    await model.setMonitorItemStatus(item, status: .dismissed)
+                                    await refreshEarlierOpenSummary()
+                                }
+                            }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("monitor.item." + item.id + ".dismiss")
+                        } else {
+                            Button("重新打开") {
+                                Task {
+                                    await model.setMonitorItemStatus(item, status: .open)
+                                    await refreshEarlierOpenSummary()
+                                }
+                            }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("monitor.item." + item.id + ".reopen")
+                        }
+                        Spacer()
+                    }
+                }.padding(.leading, 28).padding(.bottom, 10)
             }
+            WorkspaceListDivider()
         }
-        .padding(14)
-        .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
-                .strokeBorder(palette.border.opacity(0.7), lineWidth: 1)
+    }
+
+    private func timeLabel(_ item: MonitorItem) -> String {
+        guard let time = item.deadlineText, !time.isEmpty else { return item.deadlineDate ?? "时间待核对" }
+        guard let match = item.evidenceQuote.range(of: time) else { return time }
+        let before = item.evidenceQuote[..<match.lowerBound].suffix(16)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "：: "))
+        for label in ["报名截止", "网申截止", "截止", "宣讲时间", "考试时间", "活动时间"] {
+            if before.hasSuffix(label) || before.hasSuffix(label + "时间") { return label + " · " + time }
         }
-        .padding(.bottom, 6)
+        if before.hasSuffix("宣讲安排\n时间") { return "宣讲时间 · " + time }
+        return time
     }
 
     private func itemRowAccessibilityLabel(_ item: MonitorItem) -> String {
         let status = item.status == .done ? "已完成" : item.status == .dismissed ? "已忽略" : "待办"
-        let deadline = item.deadlineText ?? (item.deadlineDate.map { "截止 " + $0 } ?? "截止待核对")
+        let deadline = timeLabel(item)
         return [status, item.title, deadline].joined(separator: "，")
     }
 
@@ -644,6 +650,9 @@ struct WorkspaceMonitorView: View {
                 if expanded { expandedItems.insert(item.id) } else { expandedItems.remove(item.id) }
             })) {
             VStack(alignment: .leading, spacing: 10) {
+                if !item.whyRelevant.isEmpty { Text(item.whyRelevant).vosFont(WorkspaceText.meta) }
+                if let conditions = item.conditions, !conditions.isEmpty { Text("条件：" + conditions).vosFont(WorkspaceText.meta) }
+                if item.relatedItemID != nil { Text("已更新关联事项，处理状态已保留。").vosFont(WorkspaceText.meta) }
                 Text(item.evidenceQuote).vosFont(WorkspaceText.body)
                     .padding(.leading, 10)
                     .overlay(alignment: .leading) { Rectangle().fill(palette.border).frame(width: 2) }
@@ -714,7 +723,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var sourceStatusSection: some View {
-        WorkspaceSettingsCard(title: "来源状态", subtitle: "显示本地库最新消息时间；失败会单独标出") {
+        WorkspaceSettingsCard(title: "来源状态") {
             if monitorLoadState == .loading {
                 if showSlowLoad {
                     monitorLoadingRow("正在读取来源状态…")

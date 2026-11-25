@@ -14,18 +14,22 @@ struct NotesLibraryView: View {
 
     @State private var notes: [NoteLibraryRow] = []
     @State private var query = ""
-    @State private var readingStates: [String: SourceReadingState] = [:]
+    @State private var notesLoaded = false
     @State private var selectedPending: Set<String> = []
     @State private var organizingSelected = false
 
-    /// 还没读过的材料就是首页的「待处理」：直接从这里点开整理，读完自动消失。
     private var pendingMaterials: [SourceRecord] {
-        model.records.filter { record in
-            ["saved", "reference_only"].contains(record.state)
-                && !record.isArchived
-                && record.origin == "user" && record.speaker == "user"
-                && record.feedbackKind == nil && !record.name.hasPrefix("行动反馈")
-                && (readingStates[record.id] ?? .unread) != .read
+        guard notesLoaded else { return [] }
+        let covered = Set(notes.flatMap { $0.expressionKey.split(separator: "|").map(String.init) })
+        var seen = Set<String>()
+        return model.records.filter { record in
+            guard record.origin == "user", record.speaker == "user", !record.isArchived, !record.isTrashed,
+                  record.feedbackKind == nil, !record.name.hasPrefix("行动反馈"), !covered.contains(record.id) else { return false }
+            let ids = model.materialNoteMemberIDs(sourceID: record.id)
+            let key = VoiceOSStore.materialNoteExpressionKey(ids)
+            return model.materialNoteRows[key] == nil
+                && MaterialNoteGating.unavailableReason(memberIDs: ids, catalog: model.sourcePageIndex.recordsByID) == nil
+                && seen.insert(key).inserted
         }.sorted {
             let left = $0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast
             let right = $1.expressedDate ?? ConversationReflectionFocus.date($1.createdAt) ?? .distantPast
@@ -36,32 +40,74 @@ struct NotesLibraryView: View {
     private var filtered: [NoteLibraryRow] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return notes }
-        return notes.filter { $0.searchableText.localizedCaseInsensitiveContains(q) }
+        return notes.filter { $0.searchableText.localizedStandardContains(q) }
     }
 
     var body: some View {
         let pendingMaterials = self.pendingMaterials
         let filtered = self.filtered
-        return LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            HStack(alignment: .firstTextBaseline) {
-                WorkspaceHeading(eyebrow: "", title: "笔记")
-                Spacer()
-                Text("\(notes.count) 篇 · 按整理时间").vosFont(WorkspaceText.meta)
-                    .foregroundStyle(palette.secondaryText)
+        return LazyVStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 9) {
+                Text("笔记").vosFont(WorkspaceText.pageTitle).accessibilityAddTraits(.isHeader)
+                if !notes.isEmpty {
+                    Text("\(notes.count) 篇").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
+                Spacer(minLength: 8)
+                WorkspaceSearchField(text: $query, placeholder: "搜索笔记")
+                    .frame(maxWidth: 200)
+                    .accessibilityIdentifier("notes.search")
             }
-            if !pendingMaterials.isEmpty {
+            if notes.isEmpty {
+                Text("还没有整理出笔记。打开一份材料让它整理成笔记后，会出现在这里。")
+                    .foregroundStyle(palette.secondaryText)
+            } else if filtered.isEmpty {
+                Text("没有匹配的笔记").foregroundStyle(palette.secondaryText)
+            } else {
+                let groups = Dictionary(grouping: filtered, by: \.day)
+                ForEach(groups.keys.sorted { ($0 ?? .distantPast) > ($1 ?? .distantPast) }, id: \.self) { day in
+                    let entries = groups[day] ?? []
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let day {
+                                Text(day.formatted(.dateTime.day(.twoDigits)))
+                                    .vosFont(26, weight: .medium, monospacedDigit: true)
+                                Text(day.formatted(.dateTime.year().month(.abbreviated)))
+                                    .vosFont(WorkspaceText.caption)
+                                    .foregroundStyle(palette.secondaryText)
+                            } else {
+                                Text("日期未知").vosFont(WorkspaceText.meta)
+                            }
+                        }
+                        .frame(width: 78, alignment: .leading)
+                        .padding(.top, 12)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(day?.formatted(date: .long, time: .omitted) ?? "日期未知")
+                        .accessibilityAddTraits(.isHeader)
+
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(entries) { stored in
+                                if stored.id != entries.first?.id {
+                                    WorkspaceListDivider().padding(.horizontal, 18)
+                                }
+                                noteRow(stored)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(palette.border) }
+                    }
+                }
+            }
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !pendingMaterials.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
-                        WorkspaceSectionHeading("待处理", count: "\(pendingMaterials.count)")
+                        WorkspaceSectionHeading("待整理成笔记", count: "\(pendingMaterials.count)")
                         Spacer(minLength: 8)
                         Button("全部材料", action: openMaterials)
                             .buttonStyle(.workspaceQuietCompact)
                     }
                     WorkspaceListDivider()
-                    if selectedPending.isEmpty {
-                        Text("点左侧圆圈挑选，或直接点开一份整理")
-                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-                    } else {
+                    if !selectedPending.isEmpty {
                         HStack(spacing: 10) {
                             Text("已选 \(selectedPending.count) 份").vosFont(WorkspaceText.meta)
                             Button(organizingSelected ? "整理中…" : "整理成笔记（\(selectedPending.count) 份）") {
@@ -89,6 +135,7 @@ struct NotesLibraryView: View {
                                 } label: {
                                     Image(systemName: selectedPending.contains(record.id) ? "checkmark.circle.fill" : "circle")
                                         .foregroundStyle(selectedPending.contains(record.id) ? palette.accent : palette.tertiaryText)
+                                        .padding(4).contentShape(Rectangle()).workspaceHoverHighlight()
                                 }
                                 .buttonStyle(.plain)
                                 .help(selectedPending.contains(record.id) ? "取消选择" : "选择这份材料")
@@ -101,13 +148,11 @@ struct NotesLibraryView: View {
                                         .lineLimit(2)
                                         .fixedSize(horizontal: false, vertical: true)
                                     Spacer(minLength: 8)
-                                    Text((readingStates[record.id] ?? .unread) == .reading ? "在读" : "未读")
-                                        .vosFont(WorkspaceText.caption)
-                                        .foregroundStyle(palette.tertiaryText)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
                                 .padding(.vertical, 8)
+                                .padding(.horizontal, 6)
+                                .contentShape(Rectangle()).workspaceHoverHighlight()
                             }
                             .buttonStyle(.plain)
                             .help("打开并整理成笔记")
@@ -121,57 +166,60 @@ struct NotesLibraryView: View {
                     }
                 }
             }
-            WorkspaceSearchField(text: $query, placeholder: "搜索笔记标题或正文")
-                .accessibilityIdentifier("notes.search")
-            if notes.isEmpty {
-                Text("还没有整理出笔记。打开一份材料让它整理成笔记后，会出现在这里。")
-                    .foregroundStyle(palette.secondaryText)
-            } else if filtered.isEmpty {
-                Text("没有匹配的笔记").foregroundStyle(palette.secondaryText)
-            } else {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, stored in
-                        if index > 0 { WorkspaceListDivider() }
-                        Button { open(stored) } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 13) {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    // 标题不截断：长短由内容决定，列表用换行与滚动适配。
-                                    Text(stored.title)
-                                        .vosFont(WorkspaceText.rowTitle)
-                                        .foregroundStyle(palette.text)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .multilineTextAlignment(.leading)
-                                    if let preview = stored.preview {
-                                        Text(preview).vosFont(WorkspaceText.meta)
-                                            .foregroundStyle(palette.secondaryText)
-                                            .lineLimit(2)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                }
-                                Spacer(minLength: 8)
-                                Text(String(stored.createdAt.prefix(10)))
-                                    .vosFont(WorkspaceText.caption, monospacedDigit: true)
-                                    .foregroundStyle(palette.tertiaryText)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .padding(.vertical, 10)
-                        }
-                        .buttonStyle(.plain)
-                        .help("打开这篇笔记，回到上次读到的位置")
-                        .accessibilityIdentifier("notes.row")
-                    }
-                }
-            }
         }
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
             guard let store = model.store else { return }
             let trashed = Set(model.records.lazy.filter(\.isTrashed).map(\.id))
             let rows = try? await store.noteLibraryRows(excluding: trashed)
-            if !Task.isCancelled, let rows { notes = rows }
+            if !Task.isCancelled, let rows { notes = rows; notesLoaded = true }
         }
-        .task(id: model.recordsRevision) { readingStates = await model.readingStates() }
+    }
+
+    private var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func noteRow(_ stored: NoteLibraryRow) -> some View {
+        Button { open(stored) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(highlight(stored.title)).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !term.isEmpty, let excerpt = preview(for: stored) {
+                    Text(highlight(excerpt)).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText).lineLimit(2)
+                } else if let lead = stored.preview, lead != stored.title {
+                    // One quiet line of the note's opening gives each title a
+                    // body, so a day of notes stops reading as a wall of heads.
+                    Text(lead).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.tertiaryText).lineLimit(1)
+                }
+            }
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, 18).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle()).workspaceHoverHighlight()
+        }
+        .buttonStyle(.plain)
+        .help(stored.preview ?? stored.title)
+        .accessibilityIdentifier("notes.row")
+    }
+
+    private func preview(for row: NoteLibraryRow) -> String? {
+        guard !term.isEmpty, row.title.localizedStandardRange(of: term) == nil,
+              let match = row.searchableText.localizedStandardRange(of: term) else { return row.preview }
+        let left = row.searchableText[..<match.lowerBound].suffix(14)
+        let right = row.searchableText[match.upperBound...].prefix(64)
+        let prefix = left.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).last ?? ""
+        return String(prefix) + String(row.searchableText[match]) + String(right.prefix { !$0.isNewline })
+    }
+
+    private func highlight(_ value: String) -> AttributedString {
+        var text = AttributedString(value)
+        if !term.isEmpty, let match = value.localizedStandardRange(of: term),
+           let range = Range(match, in: text) {
+            text[range].inlinePresentationIntent = .stronglyEmphasized
+            text[range].underlineStyle = .single
+        }
+        return text
     }
 
     private func open(_ stored: NoteLibraryRow) {
@@ -201,7 +249,7 @@ private struct NoteLibraryRow: Identifiable, Sendable {
     let expressionKey: String
     let title: String
     let preview: String?
-    let createdAt: String
+    let day: Date?
     let searchableText: String
 }
 
@@ -212,7 +260,8 @@ private extension VoiceOSStore {
             return NoteLibraryRow(id: stored.id, expressionKey: stored.expressionKey,
                            title: MaterialNoteHomeText.title(stored.note) ?? "未命名笔记",
                            preview: MaterialNoteHomeText.preview(stored.note),
-                           createdAt: stored.createdAt, searchableText: stored.note.searchableText)
+                           day: ConversationReflectionFocus.date(stored.createdAt).map { Calendar.current.startOfDay(for: $0) },
+                           searchableText: stored.note.searchableText)
         }
     }
 }
