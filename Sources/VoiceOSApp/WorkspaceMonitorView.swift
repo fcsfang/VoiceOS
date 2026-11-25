@@ -1055,8 +1055,22 @@ struct WorkspaceMonitorView: View {
                     .textSelection(.enabled)
             }
             if !model.monitorQQDiagnostics.isEmpty {
+                // Passing checks collapse into one line; only the ones that need
+                // action are listed, so a healthy setup reads as one quiet fact.
+                let failing = model.monitorQQDiagnostics.filter { !$0.ok }
+                let passing = model.monitorQQDiagnostics.filter(\.ok)
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(model.monitorQQDiagnostics) { item in
+                    if !passing.isEmpty {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.success).accessibilityHidden(true)
+                            Text(failing.isEmpty ? "环境检查全部通过（\(passing.count) 项）" : "\(passing.count) 项检查通过")
+                                .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        }
+                        .help(passing.map { $0.title + "：" + $0.detail }.joined(separator: "\n"))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("通过：" + passing.map(\.title).joined(separator: "、"))
+                    }
+                    ForEach(failing) { item in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: item.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                                 .foregroundStyle(item.ok ? palette.success : palette.warning)
@@ -1069,9 +1083,6 @@ struct WorkspaceMonitorView: View {
                         .accessibilityLabel((item.ok ? "通过，" : "需要处理，") + item.title + "，" + item.detail)
                     }
                 }
-                .padding(10)
-                .background(palette.selection.opacity(0.35),
-                            in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             }
             if qqNeedsFullDiskAccess {
                 VStack(alignment: .leading, spacing: 8) {

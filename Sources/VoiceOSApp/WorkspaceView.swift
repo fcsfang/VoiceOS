@@ -166,6 +166,9 @@ struct WorkspaceRow: View {
         case link
         case dot(Color)
         case badge(WorkspaceBadge.Tone)
+        /// Navigation only: a chevron, with the verb kept for hover and VoiceOver.
+        /// For lists where every row would otherwise repeat the same 查看… label.
+        case chevron
     }
     struct CompletionControl {
         let enabled: Bool
@@ -236,6 +239,7 @@ struct WorkspaceRow: View {
         var parts=[title]
         if !subtitle.isEmpty { parts.append(subtitle) }
         if !statusAccessibility.isEmpty { parts.append(statusAccessibility) }
+        else if case .chevron = trailingStyle, !trailing.isEmpty { parts.append(trailing) }
         return parts.joined(separator:" · ")
     }
     private var titleAndTrailing: some View {
@@ -270,6 +274,8 @@ struct WorkspaceRow: View {
             }.padding(.top,3).help(trailing)
         case .badge(let tone):
             WorkspaceBadge(text:trailing, tone:tone).padding(.top,1).help(trailing)
+        case .chevron:
+            WorkspaceRowChevron().padding(.top,3).help(trailing)
         }
     }
 }
