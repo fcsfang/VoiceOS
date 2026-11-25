@@ -1344,3 +1344,4 @@
 - 审查→实现→截图验证见 work/tasks/2026-11-25-ui-polish/TASK.md。
 - 集成：main 快进到 origin/main（PR #250）后 --no-ff 合入 ui-polish-20261125，连带 Codex 分支 e176d9b..42c8023 的 10 个提交。
 - 集成构建 build_exit=0；全量 test_exit=0（592 tests）；dist_build_exit=0。
+- 重启：restart_preflight rc=0（idle 316s，无 running 主题整理）→ 正式实例改由 main 的 dist/VoiceOS.app 运行（pid 96905）。
