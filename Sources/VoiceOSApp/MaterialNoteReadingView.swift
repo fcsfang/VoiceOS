@@ -27,6 +27,20 @@ private struct MaterialNoteDisplay: Equatable {
     let isCurrent: Bool
 }
 
+private struct HistoryConnectorAnchors: PreferenceKey {
+    enum Endpoint: Hashable {
+        case paragraph(String)
+        case card(String)
+        case articleViewport
+        case listViewport
+    }
+
+    static let defaultValue: [Endpoint: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [Endpoint: Anchor<CGRect>], nextValue: () -> [Endpoint: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
 
 struct MaterialNoteReadingView: View {
     @Environment(\.workspacePalette) private var palette
@@ -37,7 +51,7 @@ struct MaterialNoteReadingView: View {
     var openTask: (String) -> Void = { _ in }
     var openDiscussion: (String) -> Void = { _ in }
     var openHistoryNote: ((String) -> Void)? = nil
-    var scrollToHistoryParagraph: ((String) -> Void)? = nil
+    var backToNotes: (() -> Void)? = nil
     var relatedActions: [ActionRecord] = []
     var relatedDiscussions: [ConversationRecord] = []
     @Binding var hasNote: Bool
@@ -59,6 +73,7 @@ struct MaterialNoteReadingView: View {
     @State private var historyNotice: String?
     @State private var historySelection: String?
     @State private var historyPresented = false
+    @State private var articlePosition = ScrollPosition(edge: .top)
 
     private var catalog: [String: SourceRecord] { model.sourcePageIndex.recordsByID }
     private var expression: RecordingExpression? { model.sourcePageIndex.expression(for: source.id) }
@@ -90,6 +105,47 @@ struct MaterialNoteReadingView: View {
     }
 
     var body: some View {
+        Group {
+            if let backToNotes {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+                            HStack {
+                                Button("所有笔记", systemImage: "arrow.left", action: backToNotes)
+                                    .buttonStyle(.workspaceQuietCompact)
+                                Spacer()
+                                Button("查看材料与原文", systemImage: "books.vertical") { openSource(source.id) }
+                                    .buttonStyle(.workspaceQuietCompact)
+                            }
+                            readingContent
+                        }
+                        .scrollTargetLayout()
+                        .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
+                        .padding(WorkspaceMetrics.pagePadding)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .scrollPosition(restoreScroll ?? $articlePosition)
+                    .transformAnchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) { value, anchor in
+                        value[.articleViewport] = anchor
+                    }
+                    if historyPresented {
+                        Divider()
+                        historyInspector.frame(width: 300)
+                    }
+                }
+                .overlayPreferenceValue(HistoryConnectorAnchors.self) { endpoints in
+                    if historyPresented { historyConnectors(endpoints) }
+                }
+            } else {
+                readingContent
+            }
+        }
+        .onChange(of: historyPresented) { _, presented in
+            if !presented { historySelection = nil }
+        }
+    }
+
+    private var readingContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             if let boardNotice {
                 Text(boardNotice)
@@ -113,13 +169,6 @@ struct MaterialNoteReadingView: View {
         .task(id: readKey) { await load() }
         .task(id: historyReadKey) { await loadHistory() }
         .task(id: historyRun) { if historyRun { await generateHistory() } }
-        .inspector(isPresented: $historyPresented) {
-            historyInspector
-                .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
-        }
-        .onChange(of: historyPresented) { _, presented in
-            if !presented { historySelection = nil }
-        }
         .task(id: requestKey) { await requestNote() }
         .sheet(item: $editing) { base in
             MaterialNoteEditor(base: base) { draft in
@@ -275,6 +324,9 @@ struct MaterialNoteReadingView: View {
                             .accessibilityAddTraits(selected ? .isSelected : [])
                             .accessibilityIdentifier("note.history.marker")
                             .help("历史批注")
+                            .anchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) {
+                                [.paragraph(anchor): $0]
+                            }
                         } else {
                             Color.clear.frame(height: 0).accessibilityHidden(true)
                         }
@@ -857,6 +909,9 @@ struct MaterialNoteReadingView: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .transformAnchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) { value, anchor in
+                        value[.listViewport] = anchor
+                    }
                 .onChange(of: historySelection) { _, anchor in
                     if let anchor { proxy.scrollTo(anchor, anchor: .top) }
                 }
@@ -887,7 +942,8 @@ struct MaterialNoteReadingView: View {
         return VStack(alignment: .leading, spacing: 10) {
             Button {
                 historySelection = annotation.id
-                scrollToHistoryParagraph?(annotation.paragraphID)
+                let position = restoreScroll ?? $articlePosition
+                position.wrappedValue.scrollTo(id: annotation.paragraphID, anchor: .center)
             } label: {
                 HStack(spacing: 8) {
                     historyIndex(number, selected: selected)
@@ -902,6 +958,9 @@ struct MaterialNoteReadingView: View {
             .workspaceHoverHighlight()
             .accessibilityLabel("查看历史批注 \(number) 对应段落")
             .accessibilityIdentifier("note.history.jump")
+            .anchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) {
+                [.card(annotation.id): $0]
+            }
             Text(annotation.text)
                 .vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
                 .accessibilityIdentifier("note.history.annotation")
@@ -939,6 +998,37 @@ struct MaterialNoteReadingView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? palette.accent : palette.border)
         }
+    }
+
+    private func historyConnectors(_ endpoints: [HistoryConnectorAnchors.Endpoint: Anchor<CGRect>]) -> some View {
+        GeometryReader { geometry in
+            Canvas { context, size in
+                guard let viewportAnchor = endpoints[.listViewport],
+                      let articleAnchor = endpoints[.articleViewport] else { return }
+                let viewport = geometry[viewportAnchor]
+                let article = geometry[articleAnchor]
+                for annotation in orderedHistory {
+                    let id = annotation.id
+                    guard let paragraph = endpoints[.paragraph(id)], let card = endpoints[.card(id)] else { continue }
+                    let left = geometry[paragraph], right = geometry[card]
+                    let start = CGPoint(x: left.midX + 10, y: left.midY)
+                    let end = CGPoint(x: right.minX - 12, y: right.midY)
+                    guard end.x > start.x, start.y >= max(0, article.minY), start.y <= min(size.height, article.maxY),
+                          end.y >= max(0, viewport.minY), end.y <= min(size.height, viewport.maxY) else { continue }
+
+                    let bend = (end.x - start.x) * 0.55
+                    let selected = historySelection == id
+                    var line = Path()
+                    line.move(to: start)
+                    line.addCurve(to: end, control1: CGPoint(x: start.x + bend, y: start.y),
+                                  control2: CGPoint(x: end.x - bend, y: end.y))
+                    context.stroke(line, with: .color(palette.accent.opacity(selected ? 0.85 : 0.42)),
+                                   style: StrokeStyle(lineWidth: selected ? 1.75 : 1, lineCap: .round))
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private func loadHistory() async {

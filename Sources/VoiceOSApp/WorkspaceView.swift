@@ -788,23 +788,11 @@ struct WorkspaceView: View {
     /// 纯笔记阅读页：只有文章本体与「查看材料与原文」入口，材料工具不出现。
     @ViewBuilder private func noteReadingPage(_ id: String) -> some View {
         if let source = model.sourcePageIndex.recordsByID[id] {
-            ScrollViewReader { proxy in
-                scrolled(scroll: sourceScrollBinding("note-reading:" + id)) {
-                    VStack(alignment:.leading, spacing: WorkspaceMetrics.sectionGap) {
-                        HStack {
-                            Button("所有笔记",systemImage:"arrow.left") { back() }.buttonStyle(.workspaceQuietCompact)
-                            Spacer()
-                            Button("查看材料与原文",systemImage:"books.vertical") { go(.source(id)) }.buttonStyle(.workspaceQuietCompact)
-                        }
-                        MaterialNoteReadingView(model: model, source: source,
-                            openSource: { go(.source($0)) }, openTask: { go(.task($0)) },
-                            openDiscussion: { conv in Task { await openSavedDiscussion(conv) } },
-                            openHistoryNote: { go(.note($0)) },
-                            scrollToHistoryParagraph: { proxy.scrollTo($0, anchor: .center) },
-                            hasNote: $notePageHasNote, restoreScroll: sourceScrollBinding("note-reading:" + id))
-                    }
-                }
-            }
+            MaterialNoteReadingView(model: model, source: source,
+                openSource: { go(.source($0)) }, openTask: { go(.task($0)) },
+                openDiscussion: { conv in Task { await openSavedDiscussion(conv) } },
+                openHistoryNote: { go(.note($0)) }, backToNotes: { back() },
+                hasNote: $notePageHasNote, restoreScroll: sourceScrollBinding("note-reading:" + id))
         } else { unavailable("这篇笔记暂时不可用",description:"可以回到笔记列表，或打开材料页。",actionTitle:"回到笔记") { go(.notes) } }
     }
     /// 保存视图区与行都单独成函数：侧栏表达式整体过大会触发类型检查超时。
