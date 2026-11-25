@@ -1351,3 +1351,10 @@
 - 次级页面容器语言与令牌一致性，详见 work/tasks/2026-11-25-ui-wave2/TASK.md。
 - 集成构建 build_exit=0；全量 test_exit=0（592 tests）；dist_build_exit=0。
 - 重启：等待空闲窗口后 restart_preflight rc=0，10:03 正式实例换为第二波 dist（pid 12214）。
+
+## 2026-11-25 UI 第三波（合并 f50ff98）
+
+- 接续自 opus-5.5 CLI 会话（高倍率模型额度用尽中断），工作树 `.worktrees/ui-wave3`，分支 `ui-wave3-20261125`；详见 work/tasks/2026-11-25-ui-wave3/TASK.md。
+- 处理情况页：`需要重新核对的原件` 按 error 原因分组（92 → 9 + 83 两组），计数从 warning 徽标改为普通等宽小字；`WorkspaceRow` 新增 `.chevron` 导航尾标，动词保留给 hover 与 VoiceOver。材料页：`SourceFold` 去卡片壳改为画布折叠标题（chevron 旋转 + 标题 + 计数 + 发丝线），嵌套 `SourceSection` 降级为组头；监测页通过项收拢一行、失败项单列并去掉底色块。
+- 复核：隔离实例确认分组与计数；`处理记录` 折叠 AXPress 后 value 由「已收起」变「已展开」，CLI 会话的「点不开」为自动化点重假象，非回归。
+- 集成构建 build_exit=0；全量 test_exit=0（592 tests）；dist 重建。
