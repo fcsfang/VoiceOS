@@ -9,6 +9,9 @@ struct WorkspaceDiscussionView: View {
     @Binding var draft: String
     let close: () -> Void
     let openSource: (String) -> Void
+    var embedded = false
+    var noteExpressionKey: String? = nil
+    var openSavedDiscussion: ((String) -> Void)? = nil
     @FocusState private var editorFocused: Bool
     @State private var confirmingEnd = false
     @State private var showingHistory = false
@@ -29,14 +32,14 @@ struct WorkspaceDiscussionView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Label("一起思考", systemImage: "sparkles").vosFont(WorkspaceText.rowTitle)
+                    if !embedded { Label("一起思考", systemImage: "sparkles").vosFont(WorkspaceText.rowTitle) }
                     Text(contextTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2)
                 }
                 Spacer()
                 Button("历史讨论", systemImage: "clock.arrow.circlepath") { showingHistory = true }
                     .buttonStyle(.workspaceSecondaryCompact)
                     .disabled(busy)
-                WorkspaceIconButton(systemImage: "xmark", label: "收起讨论，保留阅读位置") { close() }
+                if !embedded { WorkspaceIconButton(systemImage: "xmark", label: "收起讨论，保留阅读位置") { close() } }
             }.padding(18)
             WorkspaceListDivider()
             ScrollViewReader { reader in
@@ -174,7 +177,7 @@ struct WorkspaceDiscussionView: View {
                 Text("将调用一次模型把讨论整理为记录，会产生用量。")
             }
             .sheet(isPresented: $showingHistory) {
-                DiscussionHistoryView(model: model, close: { showingHistory = false })
+                DiscussionHistoryView(model: model, close: { showingHistory = false }, noteExpressionKey: noteExpressionKey, openSavedDiscussion: openSavedDiscussion)
             }
             .task {
                 // A focus write before the field attaches to its window is dropped.

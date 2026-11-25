@@ -42,6 +42,11 @@ private struct HistoryConnectorAnchors: PreferenceKey {
     }
 }
 
+enum NoteSidebarTab: String, Hashable {
+    case history = "历史批注"
+    case discussion = "AI 讨论"
+}
+
 struct MaterialNoteReadingView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
@@ -57,6 +62,9 @@ struct MaterialNoteReadingView: View {
     @Binding var hasNote: Bool
     /// 材料页的滚动位置；重开页面时据此回到上次读到的段落。
     var restoreScroll: Binding<ScrollPosition>? = nil
+    var sidebar: Binding<NoteSidebarTab?>? = nil
+    var discussionPanel: AnyView? = nil
+    var discussParagraph: ((String) -> Void)? = nil
 
     @State private var display: MaterialNoteDisplay?
     @State private var editing: StoredMaterialNote?
@@ -72,7 +80,7 @@ struct MaterialNoteReadingView: View {
     @State private var historyRun = false
     @State private var historyNotice: String?
     @State private var historySelection: String?
-    @State private var historyPresented = false
+    private var historyPresented: Bool { sidebar?.wrappedValue == .history }
     @State private var articlePosition = ScrollPosition(edge: .top)
 
     private var catalog: [String: SourceRecord] { model.sourcePageIndex.recordsByID }
@@ -128,9 +136,28 @@ struct MaterialNoteReadingView: View {
                     .transformAnchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) { value, anchor in
                         value[.articleViewport] = anchor
                     }
-                    if historyPresented {
+                    if let sidebar, sidebar.wrappedValue != nil {
                         Divider()
-                        historyInspector.frame(width: 300)
+                        VStack(spacing: 0) {
+                            Picker("侧栏", selection: Binding(
+                                get: { sidebar.wrappedValue ?? .history },
+                                set: { sidebar.wrappedValue = $0 }
+                            )) {
+                                Text("历史批注").tag(NoteSidebarTab.history)
+                                Text("AI 讨论").tag(NoteSidebarTab.discussion)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .padding(12)
+                            Divider()
+                            if historyPresented {
+                                historyInspector
+                            } else {
+                                discussionPanel
+                            }
+                        }
+                        .frame(width: 320)
+                        .background(palette.canvas)
                     }
                 }
                 .overlayPreferenceValue(HistoryConnectorAnchors.self) { endpoints in
@@ -301,6 +328,13 @@ struct MaterialNoteReadingView: View {
                     .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contextMenu {
+                        if let discussParagraph {
+                            Button("讨论这一段", systemImage: "bubble.left.and.bubble.right") {
+                                discussParagraph(paragraph.text)
+                            }
+                        }
+                    }
                     .background {
                         if selected {
                             RoundedRectangle(cornerRadius: 6)
@@ -646,14 +680,6 @@ struct MaterialNoteReadingView: View {
                 .foregroundStyle(palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            if !orderedHistory.isEmpty {
-                Button("历史批注", systemImage: "sidebar.right") {
-                    historyPresented.toggle()
-                }
-                .buttonStyle(.workspaceQuietCompact)
-                .accessibilityIdentifier("note.history.toggle")
-                .accessibilityValue(historyPresented ? "已展开" : "已收起")
-            }
             // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
             Menu {
                 if historyPilot != nil {
@@ -892,12 +918,10 @@ struct MaterialNoteReadingView: View {
 
     private var historyInspector: some View {
         VStack(alignment: .leading, spacing: 0) {
-            WorkspaceSectionHeading(title: "历史批注") {
-                Button("关闭", systemImage: "xmark") { historyPresented = false }
-                    .labelStyle(.iconOnly).buttonStyle(.workspaceQuietCompact)
+            if orderedHistory.isEmpty {
+                ContentUnavailableView("暂无历史批注", systemImage: "text.bubble")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(16)
-            Divider()
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
@@ -970,7 +994,7 @@ struct MaterialNoteReadingView: View {
             ForEach(Array(Set(annotation.sourceIDs)).sorted(), id: \.self) { id in
                 if let title = validHistory?.sourceTitles[id] {
                     Button {
-                        historyPresented = false
+                        sidebar?.wrappedValue = nil
                         openHistoryNote?(id)
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1045,7 +1069,6 @@ struct MaterialNoteReadingView: View {
         } else if key == historyReadKey && !Task.isCancelled {
             historyResult = nil
             historySelection = nil
-            historyPresented = false
         }
     }
 
@@ -1132,7 +1155,7 @@ struct MaterialNoteReadingView: View {
             historyResult = result
             historyNotice = annotations.isEmpty ? "没有找到值得补充的前情。" : nil
             if !annotations.contains(where: { $0.id == historySelection }) { historySelection = nil }
-            if annotations.isEmpty { historyPresented = false }
+
         } catch is CancellationError {
             return
         } catch {

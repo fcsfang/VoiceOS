@@ -9,7 +9,12 @@ public struct LocalTranscriptContext: Codable, Sendable {
     public let contentDigest: String
     public var conversationFocus: ConversationThoughtFocus? = nil
     public var reflectionFocus: ConversationReflectionFocus? = nil
+    public var noteFocus: ConversationNoteFocus? = nil
     public var recordingContexts: [RecordingContext]? = nil
+}
+public struct ConversationNoteFocus: Codable, Sendable, Equatable {
+    public let noteID: String
+    public let text: String
 }
 public struct ContextTranscript: Codable, Sendable {
     public let sourceID: String

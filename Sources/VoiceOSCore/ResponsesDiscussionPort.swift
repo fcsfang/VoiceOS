@@ -36,6 +36,9 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
         if let pairs=s.context.recordingContexts,!pairs.isEmpty {
             messages.append(["role":"user","content":try text(["type":"recording_contexts","pairings":JSONSerialization.jsonObject(with:encoder.encode(pairs))])])
         }
+        if let note = s.context.noteFocus {
+            messages.append(["role":"user","content":try text(["type":"current_note","noteID":note.noteID,"text":note.text])])
+        }
         if let focus = s.context.conversationFocus {
             messages.append(["role":"user","content":try text(["type":"discussion_focus","focus":JSONSerialization.jsonObject(with: encoder.encode(focus))])])
         }
@@ -66,8 +69,11 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
         let reference:[String:Any] = ["type":"object","properties":["sourceID":["type":"string"],"transcriptVersionID":["type":"string"],"spanID":["type":"string"]],"required":["sourceID","transcriptVersionID","spanID"],"additionalProperties":false]
         let part:[String:Any] = ["type":"object","properties":["kind":["type":"string","enum":["quotation","ai_suggestion"]],"text":["type":"string"],"references":["type":"array","items":reference]],"required":["kind","text","references"],"additionalProperties":false]
         let schema:[String:Any] = ["type":"object","properties":["parts":["type":"array","items":part]],"required":["parts"],"additionalProperties":false]
-        let focused = s.context.conversationFocus != nil || s.context.reflectionFocus != nil || s.context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) > 4000
+        let focused = s.context.noteFocus != nil || s.context.conversationFocus != nil || s.context.reflectionFocus != nil || s.context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) > 4000
         var instructions = Self.instructions
+        if s.context.noteFocus != nil {
+            instructions += "\n围绕 current_note 和用户的问题展开讨论，结合原始材料深入分析。笔记是整理后的内容，原始材料提供出处。"
+        }
         if s.context.recordingContexts?.isEmpty == false {
             instructions += "\n配对录音中 externalTime + offsetMS = personalTime。结合双方语义判断指代和态度，区分节目观点与用户的回应，分别引用各自的片段。"
         }

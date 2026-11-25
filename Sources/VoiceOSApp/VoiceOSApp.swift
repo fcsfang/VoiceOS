@@ -5413,15 +5413,15 @@ extension ControlCenter {
             await refreshDiscussion(); return true
         } catch { discussionStatus=error.localizedDescription; return false }
     }
-    func beginDiscussion(_ record:SourceRecord) async -> Bool {
+    func beginDiscussion(_ record:SourceRecord, note: StoredMaterialNote? = nil) async -> Bool {
         guard let store,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return false }
         discussionSaving=true;defer { discussionSaving=false }
         do {
-            let members=record.recordingExpression?.sourceIDs ?? [record.id]
+            let members = note.map { Array($0.transcriptVersions.keys).sorted() } ?? record.recordingExpression?.sourceIDs ?? [record.id]
             let sources=try await store.recordingContextSourceIDs(sourceIDs:members)
-            let id=try await store.beginConversation(sourceIDs:sources)
+            let id=try await store.beginConversation(sourceIDs:sources, note: note)
             discussionSession=try await store.conversation(id:id);discussionRecordingID=nil
-            discussionStatus=members.count > 1 ? "已带上本次连续表达的全部录音，输入问题后直接发送。" : "已带上这份材料，输入问题后直接发送。"
+            discussionStatus = note != nil ? "已带上当前笔记与原始材料。" : members.count > 1 ? "已带上本次连续表达的全部录音，输入问题后直接发送。" : "已带上这份材料，输入问题后直接发送。"
             await refreshDiscussion();return true
         } catch { status=error.localizedDescription;return false }
     }

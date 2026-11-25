@@ -103,7 +103,7 @@ extension VoiceOSStore {
     }
     /// One row per session for the history list: the first user turn stands in
     /// for the topic, and activity means creation, a later turn or the close.
-    public func conversationPreviews(limit: Int = 100) throws -> [ConversationPreview] {
+    public func conversationPreviews(limit: Int = 100, noteExpressionKey: String? = nil) throws -> [ConversationPreview] {
         guard ready, (1...500).contains(limit) else { throw VoiceOSError("讨论历史范围无效") }
         let rows = try db.query("""
             SELECT c.id,c.version,c.state,c.validity,c.entry_context_id,c.created_at,c.ended_at,
@@ -114,8 +114,12 @@ extension VoiceOSStore {
                        coalesce((SELECT MAX(u.created_at) FROM conversation_user_turns u WHERE u.conversation_id=c.id), c.created_at),
                        coalesce(c.ended_at, c.created_at)) AS updated_at
             FROM conversations c
+            WHERE (? IS NULL OR EXISTS (
+                SELECT 1 FROM contexts x JOIN material_notes n ON n.id=json_extract(x.snapshot_json,'$.noteFocus.noteID')
+                WHERE x.id=c.entry_context_id AND n.expression_key=?
+            ))
             ORDER BY updated_at DESC,c.id DESC LIMIT ?
-            """,[String(limit)])
+            """,[noteExpressionKey,noteExpressionKey,String(limit)])
         guard !rows.isEmpty else { return [] }
         let ids = rows.map { $0["id"]! }
         var turnContexts: [String: [String]] = [:]
@@ -194,16 +198,29 @@ extension VoiceOSStore {
         return try storedConversationContext(session.entryContextID).sources
     }
     /// Only an explicit entry command creates a session. Entry never processes or endorses text.
-    public func beginConversation(sourceIDs: [String], commandID: String = UUID().uuidString) throws -> String {
+    public func beginConversation(sourceIDs: [String], note: StoredMaterialNote? = nil, commandID: String = UUID().uuidString) throws -> String {
         guard ready, !commandID.isEmpty, !sourceIDs.isEmpty, Set(sourceIDs).count == sourceIDs.count else {
             throw VoiceOSError("请明确选择讨论来源和有效进入命令")
         }
         if let old = try db.query("SELECT * FROM conversations WHERE entry_command_id=?", [commandID]).first {
             let snapshot = try storedConversationContext(old["entry_context_id"]!)
-            guard snapshot.sources.map(\.sourceID) == (try completeConversationSourceIDs(sourceIDs)) else { throw VoiceOSError("同一进入命令不能更换讨论来源") }
+            guard snapshot.sources.map(\.sourceID) == (try completeConversationSourceIDs(sourceIDs)), snapshot.noteFocus?.noteID == note?.id else { throw VoiceOSError("同一进入命令不能更换讨论来源") }
             return old["id"]!
         }
-        let snapshot = try prepareFullDiscussionContext(sourceIDs:sourceIDs)
+        var snapshot = try prepareFullDiscussionContext(sourceIDs:sourceIDs)
+        if let note {
+            guard let current = try latestMaterialNote(memberSourceIDs: Array(note.transcriptVersions.keys)),
+                  current.id == note.id,
+                  note.transcriptVersions.allSatisfy({ id, version in
+                      snapshot.sources.contains { $0.sourceID == id && $0.transcriptVersionID == version }
+                  }) else { throw VoiceOSError("笔记已更新，请重新打开") }
+            snapshot.noteFocus = ConversationNoteFocus(noteID: current.id, text: current.note.searchableText)
+            for session in try conversationsForSource(sourceID: sourceIDs[0]) where session.state == "active" && session.validity == "current" {
+                if try storedConversationContext(session.entryContextID).noteFocus == snapshot.noteFocus {
+                    return session.id
+                }
+            }
+        }
         guard snapshot.sources.contains(where: { !$0.text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty }) else {
             throw VoiceOSError("讨论来源没有可用文字")
         }
@@ -402,6 +419,7 @@ extension VoiceOSStore {
         var snapshot = try prepareFullDiscussionContext(sourceIDs:ids,minimumBudget:scalarBudget,replyCharacters:replyCharacters)
         snapshot.conversationFocus = entry.conversationFocus
         snapshot.reflectionFocus = entry.reflectionFocus
+        snapshot.noteFocus = entry.noteFocus
         let contextID = try persistLocalContext(snapshot,commandID:commandID,destination:destination)
         return PreparedConversationInput(conversationID:id,conversationVersion:expectedVersion,contextID:contextID,
                                          historySourceIDs:history,userTurns:turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) },destination:destination)
@@ -429,6 +447,7 @@ extension VoiceOSStore {
         if let focus = snapshot.reflectionFocus { try validateReflectionFocus(focus) }
         guard try Self.relevanceJSON(snapshot.conversationFocus) == Self.relevanceJSON(entry.conversationFocus) else { throw VoiceOSError("讨论焦点与入口不一致") }
         guard try Self.relevanceJSON(snapshot.reflectionFocus) == Self.relevanceJSON(entry.reflectionFocus) else { throw VoiceOSError("完整讨论范围与入口不一致") }
+        guard snapshot.noteFocus == entry.noteFocus else { throw VoiceOSError("笔记讨论依据不一致") }
         guard snapshot.sources.map(\.sourceID) == (try completeConversationSourceIDs(ids)) else { throw VoiceOSError("实际讨论输入缺少来源或混入未选择历史") }
         return snapshot
     }
