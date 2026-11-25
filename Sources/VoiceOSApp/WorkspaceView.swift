@@ -241,7 +241,7 @@ struct WorkspaceRow: View {
     private var titleAndTrailing: some View {
         HStack(alignment:.top,spacing:14) {
             VStack(alignment:.leading,spacing:3) {
-                Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(titleLineLimit ?? (textScale >= 1.3 ? 3 : 2)).fixedSize(horizontal:false,vertical:true).help(title)
+                Text(title).vosFont(WorkspaceText.rowTitle.size, weight: .medium).lineSpacing(3).lineLimit(titleLineLimit ?? (textScale >= 1.3 ? 3 : 2)).fixedSize(horizontal:false,vertical:true).help(title)
                 if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(subtitleTone ?? palette.secondaryText).lineSpacing(3).lineLimit(textScale >= 1.3 ? 3 : 2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
             }
             Spacer(minLength:8)
@@ -2730,8 +2730,9 @@ struct WorkspaceView: View {
                     WorkspaceThemeOption(theme:option,selected:theme == option) { theme=option }
                 }
             }
-            .frame(maxWidth:560)
+            .frame(maxWidth:560,alignment:.leading)
             .padding(.horizontal,20).padding(.vertical,12)
+            .frame(maxWidth:.infinity,alignment:.leading)
             WorkspaceSettingsRow(title:"文字大小") {
                 Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
                     ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }

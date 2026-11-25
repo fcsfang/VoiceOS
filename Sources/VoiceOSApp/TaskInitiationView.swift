@@ -497,7 +497,7 @@ struct TaskInitiationView: View {
                     .toggleStyle(.switch).controlSize(.small).labelsHidden()
                     .accessibilityIdentifier("initiation.history.archived")
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 8).padding(.horizontal, 10)
             if visibleRecords.isEmpty {
                 WorkspaceEmptyState(
                     title: showArchived ? "还没有归档的记录" : "还没有启动记录",
@@ -511,7 +511,7 @@ struct TaskInitiationView: View {
                         HStack(alignment: .top, spacing: 14) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(record.proposal.title.isEmpty ? "未命名启动" : record.proposal.title)
-                                    .vosFont(WorkspaceText.rowTitle).lineLimit(2)
+                                    .vosFont(WorkspaceText.rowTitle.size, weight: .medium).lineLimit(2)
                                 Text(historySubtitle(record))
                                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             }
