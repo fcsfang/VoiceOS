@@ -44,7 +44,7 @@ struct ClaimNoteRow:View {
             if editing {
                 TextEditor(text:$draft).frame(minHeight:64).workspaceEditorSurface()
                 HStack {
-                    Text("\(trimmed.count) / 1000").vosFont(WorkspaceText.caption).foregroundStyle(tooLong ? palette.warning : Color.secondary)
+                    Text("\(trimmed.count) / 1000").vosFont(WorkspaceText.caption).foregroundStyle(tooLong ? palette.warning : palette.secondaryText)
                     Spacer()
                     if note != nil { Button("删除旁注", role:.destructive) { Task { await remove() } }.disabled(saving) }
                     Button("取消") { editing=false;errorText="" }.disabled(saving)

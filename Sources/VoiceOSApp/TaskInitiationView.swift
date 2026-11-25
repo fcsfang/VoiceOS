@@ -154,7 +154,7 @@ struct TaskInitiationView: View {
     }
 
     private func package(_ record: TaskInitiationRecord) -> some View {
-        WorkspaceSection(title: record.route == .answer ? "这次的问题" : "这次要启动的事", icon: "arrow.up.forward") {
+        WorkspaceSection(title: record.route == .answer ? "这次的问题" : "这次要启动的事") {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                 sourceLine(record)
                 HStack(alignment: .top, spacing: 12) {

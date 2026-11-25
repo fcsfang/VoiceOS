@@ -37,7 +37,7 @@ struct TranscriptSegmentationView: View {
             } else { Text("原话或授权已变化，请关闭后重新查看分段。").foregroundStyle(palette.secondaryText) }
             if !model.segmentationStatus.isEmpty { WorkspaceNoticeText(message: model.segmentationStatus) }
             HStack { Spacer(); Button("完成",action:dismiss).keyboardShortcut(.cancelAction) }
-        }.padding(24).frame(width:680,height:560)
+        }.padding(24).frame(width:WorkspaceMetrics.modalMedium,height:560)
             .workspaceModalSurface()
     }
 }

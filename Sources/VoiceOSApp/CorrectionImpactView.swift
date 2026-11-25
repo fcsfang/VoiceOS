@@ -148,7 +148,7 @@ private struct CompensationConfirmationView: View {
                     }
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy || !plan.eligibleForConfirmation)
             }
-        }.padding(24).frame(width: 640)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
     }
 }

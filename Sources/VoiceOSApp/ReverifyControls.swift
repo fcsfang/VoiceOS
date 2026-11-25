@@ -30,7 +30,7 @@ struct ReverifyControls: View {
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             if !pending.isEmpty {
-                WorkspaceSection(title:"需要重新核对的原件",subtitle:"核对通过后恢复原件状态；已有理解不自动解冻，在材料页重新识别观点和任务后更新。",icon:"checkmark.shield",count:pending.count) {
+                WorkspaceSection(title:"需要重新核对的原件",subtitle:"核对通过后恢复原件状态；已有理解不自动解冻，在材料页重新识别观点和任务后更新。",count:pending.count) {
                     ForEach(pending) { source in
                         VStack(alignment:.leading,spacing:8) {
                             HStack(alignment:.firstTextBaseline,spacing:10) {

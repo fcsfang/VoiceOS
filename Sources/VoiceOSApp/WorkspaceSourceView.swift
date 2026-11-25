@@ -495,6 +495,11 @@ struct WorkspaceSourceView: View {
         }
     }
     private var automaticallyUpdating:Bool { pendingUnderstanding && model.fullRecordingBusy }
+    /// The failed-transcription retry is the surface's one primary when shown;
+    /// re-understanding cannot run on a transcript that does not exist yet.
+    private var retryOffersPrimary: Bool {
+        source.transcript == nil && !source.dictationRecoveryPending && ["failed","blocked"].contains(source.jobState ?? "")
+    }
     private var pausedThoughts: [CandidateClaim] { (model.currentClaimsBySource[source.id] ?? []).filter { $0.validity != "current" } }
     private var pausedActions: [ActionRecord] { actions.filter { model.sourcePageIndex.requiresReview($0.id) } }
     private var selectedSpan:TranscriptSpan? {
@@ -822,11 +827,11 @@ struct WorkspaceSourceView: View {
                         if source.localOnly {
                             Text("当前仅本机保存。允许后会将这份完整文字发送给已配置的模型。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                             Button("允许这份文字用于云端并重新识别") { Task { await model.changeTextPolicy(source);organize() } }
-                                .buttonStyle(.workspacePrimary)
+                                .buttonStyle(retryOffersPrimary ? .workspaceSecondary : .workspacePrimary)
                                 .disabled(!model.modelConfigured || model.fullRecordingBusy || model.understandingSource != nil)
                         } else {
                             Button(automaticallyUpdating ? "正在自动更新…" : processing ? "正在重新识别…" : pendingUnderstanding ? "重试更新理解" : "重新识别观点和任务",action:organize)
-                                .buttonStyle(.workspacePrimary)
+                                .buttonStyle(retryOffersPrimary ? .workspaceSecondary : .workspacePrimary)
                                 .disabled(processing || model.fullRecordingBusy || model.understandingSource != nil || !model.modelConfigured || source.state == "quarantined")
                                 .help(automaticallyUpdating || processing ? "正在处理，完成后这里会自动更新" : pendingUnderstanding ? "查看处理进度或错误后，点此重试自动更新" : "AI 会读取完整文字和转写核对记录，重新提取观点和任务；只有文字记错时才需要更正转写")
                         }
@@ -1834,7 +1839,7 @@ struct WorkspaceTranscriptEditor:View {
                     .buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(saving || text == source.transcript || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
             }
-        }.padding(24).frame(width:650).onAppear { text=source.transcript ?? "" }
+        }.padding(24).frame(width:WorkspaceMetrics.modalSmall).onAppear { text=source.transcript ?? "" }
             .workspaceModalSurface()
             .task { try? await Task.sleep(for:.milliseconds(100)); textFocused=true }
     }
@@ -1940,7 +1945,7 @@ struct RecordingExpressionTitleEditor:View {
                 Button("保存") { save(title) }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(saving || title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || title.count > 100)
             }
-        }.padding(24).frame(width:600)
+        }.padding(24).frame(width:WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
             .task { try? await Task.sleep(for:.milliseconds(100)); titleFocused=true }
     }

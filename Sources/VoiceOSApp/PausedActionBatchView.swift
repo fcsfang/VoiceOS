@@ -62,6 +62,7 @@ enum SourceReidentifyReceipt: Sendable {
 }
 
 struct PausedActionBatchControl: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
 
     var body: some View {
@@ -74,7 +75,7 @@ struct PausedActionBatchControl: View {
                 HStack {
                     Text(progress.label)
                     if !progress.currentTitle.isEmpty {
-                        Text(progress.currentTitle).foregroundStyle(.secondary).lineLimit(1)
+                        Text(progress.currentTitle).foregroundStyle(palette.secondaryText).lineLimit(1)
                     }
                     Spacer()
                     Button(model.pausedActionBatch?.stopRequested == true ? "将在当前材料完成后停止" : "停止") {
@@ -86,19 +87,19 @@ struct PausedActionBatchControl: View {
                 Text("已更新 \(summary.updated.count) 份 · 跳过 \(summary.skipped.count) 份 · 失败 \(summary.failed.count) 份")
                     .vosFont(WorkspaceText.meta, monospacedDigit: true)
                 if summary.stoppedRemaining > 0 {
-                    Text("已停止，未处理 \(summary.stoppedRemaining) 份。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
+                    Text("已停止，未处理 \(summary.stoppedRemaining) 份。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 }
                 if !summary.remainingActionIDs.isEmpty {
-                    Text("仍有 \(summary.remainingActionIDs.count) 条暂停待办需要打开任务核对。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
+                    Text("仍有 \(summary.remainingActionIDs.count) 条暂停待办需要打开任务核对。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 }
                 if !summary.reviewOnlyActionIDs.isEmpty {
-                    Text("另有 \(summary.reviewOnlyActionIDs.count) 条行动关系需逐条核对，本次未改动。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
+                    Text("另有 \(summary.reviewOnlyActionIDs.count) 条行动关系需逐条核对，本次未改动。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 }
                 if !summary.withdrawnActionIDs.isEmpty {
-                    Text("另有 \(summary.withdrawnActionIDs.count) 条已在后续录音中撤回，本次未改动。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
+                    Text("另有 \(summary.withdrawnActionIDs.count) 条已在后续录音中撤回，本次未改动。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 }
                 if !summary.unattachedActionIDs.isEmpty {
-                    Text("另有 \(summary.unattachedActionIDs.count) 条待办找不到可重新识别的材料，需在任务里单独查看。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
+                    Text("另有 \(summary.unattachedActionIDs.count) 条待办找不到可重新识别的材料，需在任务里单独查看。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 }
                 DisclosureGroup("查看本次明细") {
                     ForEach(summary.updated, id: \.sourceID) { row in
@@ -107,12 +108,12 @@ struct PausedActionBatchControl: View {
                     }
                     ForEach(summary.skipped, id: \.sourceID) { row in
                         Text("跳过 · \(title(row.sourceID)) · \(skipLabel(row.reason))")
-                            .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                            .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                     }
                     ForEach(summary.failed, id: \.sourceID) { row in
                         VStack(alignment: .leading, spacing: 2) {
                             Text("失败 · \(title(row.sourceID))").vosFont(WorkspaceText.body)
-                            Text(row.message).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(row.message).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         }
                     }
                 }
@@ -123,13 +124,13 @@ struct PausedActionBatchControl: View {
                     Button("重新识别全部暂停的待办…") { Task { await model.preparePausedActionBatch() } }
                         .disabled(model.pausedActionBatchUnavailableReason != nil)
                     Text("涉及 \(preview.affectedMaterialCount) 份材料、\(preview.targetActionCount) 条暂停待办。每份材料重新识别一次，会调用已配置的文本模型；长文字或完整录音沿用现有分段流程，部分材料会先校正转写，可能多一次调用。相同依据会复用，不会重复发送。")
-                        .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     if let reason = model.pausedActionBatchUnavailableReason {
-                        Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     }
                 } else {
                     Text("没有可批量重新识别的暂停待办；上面的事项需要逐条核对。")
-                        .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
             }
         }

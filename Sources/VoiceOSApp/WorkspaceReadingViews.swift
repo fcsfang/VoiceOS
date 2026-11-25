@@ -169,11 +169,13 @@ struct WorkspaceListSection<Content: View>: View {
     }
 }
 
+/// A titled group on the canvas: heading, optional quiet action, hairline,
+/// then rows. Same plane as `WorkspaceListSection`; the old card shell and
+/// accent icon made secondary pages read as boxes inside boxes.
 struct WorkspaceSection<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
     let title: String
     var subtitle: String = ""
-    var icon: String = ""
     var count: Int? = nil
     var actionTitle: String = ""
     var action: (() -> Void)? = nil
@@ -181,34 +183,25 @@ struct WorkspaceSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                if !icon.isEmpty {
-                    Image(systemName: icon).vosFont(19, weight: .medium).frame(width: 26, height: 28)
-                        .foregroundStyle(palette.accent)
-                        .accessibilityHidden(true)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.text)
+                    .accessibilityAddTraits(.isHeader)
+                if !subtitle.isEmpty {
+                    Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2)
                 }
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(spacing: 9) {
-                        Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.text)
-                            .accessibilityAddTraits(.isHeader)
-                        if let count {
-                            Text(String(count)).vosFont(WorkspaceText.meta.size, weight: WorkspaceText.meta.weight, monospacedDigit: true)
-                                .foregroundStyle(palette.tertiaryText)
-                        }
-                    }
-                    if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3) }
-                }
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
                 if let action {
-                    Button(actionTitle, action: action).buttonStyle(.workspaceQuietCompact).padding(.top, 2)
+                    Button(actionTitle, action: action).buttonStyle(.workspaceQuietCompact)
+                } else if let count {
+                    Text(String(count)).vosFont(WorkspaceText.meta.size, weight: WorkspaceText.meta.weight, monospacedDigit: true)
+                        .foregroundStyle(palette.tertiaryText)
                 }
-            }.padding(.bottom, 16)
+            }
+            .padding(.vertical, 10)
             WorkspaceListDivider()
-            LazyVStack(alignment: .leading, spacing: 0, content: content).padding(.top, 8)
+            LazyVStack(alignment: .leading, spacing: 0, content: content).padding(.top, 4)
         }
-        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
-        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius).strokeBorder(palette.border, lineWidth: 1) }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
