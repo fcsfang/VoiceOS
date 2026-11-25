@@ -127,9 +127,12 @@ private enum SourceLoadPhase: Equatable {
         return nil
     }
 }
+/// A collapsible group on the page canvas: heading, count, chevron, hairline.
+/// No card shell, so a `SourceSection` nested inside reads as a subgroup
+/// rather than a box inside a box.
 private struct SourceFold<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
-    @Environment(\.vosTextScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title:String
     var icon=""
     var count:Int?=nil
@@ -137,24 +140,27 @@ private struct SourceFold<Content: View>: View {
     var spacing:CGFloat=0
     @ViewBuilder let content:()->Content
     var body: some View {
-        WorkspaceCard() {
-            VStack(alignment:.leading,spacing:0) {
-                Button { isExpanded.toggle() } label: {
-                    HStack(alignment:.top,spacing:12) {
-                        if !icon.isEmpty {
-                            Image(systemName:icon).vosFont(19, weight:.medium).foregroundStyle(palette.accent).frame(minWidth: 26 * vosLayoutScale(textScale), minHeight: 28 * vosLayoutScale(textScale)).accessibilityHidden(true)
-                        }
-                        WorkspaceSectionHeading(title:title,count:count.map { String($0) }) {
-                            Image(systemName:isExpanded ? "chevron.up" : "chevron.down").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).accessibilityHidden(true)
-                        }
-                    }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
-                    .accessibilityValue(isExpanded ? "已展开" : "已收起")
-                WorkspaceListDivider().padding(.top,18)
-                if isExpanded {
-                    LazyVStack(alignment:.leading,spacing:spacing,content:content).padding(.top,8)
-                }
+        VStack(alignment:.leading,spacing:0) {
+            Button { isExpanded.toggle() } label: {
+                HStack(alignment:.firstTextBaseline,spacing:10) {
+                    Image(systemName:"chevron.right").vosFont(WorkspaceText.caption.size, weight:.semibold)
+                        .foregroundStyle(palette.tertiaryText)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .animation(reduceMotion ? nil : WorkspaceMotion.expand, value: isExpanded)
+                        .accessibilityHidden(true)
+                    Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+                    Spacer(minLength:8)
+                    if let count {
+                        Text(String(count)).vosFont(WorkspaceText.meta.size, weight: WorkspaceText.meta.weight, monospacedDigit: true)
+                            .foregroundStyle(palette.tertiaryText)
+                    }
+                }.padding(.vertical,10).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
+                .accessibilityValue(isExpanded ? "已展开" : "已收起")
+            WorkspaceListDivider()
+            if isExpanded {
+                LazyVStack(alignment:.leading,spacing:spacing,content:content).padding(.top,8)
             }
         }
     }
@@ -230,16 +236,34 @@ private struct UnresolvedIssuesBlock: View {
     }
 }
 private struct SourceSection<Content: View>: View {
+    @Environment(\.workspacePalette) private var palette
     let title:String
     var count:Int? = nil
+    /// Inside a `SourceFold` the heading steps down to a list group header.
+    var nested = false
     @ViewBuilder let content:()->Content
     var body: some View {
-        WorkspaceCard() {
+        if nested {
             VStack(alignment:.leading,spacing:0) {
-                WorkspaceSectionHeading(title,count:count.map { String($0) })
-                WorkspaceListDivider().padding(.top,18)
-                LazyVStack(alignment:.leading,spacing:0,content:content).padding(.top,8)
+                WorkspaceListGroupHeader(title: count.map { title + " · \($0)" } ?? title)
+                LazyVStack(alignment:.leading,spacing:0,content:content)
             }
+        } else {
+            sectionBody
+        }
+    }
+    private var sectionBody: some View {
+        VStack(alignment:.leading,spacing:0) {
+            HStack(alignment:.firstTextBaseline,spacing:10) {
+                Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+                Spacer(minLength:8)
+                if let count {
+                    Text(String(count)).vosFont(WorkspaceText.meta.size, weight: WorkspaceText.meta.weight, monospacedDigit: true)
+                        .foregroundStyle(palette.tertiaryText)
+                }
+            }.padding(.vertical,10)
+            WorkspaceListDivider()
+            LazyVStack(alignment:.leading,spacing:0,content:content).padding(.top,8)
         }
     }
 }
@@ -914,7 +938,7 @@ struct WorkspaceSourceView: View {
                 SourceFold(title:"更多资料",icon:"archivebox",count:extraSectionCount == 0 ? nil : extraSectionCount,isExpanded:foldExpanded(\.extras),spacing:WorkspaceMetrics.groupGap) {
                     if programPairs.isEmpty && contextPhase.isLoading { SourceLoadingRow(title:"正在读取节目关联…") }
                     if !programPairs.isEmpty {
-                        SourceSection(title:"节目与我的思考",count:contextLinks.count) {
+                        SourceSection(title:"节目与我的思考",count:contextLinks.count,nested:true) {
                             ForEach(programPairs,id:\.externalSourceID) { pair in
                                 if let external=catalog[pair.externalSourceID] {
                                     WorkspaceRow(title:external.displayTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文" : "节目原话或处理许可已变化，关联等待更新",icon:"headphones",trailing:"节目原文") { openSource(external.id) }
@@ -979,7 +1003,7 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 SourceFold(title:"处理记录",icon:"tray",isExpanded:foldExpanded(\.records),spacing:WorkspaceMetrics.groupGap) {
-                    SourceSection(title:"依据、修订与处理记录") {
+                    SourceSection(title:"依据、修订与处理记录",nested:true) {
                         DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id],carded:false).padding(.top,12) }.padding(.vertical,16)
                         WorkspaceListDivider()
                         DisclosureGroup("文字校正、理解与修订历史") {

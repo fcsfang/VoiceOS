@@ -26,29 +26,44 @@ struct ReverifyControls: View {
     private var pending: [SourceRecord] {
         model.records.filter { ($0.state == "quarantined" || ($0.state == "saved" && ($0.error ?? "").contains("核对失败"))) && !restored.contains($0.id) }
     }
+    private var reasonGroups: [(reason: String, sources: [SourceRecord])] {
+        var order: [String] = []
+        var byReason: [String: [SourceRecord]] = [:]
+        for source in pending {
+            let error = source.error?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let reason = error.isEmpty ? workspaceStateLabel(source.state) : error
+            if byReason[reason] == nil { order.append(reason) }
+            byReason[reason, default: []].append(source)
+        }
+        return order.map { ($0, byReason[$0] ?? []) }
+    }
     private var restoredSources: [SourceRecord] { model.records.filter { restored.contains($0.id) } }
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             if !pending.isEmpty {
                 WorkspaceSection(title:"需要重新核对的原件",subtitle:"核对通过后恢复原件状态；已有理解不自动解冻，在材料页重新识别观点和任务后更新。",count:pending.count) {
-                    ForEach(pending) { source in
-                        VStack(alignment:.leading,spacing:8) {
-                            HStack(alignment:.firstTextBaseline,spacing:10) {
-                                VStack(alignment:.leading,spacing:5) {
-                                    Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).lineLimit(2)
-                                    Text(workspaceStateLabel(source.state)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    // 92 rows used to repeat 已隔离 and one of a few reasons each. The
+                    // reason becomes a group header, the row keeps only what differs.
+                    ForEach(reasonGroups, id: \.reason) { group in
+                        WorkspaceListGroupHeader(title: group.reason + " · \(group.sources.count)")
+                        ForEach(group.sources) { source in
+                            VStack(alignment:.leading,spacing:4) {
+                                HStack(alignment:.firstTextBaseline,spacing:10) {
+                                    Text(source.displayTitle).vosFont(WorkspaceText.rowTitle.size, weight: .medium).lineLimit(2)
+                                    if source.state != "quarantined" {
+                                        Text(workspaceStateLabel(source.state)).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+                                    }
+                                    Spacer(minLength:8)
+                                    Button(runningID == source.id ? "正在核对…" : "重新核对") { reverify(source) }
+                                        .buttonStyle(.workspaceSecondaryCompact)
+                                        .disabled(runningID != nil)
                                 }
-                                Spacer(minLength:8)
-                                Button(runningID == source.id ? "正在核对…" : "重新核对") { reverify(source) }
-                                    .disabled(runningID != nil)
-                            }
-                            if let failure = failures[source.id] {
-                                Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled)
-                            } else if let error = source.error {
-                                Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
-                            }
-                        }.padding(.vertical,10)
-                        if source.id != pending.last?.id { WorkspaceListDivider() }
+                                if let failure = failures[source.id] {
+                                    Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled)
+                                }
+                            }.padding(.vertical,8)
+                            if source.id != group.sources.last?.id { WorkspaceListDivider() }
+                        }
                     }
                 }
             }
