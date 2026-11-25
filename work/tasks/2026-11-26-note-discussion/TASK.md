@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: in_review
 started: 2026-11-26
 updated: 2026-11-26
 branch: codex/edit-generated-content
-pr: -
+pr: 251
 owner: codex
 ---
 # 笔记侧栏与 AI 讨论
@@ -18,4 +18,4 @@ owner: codex
 
 ## 下一步
 
-本地分支已具备试用构建，随当前分支批次统一提交 PR。
+随 PR #251 合并至主分支。

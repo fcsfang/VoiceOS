@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: in_review
 started: 2026-11-25
-updated: 2026-11-25
+updated: 2026-11-26
 branch: codex/edit-generated-content
-pr: -
+pr: 251
 owner: codex
 ---
 # 笔记历史批注试点
