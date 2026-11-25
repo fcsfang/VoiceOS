@@ -97,7 +97,7 @@ struct ReflectionQuestionsView: View {
             }
             if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
         }
-        .foregroundStyle(palette.text).background(palette.canvas).frame(width: 1020, height: 760)
+        .foregroundStyle(palette.text).background(palette.canvas).frame(width: WorkspaceMetrics.modalLarge, height: 760)
         .task { selectedID = initialQuestionID; await reload() }
         .sheet(isPresented: $creating) { createSheet }
         .sheet(isPresented: $managingSources) { sourcesSheet }

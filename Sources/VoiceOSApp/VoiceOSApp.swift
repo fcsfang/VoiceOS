@@ -4936,7 +4936,7 @@ struct ActionCreationView: View {
                 }
                     .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
             }.padding(.horizontal, 24)
-        }.padding(.vertical, 24).frame(width: 600)
+        }.padding(.vertical, 24).frame(width: WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
     }
 }
@@ -5011,7 +5011,7 @@ struct ActionFeedbackView: View {
                     }
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || waitingForVoice || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }.padding(.horizontal, 24)
-        }.padding(.vertical, 24).frame(width:620)
+        }.padding(.vertical, 24).frame(width:WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
             .onChange(of: recording?.transcriptVersionID) { _, _ in applyTranscription() }
             .interactiveDismissDisabled(saving || (recordingID != nil && model.dictationActive))
@@ -5098,7 +5098,7 @@ struct PackageRestoreView: View {
                     }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(restoring || package == nil || destination == nil)
                 }
             }.padding(.horizontal, 24)
-        }.padding(.vertical, 24).frame(width:640)
+        }.padding(.vertical, 24).frame(width:WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
     }
 }
@@ -5181,7 +5181,7 @@ struct BackupLibraryRestoreView: View {
                     }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(restoring || currentRoot == nil || destination == nil || backupSummary == nil)
                 }
             }.padding(.horizontal, 24)
-        }.padding(.vertical, 24).frame(width:640)
+        }.padding(.vertical, 24).frame(width:WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
     }
 }

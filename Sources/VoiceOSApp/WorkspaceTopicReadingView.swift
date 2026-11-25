@@ -131,7 +131,7 @@ struct WorkspaceTopicReadingView: View {
     }
     @ViewBuilder private var adjacentTopicsSection: some View {
         if !adjacentTopics.isEmpty {
-            WorkspaceSection(title:"相邻主题",icon:"point.3.connected.trianglepath.dotted",count:adjacentTopics.count) {
+            WorkspaceSection(title:"相邻主题",count:adjacentTopics.count) {
                 ForEach(adjacentTopics) { adjacent in
                     WorkspaceRow(title:adjacent.topic.title,subtitle:"共享 \(adjacent.sharedCount) 份材料",icon:"circle.hexagongrid",trailing:"查看",trailingStyle:.link) { openTopic(adjacent.topic.id) }
                 }
@@ -142,7 +142,8 @@ struct WorkspaceTopicReadingView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:WorkspaceMetrics.sectionGap) {
             if topic.organizationStale == true { TopicStaleBanner() }
-            if bodyPending { topicPendingBanner }
+            // With no sections the preparing card already offers 补齐正文 as the one primary.
+            if bodyPending, !sections.isEmpty { topicPendingBanner }
             if mode == "概览" { introduction }
             if mode != "行动与结果" {
                 if sections.isEmpty { preparingCards }
@@ -250,10 +251,12 @@ struct WorkspaceTopicReadingView: View {
                 }
                 VStack(spacing:0) {
                     Button { selectedSection=nil } label: {
+                        // The root is a heading, not a filled band; selection fill is
+                        // reserved for the chosen subtopic below.
                         Label(topic.title,systemImage:"circle.hexagongrid").vosFont(WorkspaceText.rowTitle)
                             .padding(.horizontal,20).padding(.vertical,12).frame(maxWidth:.infinity)
-                            .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-                            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
+                            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+                            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(selectedSection == nil ? palette.focusRing : palette.border,lineWidth:1) }
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     Rectangle().fill(palette.border).frame(width:1,height:16)
@@ -265,7 +268,7 @@ struct WorkspaceTopicReadingView: View {
                                     Text(section.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
                                     Spacer(minLength:0)
                                 }.padding(12).frame(maxWidth:.infinity,minHeight:60,alignment:.topLeading)
-                                    .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id || keyboardSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                                    .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id || keyboardSectionID == section.id ? palette.hover : palette.canvas,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
                                     .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius).strokeBorder(selectedSection == section.id ? palette.accent : keyboardSectionID == section.id ? palette.focusRing : palette.border,lineWidth:1) }
                                     .contentShape(Rectangle())
                             }.buttonStyle(.plain).accessibilityValue(selectedSection == section.id ? "已选择" : "")
@@ -417,7 +420,7 @@ struct WorkspaceTopicReadingView: View {
             }.buttonStyle(.plain)
         }
         if !outcomes.isEmpty || !deliveries.isEmpty {
-            WorkspaceSection(title:"最近带回来的结果",icon:"tray.and.arrow.down",actionTitle:"查看全部",action:showActions) {
+            WorkspaceSection(title:"最近带回来的结果",actionTitle:"查看全部",action:showActions) {
                 ForEach(Array(outcomes.suffix(2))) { outcome in outcomeCard(outcome) }
                 ForEach(Array(deliveries.prefix(2))) { result in deliveryButton(result) }
             }
@@ -428,21 +431,27 @@ struct WorkspaceTopicReadingView: View {
         let questions=topic.organization?.questions ?? []
         if !questions.isEmpty {
             ScrollViewReader { proxy in
-                WorkspaceSection(title:"值得继续的问题",icon:"questionmark.bubble",count:questions.count) {
+                WorkspaceSection(title:"值得继续的问题",count:questions.count) {
                     ForEach(Array(questions.enumerated()),id:\.offset) { index,question in
                         Button { discuss(question) } label: {
                             HStack(alignment:.top,spacing:12) {
                                 Image(systemName:"questionmark.bubble").foregroundStyle(palette.action).accessibilityHidden(true)
-                                Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
+                                Text(question).vosFont(WorkspaceText.rowTitle.size, weight: .medium).multilineTextAlignment(.leading)
                                 Spacer(minLength:4)
                                 Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).accessibilityHidden(true)
-                            }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(keyboardQuestionFocus.id == String(index) ? palette.selection : hoveredQuestion == index ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(focusedQuestion == index || keyboardQuestionFocus.id == String(index) ? palette.focusRing : palette.border,lineWidth:1) }.contentShape(Rectangle())
+                            }.padding(.horizontal,10).padding(.vertical,12).frame(maxWidth:.infinity,alignment:.leading)
+                                // Rows on the section plane, not a box per question: hover and
+                                // keyboard focus tint the row, the ring marks focus only.
+                                .background(keyboardQuestionFocus.id == String(index) ? palette.selection : hoveredQuestion == index ? palette.hover : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                                .overlay { if focusedQuestion == index || keyboardQuestionFocus.id == String(index) { RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                                .contentShape(Rectangle())
                         }.buttonStyle(.plain).help("带上当前主题继续讨论")
                             .id(String(index))
                             .focusable()
                             .focused($focusedQuestion, equals: index)
                             .focusEffectDisabled()
                             .onHover { inside in hoveredQuestion = inside ? index : (hoveredQuestion == index ? nil : hoveredQuestion) }
+                        if index < questions.count - 1 { WorkspaceListDivider().padding(.leading,40) }
                     }
                 }
                 .focusable()
@@ -456,7 +465,7 @@ struct WorkspaceTopicReadingView: View {
 
     @ViewBuilder private var connectionsSection: some View {
         if !connections.isEmpty {
-            WorkspaceSection(title:"后来的表达接上了什么",icon:"arrow.triangle.branch",count:connections.count,
+            WorkspaceSection(title:"后来的表达接上了什么",count:connections.count,
                              actionTitle:mode == "概览" ? "完整脉络" : "",action:mode == "概览" ? showUnderstanding : nil) {
                 ForEach(mode == "概览" ? Array(connections.prefix(3)) : connections) { connection in
                     VStack(alignment:.leading,spacing:12) {
@@ -504,17 +513,17 @@ struct WorkspaceTopicReadingView: View {
             let open=tasks.filter { $0.state == "open" }
             let completed=tasks.filter { $0.state == "completed" }
             if !open.isEmpty {
-                WorkspaceSection(title:"待跟进",icon:"circle",count:open.count) { ForEach(open) { action in actionWithResults(action) } }
+                WorkspaceSection(title:"待跟进",count:open.count) { ForEach(open) { action in actionWithResults(action) } }
             }
             if !completed.isEmpty {
-                WorkspaceSection(title:"已完成的行动",icon:"checkmark.circle",count:completed.count) { ForEach(completed) { action in actionWithResults(action) } }
+                WorkspaceSection(title:"已完成的行动",count:completed.count) { ForEach(completed) { action in actionWithResults(action) } }
             }
             let intentions=actions.filter { $0.kind != "task" }
             if !intentions.isEmpty {
-                WorkspaceSection(title:"探索意图",icon:"lightbulb",count:intentions.count) { ForEach(intentions) { action in taskButton(action).padding(.vertical,WorkspaceMetrics.rowGap) } }
+                WorkspaceSection(title:"探索意图",count:intentions.count) { ForEach(intentions) { action in taskButton(action).padding(.vertical,WorkspaceMetrics.rowGap) } }
             }
             if !deliveries.isEmpty {
-                WorkspaceSection(title:"AI 的交付",icon:"doc.text",count:deliveries.count) { ForEach(deliveries) { result in deliveryButton(result) } }
+                WorkspaceSection(title:"AI 的交付",count:deliveries.count) { ForEach(deliveries) { result in deliveryButton(result) } }
             }
             if !sections.isEmpty && actions.isEmpty && deliveries.isEmpty { Text("这个主题目前没有待办或结果。").foregroundStyle(palette.secondaryText) }
         }
@@ -523,7 +532,7 @@ struct WorkspaceTopicReadingView: View {
     @ViewBuilder private var personalEntries: some View {
         let entries=focus?.question?.entries ?? []
         if !entries.isEmpty {
-            WorkspaceSection(title:"你留下的认识与实践",icon:"quote.bubble",count:entries.count) {
+            WorkspaceSection(title:"你留下的认识与实践",count:entries.count) {
                 ForEach(entries) { entry in
                     VStack(alignment:.leading,spacing:12) {
                         Text(entry.kind.label + " · " + date(entry.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)

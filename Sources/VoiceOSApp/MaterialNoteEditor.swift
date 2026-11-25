@@ -3,6 +3,7 @@ import VoiceOSCore
 
 struct MaterialNoteEditor: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.workspacePalette) private var palette
     @State private var title: String
     @State private var lead: String
     @State private var blocks: [NoteBlock]
@@ -19,7 +20,7 @@ struct MaterialNoteEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("编辑笔记").font(.headline)
+            Text("编辑笔记").vosFont(WorkspaceText.sectionTitle)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     TextField("标题", text: $title)
@@ -42,10 +43,10 @@ struct MaterialNoteEditor: View {
                     }
                 }.textFieldStyle(.roundedBorder)
             }
-            if let failure { Text(failure).foregroundStyle(.red) }
+            if let failure { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("取消") { dismiss() }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Button("保存") {
                     saving = true
                     Task {
@@ -60,8 +61,8 @@ struct MaterialNoteEditor: View {
                         } catch { failure = error.localizedDescription }
                         saving = false
                     }
-                }.keyboardShortcut(.defaultAction).disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(20).frame(minWidth: 480, minHeight: 420).disabled(saving)
+        }.padding(24).frame(minWidth: 480, minHeight: 420).workspaceModalSurface().disabled(saving)
     }
 }

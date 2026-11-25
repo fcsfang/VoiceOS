@@ -38,7 +38,7 @@ struct RecordingTitleEditor: View {
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.count > 100)
             }.disabled(saving)
-        }.padding(24).frame(width: 600)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
             .task { try? await Task.sleep(for: .milliseconds(100)); titleFocused = true }
     }

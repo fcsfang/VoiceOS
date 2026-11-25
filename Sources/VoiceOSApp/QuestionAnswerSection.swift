@@ -46,7 +46,7 @@ struct QuestionAnswerSection: View {
     private var canFollowup: Bool { action.state == "open" && action.validity == "current" }
 
     var body: some View {
-        WorkspaceSection(title: "VoiceOS 的回答", subtitle: subtitle, icon: "sparkles") {
+        WorkspaceSection(title: "VoiceOS 的回答", subtitle: subtitle) {
             switch phase {
             case .none: emptyState
             case .running: runningState

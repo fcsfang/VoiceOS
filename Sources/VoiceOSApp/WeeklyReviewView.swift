@@ -293,7 +293,7 @@ struct WeeklyReviewView: View {
         let review = dailyReview
         let todayRows = Array(review.today.prefix(5))
         let overdueRows = Array(review.overdue.prefix(5))
-        return WorkspaceSection(title: "今天收尾", icon: "checkmark.circle", count: review.remainingCount) {
+        return WorkspaceSection(title: "今天收尾", count: review.remainingCount) {
             if review.isClear {
                 Text("今天没有未收尾的行动").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).padding(.vertical, 10)
             }
@@ -475,7 +475,7 @@ struct WeeklyReviewView: View {
     private var nextWeekSection: some View {
         let candidates = nextWeekCandidates
         let rows = Array(candidates.prefix(5))
-        return WorkspaceSection(title: "下周先做", subtitle: "加入本周专注", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
+        return WorkspaceSection(title: "下周先做", subtitle: "加入本周专注", count: nextWeekEntries.count) {
             if focusSlots == 0 {
                 HStack(spacing: 8) {
                     Text("已有 3 条专注，先到行动页移出。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
@@ -518,7 +518,7 @@ struct WeeklyReviewView: View {
         } label: {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: focused ? "pin.fill" : selected ? "checkmark.circle.fill" : "circle").vosFont(WorkspaceText.rowTitle.size)
-                    .foregroundStyle(focused || selected ? palette.accent : Color.secondary)
+                    .foregroundStyle(focused || selected ? palette.accent : palette.secondaryText)
                     .frame(width: 34, height: 34)
                     .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .accessibilityHidden(true)
@@ -577,7 +577,7 @@ struct WeeklyReviewView: View {
 
     private var staleSection: some View {
         let rows = Array(staleTasks.prefix(5))
-        return WorkspaceSection(title: "长期未动", subtitle: "创建超过 14 天，仍是未完成状态。", icon: "hourglass", count: staleTasks.count) {
+        return WorkspaceSection(title: "长期未动", subtitle: "创建超过 14 天，仍是未完成状态。", count: staleTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
                 reviewRow(title: action.title, subtitle: staleLabel(action), trailing: "搁置", icon: "hourglass",
@@ -589,7 +589,7 @@ struct WeeklyReviewView: View {
     }
     private var unclarifiedSection: some View {
         let rows = Array(unclarifiedTasks.prefix(5))
-        return WorkspaceSection(title: "待确认", subtitle: "最近 14 天抽取，尚未确认类型。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
+        return WorkspaceSection(title: "待确认", subtitle: "最近 14 天抽取，尚未确认类型。", count: unclarifiedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
                 reviewRow(title: action.title, trailing: "待确认", icon: "questionmark.circle",
@@ -601,7 +601,7 @@ struct WeeklyReviewView: View {
     }
     private var progressSection: some View {
         let rows = Array(weekProgress.prefix(5))
-        return WorkspaceSection(title: "本周结果", subtitle: "最近 7 天记录的结果与进展。", icon: "checkmark.seal", count: weekProgress.count) {
+        return WorkspaceSection(title: "本周结果", subtitle: "最近 7 天记录的结果与进展。", count: weekProgress.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 if index > 0 { WorkspaceListDivider() }
                 if row.isTaskAvailable {
@@ -656,7 +656,7 @@ struct WeeklyReviewView: View {
     }
 
     private var weekCompletedSection: some View {
-        WorkspaceSection(title: "本周完成", subtitle: "最近 7 天完成的行动。", icon: "checkmark.circle", count: weekCompleted.count) {
+        WorkspaceSection(title: "本周完成", subtitle: "最近 7 天完成的行动。", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
                 weekCompletedRow(action, highlighted: isReviewHighlighted("completed", action.id))
@@ -746,7 +746,7 @@ struct WeeklyReviewView: View {
 
     private var pausedSection: some View {
         let rows = Array(pausedTasks.prefix(5))
-        return WorkspaceSection(title: "暂停与冻结", subtitle: "暂停或待核对的待办；状态保留。", icon: "pause.circle", count: pausedTasks.count) {
+        return WorkspaceSection(title: "暂停与冻结", subtitle: "暂停或待核对的待办；状态保留。", count: pausedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
                 reviewRow(title: action.title, subtitle: model.workspaceActionStatus(action),
@@ -761,7 +761,7 @@ struct WeeklyReviewView: View {
     private var stalledGoalsSection: some View {
         let rows = Array(stalledGoals.prefix(5))
         return WorkspaceSection(title: "没有下一步的目标", subtitle: "还停在原处；补一条下一步就会回到待办。",
-                                icon: "exclamationmark.circle", count: stalledGoals.count,
+                                count: stalledGoals.count,
                                 actionTitle: "逐个澄清", action: { showingClarifyQueue = true }) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { WorkspaceListDivider() }
@@ -812,7 +812,7 @@ struct WeeklyReviewView: View {
 
     private var somedaySection: some View {
         let rows = Array(somedayRows.prefix(5))
-        return WorkspaceSection(title: "留到以后的问题与目标", subtitle: "超过 60 天没有回看。", icon: "tray", count: somedayRows.count) {
+        return WorkspaceSection(title: "留到以后的问题与目标", subtitle: "超过 60 天没有回看。", count: somedayRows.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { WorkspaceListDivider() }
                 somedayRow(goal, highlighted: isReviewHighlighted("someday", goal.id))

@@ -849,7 +849,7 @@ struct WorkspaceView: View {
                             .padding(.horizontal, 4).padding(.vertical, 3)
                             .contentShape(Rectangle())
                             .workspaceHoverHighlight()
-                            .background(selected ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                            .background(selected ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                     }
                     .buttonStyle(.plain).tag(item.title).badge(item.count)
                     .accessibilityIdentifier("nav." + item.id)
@@ -1484,7 +1484,7 @@ struct WorkspaceView: View {
         case "材料":
             let catalog = recordCatalog
             let expressions = distinctExpressions(reading.sources)
-            WorkspaceSection(title:"主题材料",icon:"books.vertical",count:reading.sources.count) {
+            WorkspaceSection(title:"主题材料",count:reading.sources.count) {
                 VStack(spacing:0) {
                     ForEach(expressions) { source in
                         sourceRow(source,catalog:catalog)
@@ -2079,7 +2079,7 @@ struct WorkspaceView: View {
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
                 ForEach(sections) { section in
                     let expand: (() -> Void)? = section.hasMore ? { expandSearchKind(section.kind) } : nil
-                    WorkspaceSection(title:section.title,icon:section.icon,count:section.count,actionTitle:section.hasMore ? "显示全部" : "",action:expand) {
+                    WorkspaceSection(title:section.title,count:section.count,actionTitle:section.hasMore ? "显示全部" : "",action:expand) {
                         ForEach(section.rows) { row in
                             SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
                                 .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -3374,7 +3374,7 @@ struct WorkspaceView: View {
         return Button { togglePlanSelection(entry.action.id) } label: {
             HStack(alignment:.top,spacing:12) {
                 Image(systemName:selected ? "checkmark.circle.fill" : "circle")
-                    .vosFont(WorkspaceText.rowTitle.size).foregroundStyle(selected ? palette.accent : Color.secondary).padding(.top,2).accessibilityHidden(true)
+                    .vosFont(WorkspaceText.rowTitle.size).foregroundStyle(selected ? palette.accent : palette.secondaryText).padding(.top,2).accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:4) {
                     Text(entry.action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
                     if let due=entry.due { Text(due.summary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }

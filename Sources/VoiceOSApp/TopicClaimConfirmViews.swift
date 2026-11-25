@@ -20,7 +20,7 @@ struct TopicUnlinkedReferencesSection: View {
 
     @ViewBuilder var body: some View {
         if !candidates.isEmpty || !confirmed.isEmpty {
-            WorkspaceSection(title:"提到这个主题但还没关联",icon:"link.badge.plus",count:candidates.isEmpty ? nil : candidates.count) {
+            WorkspaceSection(title:"提到这个主题但还没关联",count:candidates.isEmpty ? nil : candidates.count) {
                 ForEach(candidates) { claim in
                     row(claim,actionTitle:"确认关联") { confirm(claim) }
                 }
