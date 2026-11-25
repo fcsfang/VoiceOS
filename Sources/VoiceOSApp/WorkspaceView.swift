@@ -376,6 +376,8 @@ struct WorkspaceView: View {
     @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
     @State private var sourceFoldStates: [String: SourceFoldState] = [:]
     @State private var notePageHasNote = false
+    @State private var noteSidebar: NoteSidebarTab? = nil
+    @State private var noteDiscussionLoading = false
     @State private var topicID: String?
     @State private var topicTab = "概览"
     @State private var topicReadingMode = "卡片"
@@ -528,7 +530,7 @@ struct WorkspaceView: View {
         } detail: {
             HStack(spacing:0) {
                 mainColumn
-                if discussionIsPresented {
+                if discussionIsPresented && !isNotePage {
                     Divider()
                     WorkspaceDiscussionView(model:model,draft:$discussionDraft,close:{ showingDiscussion=false },openSource:{ go(.source($0)) })
                         .frame(minWidth:290,idealWidth:320,maxWidth:380)
@@ -548,7 +550,8 @@ struct WorkspaceView: View {
             .dynamicTypeSize(model.textSize.dynamicType)
             .frame(minWidth:980,minHeight:700)
             .onExitCommand {
-                if discussionIsPresented { showingDiscussion = false }
+                if isNotePage && noteSidebar != nil { noteSidebar = nil }
+                else if discussionIsPresented { showingDiscussion = false }
                 else if selectingActions { exitActionSelection() }
                 else if page == .search {
                     if !query.isEmpty { query="";searchFocused=true;searchKeyboardFocus.id=nil }
@@ -604,6 +607,8 @@ struct WorkspaceView: View {
             }
             .onChange(of:page) { _, next in
                 model.stopPlayback()
+                noteSidebar = nil
+                showingDiscussion = false
                 if next != .search { searchFocused = false }
                 if case .source(let id) = next { model.selected = id }
             }
@@ -788,18 +793,27 @@ struct WorkspaceView: View {
     /// 纯笔记阅读页：只有文章本体与「查看材料与原文」入口，材料工具不出现。
     @ViewBuilder private func noteReadingPage(_ id: String) -> some View {
         if let source = model.sourcePageIndex.recordsByID[id] {
-            ScrollViewReader { proxy in
-                scrolled(scroll: sourceScrollBinding("note-reading:" + id)) {
-                    VStack(alignment:.leading, spacing: WorkspaceMetrics.sectionGap) {
-                        HStack {
-                            Button("所有笔记",systemImage:"arrow.left") { back() }.buttonStyle(.workspaceQuietCompact)
-                            Spacer()
-                            Button("查看材料与原文",systemImage:"books.vertical") { go(.source(id)) }.buttonStyle(.workspaceQuietCompact)
-                        }
-                        MaterialNoteReadingView(model:model,source:source,openSource:{ go(.source($0)) },openTask:{ go(.task($0)) },openDiscussion:{ conv in Task { await openSavedDiscussion(conv) } },hasNote:$notePageHasNote,restoreScroll:sourceScrollBinding("note-reading:" + id))
+            MaterialNoteReadingView(model: model, source: source,
+                openSource: { go(.source($0)) }, openTask: { go(.task($0)) },
+                openDiscussion: { conv in Task { await openSavedDiscussion(conv) } },
+                openHistoryNote: { go(.note($0)) }, backToNotes: { back() },
+                hasNote: $notePageHasNote, restoreScroll: sourceScrollBinding("note-reading:" + id),
+                sidebar: $noteSidebar, discussionPanel: AnyView(noteDiscussionPanel),
+                discussParagraph: { paragraph in
+                    Task { await toggleDiscussion(force: true, prompt: "关于这段内容：\n“" + paragraph + "”\n\n") }
+                })
+                .id(id)
+                .onChange(of: displayedNoteRevisionID) { _, _ in
+                    if noteSidebar == .discussion {
+                        noteSidebar = .history
+                        showingDiscussion = false
                     }
                 }
-            }
+                .onChange(of: noteSidebar) { _, tab in
+                    if tab == .discussion && (!discussionIsPresented || discussionContext != discussionKey) {
+                        Task { await toggleDiscussion(force: true) }
+                    }
+                }
         } else { unavailable("这篇笔记暂时不可用",description:"可以回到笔记列表，或打开材料页。",actionTitle:"回到笔记") { go(.notes) } }
     }
     /// 保存视图区与行都单独成函数：侧栏表达式整体过大会触发类型检查超时。
@@ -912,10 +926,18 @@ struct WorkspaceView: View {
             Button("搜索全部内容", systemImage:"magnifyingglass") {
                 if page == .search { searchFocused = true } else { go(.search) }
             }.help("搜索全部内容（⌘F）")
-            Button("讨论", systemImage:"sidebar.right") { Task { await toggleDiscussion() } }
-                .disabled(model.discussionSaving || model.discussionSending || !discussionEntryAvailable)
-                .help(discussionEntryHint)
-                .accessibilityIdentifier("workspace.discussion")
+            if isNotePage {
+                Button(noteSidebar == nil ? "展开侧栏" : "收起侧栏", systemImage: "sidebar.right") {
+                    noteSidebar = noteSidebar == nil ? .history : nil
+                }
+                .help(noteSidebar == nil ? "展开侧栏" : "收起侧栏")
+                .accessibilityIdentifier("workspace.note.sidebar")
+            } else if discussionEntryAvailable {
+                Button("讨论", systemImage:"sidebar.right") { Task { await toggleDiscussion() } }
+                    .disabled(model.discussionSaving || model.discussionSending)
+                    .help(discussionEntryHint)
+                    .accessibilityIdentifier("workspace.discussion")
+            }
             Button("记录想法", systemImage:"mic") { go(.capture) }.help("记录想法")
         }
     }
@@ -4036,7 +4058,39 @@ struct WorkspaceView: View {
         let panel=NSOpenPanel();panel.title="打开已有 VoiceOS 资料库";panel.canChooseDirectories=true;panel.canChooseFiles=false
         panel.begin { response in guard response == .OK,let url=panel.url else { return };guard FileManager.default.fileExists(atPath:url.appendingPathComponent("voiceos.sqlite").path) else { error="所选目录不是 VoiceOS 资料库";return };openWindow(id:"restored-library",value:url.path) }
     }
-    private var discussionKey: String { page == .themes ? "topic:" + (topicID ?? "all") : String(describing: page) }
+    private var isNotePage: Bool {
+        if case .note = page { return true }
+        return false
+    }
+    @ViewBuilder private var noteDiscussionPanel: some View {
+        if discussionIsPresented && discussionContext == discussionKey {
+            WorkspaceDiscussionView(model: model, draft: $discussionDraft,
+                close: { noteSidebar = nil }, openSource: { go(.source($0)) }, embedded: true,
+                noteExpressionKey: currentNoteExpressionKey,
+                openSavedDiscussion: { id in Task { await openSavedDiscussion(id) } })
+        } else if noteDiscussionLoading {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ContentUnavailableView {
+                Label("开始讨论", systemImage: "bubble.left.and.bubble.right")
+            } actions: {
+                Button("开始讨论") { Task { await toggleDiscussion(force: true) } }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+    private var currentNoteExpressionKey: String? {
+        guard case .note(let id) = page else { return nil }
+        return VoiceOSStore.materialNoteExpressionKey(model.materialNoteMemberIDs(sourceID: id))
+    }
+    private var displayedNoteRevisionID: String? {
+        currentNoteExpressionKey.flatMap { model.materialNoteRows[$0]?.id }
+    }
+    private var discussionKey: String {
+        if page == .themes { return "topic:" + (topicID ?? "all") }
+        if isNotePage { return "\(page):\(displayedNoteRevisionID ?? "")" }
+        return String(describing: page)
+    }
     private func openSelectedSource() { if let id=model.selected { go(.source(id)) } else { back() } }
     private func presentDiscussion(for key: String, prompt: String = "") {
         guard key == discussionKey, let id = model.discussionSession?.id else { return }
@@ -4046,6 +4100,7 @@ struct WorkspaceView: View {
         let savedDraft = discussionDrafts[id] ?? ""
         discussionDraft = prompt.isEmpty || savedDraft == prompt ? savedDraft : savedDraft.isEmpty ? prompt : savedDraft + "\n\n" + prompt
         showingDiscussion = true
+        if isNotePage { noteSidebar = .discussion }
     }
     private func openSavedDiscussion(_ id: String) async {
         let key = discussionKey
@@ -4072,7 +4127,7 @@ struct WorkspaceView: View {
     }
     private var discussionEntryAvailable: Bool {
         switch page {
-        case .source, .task, .delivery: true
+        case .note, .source, .task, .delivery: true
         case .themes: topic != nil
         case .materials: discussionEntry != nil
         case .actions: !selectingActions && discussionEntry != nil
@@ -4086,20 +4141,37 @@ struct WorkspaceView: View {
         case .materials: discussionEntry == nil ? "先选中一条材料，再开始讨论" : "讨论"
         case .actions: selectingActions ? "批量选择中不能开始讨论；先结束选择" : (discussionEntry == nil ? "先选中一条行动，再开始讨论" : "讨论")
         case .search: discussionEntry == nil ? "先选中一条搜索结果，再开始讨论" : "讨论"
-        case .source, .task, .delivery: "讨论"
+        case .note, .source, .task, .delivery: "讨论"
         default: "这个页面没有可讨论的选中项；请从材料、行动或搜索结果进入"
         }
     }
     private func toggleDiscussion(force:Bool=false,prompt:String="") async {
         let key = discussionKey
-        if discussionIsPresented && !force { showingDiscussion=false;return }
+        if !force && (isNotePage ? noteSidebar != nil : discussionIsPresented) {
+            if isNotePage { noteSidebar = nil } else { showingDiscussion = false }
+            return
+        }
         guard discussionEntryAvailable else { error=discussionEntryHint;return }
         if discussionContext == discussionKey, discussionDraftSessionID == model.discussionSession?.id, model.discussionSession?.validity == "current", model.discussionSession?.state == "active" {
             if !prompt.isEmpty && prompt != discussionDraft { discussionDraft = discussionDraft.isEmpty ? prompt : discussionDraft + "\n\n" + prompt }
-            showingDiscussion=true;return
+            showingDiscussion=true
+            if isNotePage { noteSidebar = .discussion }
+            return
         }
         let opened:Bool
         switch page {
+        case .note(let id):
+            guard !noteDiscussionLoading else { return }
+            noteDiscussionLoading = true
+            defer { noteDiscussionLoading = false }
+            if let source = model.sourcePageIndex.recordsByID[id],
+               let result = await model.materialNoteForDisplay(sourceID: id), result.isCurrent,
+               key == discussionKey {
+                opened = await model.beginDiscussion(source, note: result.note)
+            } else {
+                opened = false
+                if key == discussionKey { error = "笔记尚未生成或需要更新" }
+            }
         case .source(let id): opened = if let source=model.sourcePageIndex.recordsByID[id] { await model.beginDiscussion(source) } else { false }
         case .task(let id): opened = if let action=model.sourcePageIndex.allAction(for: id) { await model.beginActionDiscussion(action) } else { false }
         case .delivery(let id): opened = if let execution=model.assistantExecutions.first(where: { $0.id == id }) { await model.beginAssistantDiscussion(execution) } else { false }
@@ -4139,7 +4211,11 @@ struct WorkspaceView: View {
             error="这个页面没有可讨论的选中项；全时段回顾请从主题的回顾页进入。"
             return
         }
-        if opened { presentDiscussion(for:key,prompt:prompt) }
+        if opened {
+            let previousTab = noteSidebar
+            presentDiscussion(for:key,prompt:prompt)
+            if key == discussionKey && isNotePage && force && prompt.isEmpty && previousTab != .discussion { noteSidebar = previousTab }
+        }
         else if key == discussionKey { error=model.status }
     }
 }

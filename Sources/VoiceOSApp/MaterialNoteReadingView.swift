@@ -27,6 +27,25 @@ private struct MaterialNoteDisplay: Equatable {
     let isCurrent: Bool
 }
 
+private struct HistoryConnectorAnchors: PreferenceKey {
+    enum Endpoint: Hashable {
+        case paragraph(String)
+        case card(String)
+        case articleViewport
+        case listViewport
+    }
+
+    static let defaultValue: [Endpoint: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [Endpoint: Anchor<CGRect>], nextValue: () -> [Endpoint: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+enum NoteSidebarTab: String, Hashable {
+    case history = "历史批注"
+    case discussion = "AI 讨论"
+}
 
 struct MaterialNoteReadingView: View {
     @Environment(\.workspacePalette) private var palette
@@ -36,11 +55,16 @@ struct MaterialNoteReadingView: View {
     var openSource: (String) -> Void = { _ in }
     var openTask: (String) -> Void = { _ in }
     var openDiscussion: (String) -> Void = { _ in }
+    var openHistoryNote: ((String) -> Void)? = nil
+    var backToNotes: (() -> Void)? = nil
     var relatedActions: [ActionRecord] = []
     var relatedDiscussions: [ConversationRecord] = []
     @Binding var hasNote: Bool
     /// 材料页的滚动位置；重开页面时据此回到上次读到的段落。
     var restoreScroll: Binding<ScrollPosition>? = nil
+    var sidebar: Binding<NoteSidebarTab?>? = nil
+    var discussionPanel: AnyView? = nil
+    var discussParagraph: ((String) -> Void)? = nil
 
     @State private var display: MaterialNoteDisplay?
     @State private var editing: StoredMaterialNote?
@@ -51,6 +75,13 @@ struct MaterialNoteReadingView: View {
     @State private var probeBox = NoteReadingProbeBox()
     @State private var hasRestored = false
     @State private var boardNotice: String?
+    @State private var historyPilot: NoteHistoryPilot?
+    @State private var historyResult: NoteHistoryResult?
+    @State private var historyRun = false
+    @State private var historyNotice: String?
+    @State private var historySelection: String?
+    private var historyPresented: Bool { sidebar?.wrappedValue == .history }
+    @State private var articlePosition = ScrollPosition(edge: .top)
 
     private var catalog: [String: SourceRecord] { model.sourcePageIndex.recordsByID }
     private var expression: RecordingExpression? { model.sourcePageIndex.expression(for: source.id) }
@@ -82,6 +113,66 @@ struct MaterialNoteReadingView: View {
     }
 
     var body: some View {
+        Group {
+            if let backToNotes {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+                            HStack {
+                                Button("所有笔记", systemImage: "arrow.left", action: backToNotes)
+                                    .buttonStyle(.workspaceQuietCompact)
+                                Spacer()
+                                Button("查看材料与原文", systemImage: "books.vertical") { openSource(source.id) }
+                                    .buttonStyle(.workspaceQuietCompact)
+                            }
+                            readingContent
+                        }
+                        .scrollTargetLayout()
+                        .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
+                        .padding(WorkspaceMetrics.pagePadding)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .scrollPosition(restoreScroll ?? $articlePosition)
+                    .transformAnchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) { value, anchor in
+                        value[.articleViewport] = anchor
+                    }
+                    if let sidebar, sidebar.wrappedValue != nil {
+                        Divider()
+                        VStack(spacing: 0) {
+                            Picker("侧栏", selection: Binding(
+                                get: { sidebar.wrappedValue ?? .history },
+                                set: { sidebar.wrappedValue = $0 }
+                            )) {
+                                Text("历史批注").tag(NoteSidebarTab.history)
+                                Text("AI 讨论").tag(NoteSidebarTab.discussion)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .padding(12)
+                            Divider()
+                            if historyPresented {
+                                historyInspector
+                            } else {
+                                discussionPanel
+                            }
+                        }
+                        .frame(width: 320)
+                        .background(palette.canvas)
+                    }
+                }
+                .overlayPreferenceValue(HistoryConnectorAnchors.self) { endpoints in
+                    if historyPresented { historyConnectors(endpoints) }
+                }
+            } else {
+                readingContent
+            }
+        }
+        .onChange(of: historyPresented) { _, presented in
+            if !presented { historySelection = nil }
+        }
+    }
+
+    private var readingContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             if let boardNotice {
                 Text(boardNotice)
@@ -90,11 +181,21 @@ struct MaterialNoteReadingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             statusRows
+            if historyRun {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    noteText("正在回看相关历史…")
+                }
+            } else if let historyNotice {
+                noteText(historyNotice)
+            }
             if let display {
                 article(display)
             }
         }
         .task(id: readKey) { await load() }
+        .task(id: historyReadKey) { await loadHistory() }
+        .task(id: historyRun) { if historyRun { await generateHistory() } }
         .task(id: requestKey) { await requestNote() }
         .sheet(item: $editing) { base in
             MaterialNoteEditor(base: base) { draft in
@@ -216,13 +317,57 @@ struct MaterialNoteReadingView: View {
 
     /// 成品视图：段落只有正文与「整理时补充的关联」标记。逐段原话与回听
     /// 属于原材料侧的信息，只在「查看材料与原文」里出现，不挂在成品上。
-    private func paragraphView(_ paragraph: MaterialNote.Paragraph) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(attributedParagraph(paragraph))
-                .vosFont(WorkspaceText.body)
-                .foregroundStyle(palette.text)
-                .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
-                .fixedSize(horizontal: false, vertical: true)
+    private func paragraphView(_ paragraph: MaterialNote.Paragraph, anchor: String) -> some View {
+        let number = orderedHistory.firstIndex { $0.paragraphID == anchor }.map { $0 + 1 }
+        let selected = historyPresented && historySelection == anchor
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Text(attributedParagraph(paragraph))
+                    .vosFont(WorkspaceText.body)
+                    .foregroundStyle(palette.text)
+                    .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contextMenu {
+                        if let discussParagraph {
+                            Button("讨论这一段", systemImage: "bubble.left.and.bubble.right") {
+                                discussParagraph(paragraph.text)
+                            }
+                        }
+                    }
+                    .background {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(palette.selection)
+                                .padding(-5)
+                        }
+                    }
+                if historyPresented && !orderedHistory.isEmpty {
+                    Group {
+                        if let number {
+                            Button {
+                                historySelection = anchor
+                            } label: {
+                                historyIndex(number, selected: selected)
+                                    .frame(minWidth: 28, minHeight: 28)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .workspaceHoverHighlight()
+                            .accessibilityLabel("历史批注 \(number)")
+                            .accessibilityAddTraits(selected ? .isSelected : [])
+                            .accessibilityIdentifier("note.history.marker")
+                            .help("历史批注")
+                            .anchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) {
+                                [.paragraph(anchor): $0]
+                            }
+                        } else {
+                            Color.clear.frame(height: 0).accessibilityHidden(true)
+                        }
+                    }
+                    .frame(width: 28)
+                }
+            }
             if paragraph.inferred == true {
                 Text("整理时补充的关联")
                     .vosFont(WorkspaceText.caption)
@@ -240,12 +385,7 @@ struct MaterialNoteReadingView: View {
     /// 一条 AI 批注：低饱和暖色底、左缘色条、轻标签；形式与长度随内容，
     /// 理论出处与身份（voice）有就给一行。批注是成品的一部分。
     private func annotationView(_ annotation: MaterialNote.Annotation) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(palette.warning.opacity(0.45))
-                .frame(width: 2)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Text("AI 批注").vosFont(WorkspaceText.caption.size, weight: .semibold)
                         .foregroundStyle(palette.warning)
@@ -268,10 +408,19 @@ struct MaterialNoteReadingView: View {
                         .foregroundStyle(palette.tertiaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
         }
         .padding(12)
+        .padding(.leading, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.warning.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(palette.warning.opacity(0.45))
+                .frame(width: 2)
+                .padding(.vertical, 12)
+                .padding(.leading, 10)
+                .accessibilityHidden(true)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("AI 批注" + (Self.annotationKindLabel(annotation.kind).map { "，" + $0 } ?? ""))
     }
@@ -332,12 +481,13 @@ struct MaterialNoteReadingView: View {
             }
             VStack(alignment: .leading, spacing: 18) {
                 ForEach(Array((block.paragraphs ?? []).enumerated()), id: \.offset) { index, paragraph in
-                    paragraphView(paragraph)
-                        .id(blockParagraphAnchor(block, index))
+                    let anchor = blockParagraphAnchor(block, index)
+                    paragraphView(paragraph, anchor: anchor)
+                        .id(anchor)
                         .onGeometryChange(for: CGFloat.self) { proxy in
                             proxy.frame(in: .scrollView(axis: .vertical)).minY
                         } action: { minY in
-                            probe(minY, anchor: blockParagraphAnchor(block, index))
+                            probe(minY, anchor: anchor)
                         }
                 }
             }
@@ -532,6 +682,14 @@ struct MaterialNoteReadingView: View {
             Spacer(minLength: 8)
             // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
             Menu {
+                if historyPilot != nil {
+                    Button("回看相关历史", systemImage: "clock.arrow.circlepath") {
+                        historyRun = true
+                        historyNotice = nil
+                    }
+                    .disabled(historyRun || display?.isCurrent != true)
+                    .accessibilityIdentifier("note.history.request")
+                }
                 Button("编辑笔记…") { editing = display?.note }
                 Button(annotationsVisible ? "隐藏 AI 批注" : "显示 AI 批注") {
                     annotationsVisible.toggle()
@@ -738,6 +896,271 @@ struct MaterialNoteReadingView: View {
     private func retry() {
         if let base = display?.note, base.note.manuallyEdited == true { replacement = base; return }
         Task { await model.requestMaterialNote(sourceID: source.id, force: true) }
+    }
+
+    private struct HistoryReadKey: Equatable {
+        let noteID: String?
+        let records: Int
+        let notes: Int
+    }
+
+    private var historyReadKey: HistoryReadKey {
+        .init(noteID: display?.note.id, records: model.recordsRevision, notes: model.materialNotesRevision)
+    }
+
+    private var validHistory: NoteHistoryResult? {
+        guard let historyResult, display?.isCurrent == true, historyResult.noteID == display?.note.id,
+              historyResult.recordVersions.allSatisfy({ id, version in
+                  catalog[id].map(NoteHistoryResult.version) == version
+              }) else { return nil }
+        return historyResult
+    }
+
+    private var historyInspector: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if orderedHistory.isEmpty {
+                ContentUnavailableView("暂无历史批注", systemImage: "text.bubble")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(orderedHistory.enumerated()), id: \.element.id) { index, annotation in
+                            historyCard(annotation, number: index + 1)
+                                .id(annotation.id)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .transformAnchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) { value, anchor in
+                        value[.listViewport] = anchor
+                    }
+                .onChange(of: historySelection) { _, anchor in
+                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                }
+            }
+        }
+        .background(palette.canvas)
+    }
+
+    private var orderedHistory: [NoteHistoryAnnotation] {
+        guard let annotations = validHistory?.annotations, !annotations.isEmpty, let display else { return [] }
+        let byParagraph = Dictionary(annotations.map { ($0.paragraphID, $0) }, uniquingKeysWith: { first, _ in first })
+        return NoteBoardAdapting.blocks(for: display.note.note).flatMap { block in
+            (block.paragraphs ?? []).indices.compactMap { byParagraph[blockParagraphAnchor(block, $0)] }
+        }
+    }
+
+    private func historyIndex(_ number: Int, selected: Bool) -> some View {
+        Text(number.formatted())
+            .font(.system(.caption, design: .monospaced).weight(.semibold))
+            .foregroundStyle(selected ? palette.surface : palette.accent)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(selected ? palette.accent : palette.selection, in: Capsule())
+    }
+
+    private func historyCard(_ annotation: NoteHistoryAnnotation, number: Int) -> some View {
+        let selected = historySelection == annotation.id
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                historySelection = annotation.id
+                let position = restoreScroll ?? $articlePosition
+                position.wrappedValue.scrollTo(id: annotation.paragraphID, anchor: .center)
+            } label: {
+                HStack(spacing: 8) {
+                    historyIndex(number, selected: selected)
+                    Text("查看对应段落").vosFont(WorkspaceText.meta)
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.left").accessibilityHidden(true)
+                }
+                .foregroundStyle(palette.accent)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .workspaceHoverHighlight()
+            .accessibilityLabel("查看历史批注 \(number) 对应段落")
+            .accessibilityIdentifier("note.history.jump")
+            .anchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) {
+                [.card(annotation.id): $0]
+            }
+            Text(annotation.text)
+                .vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
+                .accessibilityIdentifier("note.history.annotation")
+            Divider().padding(.top, 4)
+            Text("相关笔记").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(Array(Set(annotation.sourceIDs)).sorted(), id: \.self) { id in
+                if let title = validHistory?.sourceTitles[id] {
+                    Button {
+                        sidebar?.wrappedValue = nil
+                        openHistoryNote?(id)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "doc.text")
+                            Text(title).fixedSize(horizontal: false, vertical: true)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.right")
+                                .accessibilityHidden(true)
+                        }
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.accent)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .workspaceHoverHighlight()
+                    .accessibilityIdentifier("note.history.source")
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? palette.accent : palette.border)
+        }
+    }
+
+    private func historyConnectors(_ endpoints: [HistoryConnectorAnchors.Endpoint: Anchor<CGRect>]) -> some View {
+        GeometryReader { geometry in
+            Canvas { context, size in
+                guard let viewportAnchor = endpoints[.listViewport],
+                      let articleAnchor = endpoints[.articleViewport] else { return }
+                let viewport = geometry[viewportAnchor]
+                let article = geometry[articleAnchor]
+                for annotation in orderedHistory {
+                    let id = annotation.id
+                    guard let paragraph = endpoints[.paragraph(id)], let card = endpoints[.card(id)] else { continue }
+                    let left = geometry[paragraph], right = geometry[card]
+                    let start = CGPoint(x: left.midX + 10, y: left.midY)
+                    let end = CGPoint(x: right.minX - 12, y: right.midY)
+                    guard end.x > start.x, start.y >= max(0, article.minY), start.y <= min(size.height, article.maxY),
+                          end.y >= max(0, viewport.minY), end.y <= min(size.height, viewport.maxY) else { continue }
+
+                    let bend = (end.x - start.x) * 0.55
+                    let selected = historySelection == id
+                    var line = Path()
+                    line.move(to: start)
+                    line.addCurve(to: end, control1: CGPoint(x: start.x + bend, y: start.y),
+                                  control2: CGPoint(x: end.x - bend, y: end.y))
+                    context.stroke(line, with: .color(palette.accent.opacity(selected ? 0.85 : 0.42)),
+                                   style: StrokeStyle(lineWidth: selected ? 1.75 : 1, lineCap: .round))
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func loadHistory() async {
+        guard openHistoryNote != nil, let root = model.libraryRoot,
+              let pilot = NoteHistoryPilot.load(root: root), pilot.targetSourceIDs.contains(source.id) else { return }
+        historyPilot = pilot
+        guard let displayed = display, displayed.isCurrent, let store = model.store else { return }
+        let key = historyReadKey
+        let cached = NoteHistoryResult.read(root: root, sourceID: source.id)
+        if let cached, cached.noteID == displayed.note.id,
+           await historyVersionsMatch(cached, store: store),
+           key == historyReadKey, !Task.isCancelled {
+            historyResult = cached
+        } else if key == historyReadKey && !Task.isCancelled {
+            historyResult = nil
+            historySelection = nil
+        }
+    }
+
+    private func historyVersionsMatch(_ result: NoteHistoryResult, store: VoiceOSStore) async -> Bool {
+        guard let records = try? await store.sources() else { return false }
+        let indexed = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+        guard result.recordVersions.allSatisfy({ id, version in
+            indexed[id].map(NoteHistoryResult.version) == version
+        }) else { return false }
+        for (expressionKey, revisionID) in result.sourceNoteIDs {
+            let ids = expressionKey.split(separator: "|").map(String.init)
+            guard let current = try? await store.latestMaterialNote(memberSourceIDs: ids),
+                  current.id == revisionID else { return false }
+        }
+        return true
+    }
+
+    private func generateHistory() async {
+        defer { historyRun = false }
+        guard let pilot = historyPilot, let displayed = display, displayed.isCurrent,
+              let store = model.store, let root = model.libraryRoot, let port = model.materialNoteModel else {
+            historyNotice = "暂时无法回看历史，请检查资料库和文本模型。"
+            return
+        }
+        do {
+            let indexed = Dictionary(uniqueKeysWithValues: try await store.sources().map { ($0.id, $0) })
+            let baseIDs = memberIDs
+            if let reason = MaterialNoteGating.unavailableReason(memberIDs: baseIDs, catalog: indexed) {
+                throw VoiceOSError(reason)
+            }
+            var revisions = [displayed.note.expressionKey: displayed.note.id]
+            var usedRecords = Set(baseIDs)
+            let current = await store.materialNoteIsCurrent(displayed.note,
+                currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: baseIDs, catalog: indexed))
+            guard current else { throw VoiceOSError("原话已更新，请先更新笔记。") }
+            try Task.checkCancellation()
+            let documents = try await pilot.recalledDocuments(query: articleTitle(displayed.note.note))
+            var evidence: [NoteHistoryEvidence] = []
+            for sourceEntry in pilot.sources where documents.contains(sourceEntry.documentID) && !baseIDs.contains(sourceEntry.sourceID) {
+                let ids = model.materialNoteMemberIDs(sourceID: sourceEntry.sourceID)
+                guard MaterialNoteGating.unavailableReason(memberIDs: ids, catalog: indexed) == nil,
+                      let prior = try await store.latestMaterialNote(memberSourceIDs: ids), prior.id == sourceEntry.noteID,
+                      await store.materialNoteIsCurrent(prior,
+                        currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: ids, catalog: indexed))
+                else { continue }
+                let body = NoteBoardAdapting.blocks(for: prior.note)
+                    .filter { $0.kind == "text" }.flatMap { $0.paragraphs ?? [] }.map(\.text)
+                guard !body.isEmpty else { continue }
+                let date = ids.compactMap { indexed[$0]?.expressedDate }.min()
+                    .map { $0.formatted(date: .numeric, time: .omitted) } ?? ""
+                evidence.append(.init(sourceID: sourceEntry.sourceID, title: prior.note.title, date: date,
+                                      text: body.joined(separator: "\n\n")))
+                revisions[prior.expressionKey] = prior.id
+                usedRecords.formUnion(ids)
+            }
+            let versions = Dictionary(uniqueKeysWithValues: usedRecords.compactMap { id in
+                indexed[id].map { (id, NoteHistoryResult.version($0)) }
+            })
+            let titles = Dictionary(evidence.map { ($0.sourceID, $0.title) }, uniquingKeysWith: { first, _ in first })
+            let snapshot = NoteHistoryResult(noteID: displayed.note.id, sourceNoteIDs: revisions, sourceTitles: titles,
+                                             recordVersions: versions, annotations: [])
+            guard await historyVersionsMatch(snapshot, store: store),
+                  display?.note.id == displayed.note.id, model.libraryRoot == root else {
+                throw VoiceOSError("笔记或材料已更新，请重新回看。")
+            }
+            try Task.checkCancellation()
+            let paragraphs = NoteBoardAdapting.blocks(for: displayed.note.note)
+                .filter { !["todo", "claim", "quote", "insight", "callout"].contains($0.kind) }
+                .flatMap { block in
+                    (block.paragraphs ?? []).enumerated().map { index, paragraph in
+                        NoteHistoryParagraph(id: blockParagraphAnchor(block, index), text: paragraph.text)
+                    }
+                }
+            let annotations = try await port.historyAnnotations(
+                transcripts: baseIDs.compactMap { indexed[$0]?.transcript }, paragraphs: paragraphs, evidence: evidence)
+            guard await historyVersionsMatch(snapshot, store: store),
+                  display?.note.id == displayed.note.id, model.libraryRoot == root else {
+                throw VoiceOSError("笔记或材料已更新，请重新回看。")
+            }
+            try Task.checkCancellation()
+            let result = NoteHistoryResult(noteID: snapshot.noteID, sourceNoteIDs: revisions, sourceTitles: titles,
+                                           recordVersions: versions, annotations: annotations)
+            try result.save(root: root, sourceID: source.id)
+            historyResult = result
+            historyNotice = annotations.isEmpty ? "没有找到值得补充的前情。" : nil
+            if !annotations.contains(where: { $0.id == historySelection }) { historySelection = nil }
+
+        } catch is CancellationError {
+            return
+        } catch {
+            historyNotice = error.localizedDescription
+        }
     }
 
     private func allowCloudAndRequest() {

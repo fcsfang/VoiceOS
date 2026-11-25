@@ -5,6 +5,8 @@ struct DiscussionHistoryView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let close: () -> Void
+    var noteExpressionKey: String? = nil
+    var openSavedDiscussion: ((String) -> Void)? = nil
     @State private var previews: [ConversationPreview] = []
     @State private var loading = true
     @State private var loadError = ""
@@ -76,6 +78,11 @@ struct DiscussionHistoryView: View {
     }
 
     private func open(_ preview: ConversationPreview) {
+        if let openSavedDiscussion {
+            close()
+            openSavedDiscussion(preview.id)
+            return
+        }
         Task {
             if await model.openDiscussion(preview.id) {
                 close()
@@ -94,7 +101,7 @@ struct DiscussionHistoryView: View {
             return
         }
         do {
-            previews = try await store.conversationPreviews()
+            previews = try await store.conversationPreviews(noteExpressionKey: noteExpressionKey)
         } catch {
             self.loadError = error.localizedDescription
         }

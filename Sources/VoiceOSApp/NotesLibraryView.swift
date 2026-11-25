@@ -1,11 +1,12 @@
 import SwiftUI
 import VoiceOSCore
 
-/// 笔记页：每个表达的最新一篇笔记，按整理时间倒序列出。材料页回答「我有
+/// 笔记页：每个表达的最新一篇笔记，按原始素材时间倒序列出。材料页回答「我有
 /// 什么材料」，主题页回答「我在关心什么」，笔记页回答「我整理出了什么」。
 /// 点开任一篇都落到与首页、材料页相同的正文与阅读位置。
 struct NotesLibraryView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @ObservedObject var model: ControlCenter
     /// 打开纯笔记阅读页（文章本体），不是完整的材料页。
     let openNote: (String) -> Void
@@ -14,6 +15,7 @@ struct NotesLibraryView: View {
 
     @State private var notes: [NoteLibraryRow] = []
     @State private var query = ""
+    @State private var previewedNoteID: String?
     @State private var notesLoaded = false
     @State private var selectedPending: Set<String> = []
     @State private var organizingSelected = false
@@ -70,7 +72,7 @@ struct NotesLibraryView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             if let day {
                                 Text(day.formatted(.dateTime.day(.twoDigits)))
-                                    .vosFont(26, weight: .medium, monospacedDigit: true)
+                                    .vosFont(22, weight: .medium, monospacedDigit: true)
                                 Text(day.formatted(.dateTime.year().month(.abbreviated)))
                                     .vosFont(WorkspaceText.caption)
                                     .foregroundStyle(palette.secondaryText)
@@ -78,7 +80,7 @@ struct NotesLibraryView: View {
                                 Text("日期未知").vosFont(WorkspaceText.meta)
                             }
                         }
-                        .frame(width: 78, alignment: .leading)
+                        .frame(width: 78 * vosLayoutScale(textScale), alignment: .leading)
                         .padding(.top, 12)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(day?.formatted(date: .long, time: .omitted) ?? "日期未知")
@@ -170,7 +172,9 @@ struct NotesLibraryView: View {
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
             guard let store = model.store else { return }
             let trashed = Set(model.records.lazy.filter(\.isTrashed).map(\.id))
-            let rows = try? await store.noteLibraryRows(excluding: trashed)
+            let rows = try? await store.noteLibraryRows(
+                sources: model.sourcePageIndex.recordsByID, excluding: trashed
+            )
             if !Task.isCancelled, let rows { notes = rows; notesLoaded = true }
         }
     }
@@ -178,34 +182,66 @@ struct NotesLibraryView: View {
     private var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func noteRow(_ stored: NoteLibraryRow) -> some View {
-        Button { open(stored) } label: {
-            VStack(alignment: .leading, spacing: 4) {
+        let summary = stored.preview.flatMap { $0 == stored.title ? nil : $0 }
+        return Button { open(stored) } label: {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(highlight(stored.title)).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
-                if !term.isEmpty, let excerpt = preview(for: stored) {
+                if let excerpt = searchExcerpt(for: stored) {
                     Text(highlight(excerpt)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText).lineLimit(2)
-                } else if let lead = stored.preview, lead != stored.title {
-                    // One quiet line of the note's opening gives each title a
-                    // body, so a day of notes stops reading as a wall of heads.
-                    Text(lead).vosFont(WorkspaceText.meta)
-                        .foregroundStyle(palette.tertiaryText).lineLimit(1)
+                } else if let summary {
+                    Text(summary).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.tertiaryText)
+                        .lineLimit(1)
+                        .frame(maxWidth: 420 * vosLayoutScale(textScale), alignment: .leading)
                 }
             }
             .multilineTextAlignment(.leading)
-            .padding(.horizontal, 18).padding(.vertical, 12)
+            .padding(.horizontal, 18).padding(.vertical, 15)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle()).workspaceHoverHighlight()
         }
         .buttonStyle(.plain)
-        .help(stored.preview ?? stored.title)
+        .help(summary ?? stored.title)
+        .contextMenu {
+            if summary != nil {
+                Button("预览摘要") { previewedNoteID = stored.id }
+            }
+        }
+        .accessibilityActions {
+            if summary != nil {
+                Button("预览摘要") { previewedNoteID = stored.id }
+            }
+        }
+        .popover(isPresented: Binding(
+            get: { previewedNoteID == stored.id },
+            set: { if !$0, previewedNoteID == stored.id { previewedNoteID = nil } }
+        )) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(stored.title).vosFont(WorkspaceText.rowTitle)
+                    .accessibilityAddTraits(.isHeader)
+                if let summary {
+                    Text(summary).vosFont(WorkspaceText.body)
+                        .foregroundStyle(palette.secondaryText)
+                        .textSelection(.enabled)
+                }
+                Button("打开笔记") {
+                    previewedNoteID = nil
+                    open(stored)
+                }
+                .buttonStyle(.workspaceSecondaryCompact)
+            }
+            .padding(18)
+            .frame(width: 340, alignment: .leading)
+        }
         .accessibilityIdentifier("notes.row")
     }
 
-    private func preview(for row: NoteLibraryRow) -> String? {
+    private func searchExcerpt(for row: NoteLibraryRow) -> String? {
         guard !term.isEmpty, row.title.localizedStandardRange(of: term) == nil,
-              let match = row.searchableText.localizedStandardRange(of: term) else { return row.preview }
+              let match = row.searchableText.localizedStandardRange(of: term) else { return nil }
         let left = row.searchableText[..<match.lowerBound].suffix(14)
         let right = row.searchableText[match.upperBound...].prefix(64)
         let prefix = left.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).last ?? ""
@@ -249,19 +285,30 @@ private struct NoteLibraryRow: Identifiable, Sendable {
     let expressionKey: String
     let title: String
     let preview: String?
-    let day: Date?
+    let sourceDate: Date?
+    var day: Date? { sourceDate.map { Calendar.current.startOfDay(for: $0) } }
     let searchableText: String
 }
 
 private extension VoiceOSStore {
-    func noteLibraryRows(excluding trashed: Set<String>) throws -> [NoteLibraryRow] {
+    func noteLibraryRows(sources: [String: SourceRecord], excluding trashed: Set<String>) throws -> [NoteLibraryRow] {
         try recentMaterialNotes(limit: nil).compactMap { stored in
-            guard !stored.expressionKey.split(separator: "|").contains(where: { trashed.contains(String($0)) }) else { return nil }
+            let ids = stored.expressionKey.split(separator: "|").map(String.init)
+            guard !ids.contains(where: trashed.contains) else { return nil }
+            let members = ids.compactMap { sources[$0] }
+            let personal = members.filter { $0.origin == "user" }
+            // Multi-part notes belong to the start of the user's material, even
+            // when the expression also references an older external source.
+            let sourceDate = (personal.isEmpty ? members : personal).compactMap {
+                $0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt)
+            }.min()
             return NoteLibraryRow(id: stored.id, expressionKey: stored.expressionKey,
                            title: MaterialNoteHomeText.title(stored.note) ?? "未命名笔记",
                            preview: MaterialNoteHomeText.preview(stored.note),
-                           day: ConversationReflectionFocus.date(stored.createdAt).map { Calendar.current.startOfDay(for: $0) },
+                           sourceDate: sourceDate,
                            searchableText: stored.note.searchableText)
+        }.sorted {
+            ($0.sourceDate ?? .distantPast) > ($1.sourceDate ?? .distantPast)
         }
     }
 }
