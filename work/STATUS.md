@@ -1350,3 +1350,4 @@
 
 - 次级页面容器语言与令牌一致性，详见 work/tasks/2026-11-25-ui-wave2/TASK.md。
 - 集成构建 build_exit=0；全量 test_exit=0（592 tests）；dist_build_exit=0。
+- 重启：等待空闲窗口后 restart_preflight rc=0，10:03 正式实例换为第二波 dist（pid 12214）。
