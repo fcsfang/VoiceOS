@@ -1099,8 +1099,12 @@ final class ControlCenter: ObservableObject {
 
     @Published var dictationBusy = false
     @Published var dictationActive = false
+    @Published private(set) var dictationStarting = false
+    @Published private(set) var dictationPaused = false
+    @Published private(set) var dictationSealing = false
+    @Published private(set) var lastSavedDictation: SourceRecord?
     private(set) var dictationStartedAt: Date?
-    private var dictationStatusBase = ""
+    private var dictationShowsReceipt = false
     private var dictationDiscarding = false
     var dictationHotKeyConflict: Bool { !GlobalHotKeyCenter.shared.isRegistered(.toggleDictation) }
     private var dictationSource: String?
@@ -1118,12 +1122,21 @@ final class ControlCenter: ObservableObject {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
     var dictationElapsedText: String {
-        guard let dictationStartedAt else { return "" }
-        return Self.clockText(Date().timeIntervalSince(dictationStartedAt))
+        guard dictationStartedAt != nil else { return "" }
+        return Self.clockText(dictation.elapsed)
     }
-    func noteDictationClock(_ text: String) {
-        guard dictationActive, !dictationBusy, !dictationStatusBase.isEmpty else { return }
-        status = dictationStatusBase + " · 已录 " + text
+    var dictationInputLevel: Double { dictation.inputLevel }
+    func toggleDictationPause() {
+        guard dictationActive, !dictationBusy else { return }
+        if dictationPaused {
+            guard dictation.resume() else {
+                stopDictation(interrupted: true)
+                return
+            }
+            dictationPaused = false
+        } else if dictation.pause() {
+            dictationPaused = true
+        }
     }
     func refreshMicrophoneAuthorization() { microphoneAuthorization = NativeDictation.authorizationStatus() }
     func requestMicrophoneAccess() async -> Bool {
@@ -1131,40 +1144,48 @@ final class ControlCenter: ObservableObject {
         microphoneAuthorization = NativeDictation.authorizationStatus()
         return granted
     }
-    func startDictation(processAfterTranscription: Bool = false) async {
+    func startDictation(processAfterTranscription: Bool = false, showsReceipt: Bool = false) async {
         guard let store, dictationBusyReason == nil, !dictationActive else { status = dictationBusyReason ?? "正在录音，停止后才能开始下一段"; return }
         if processAfterTranscription, let issue = recordingModelIssue {
             status = issue + "无法录制并完整整理"
             return
         }
-        dictationBusy = true; defer { dictationBusy = false }
+        dictationBusy = true
+        dictationStarting = true
+        defer { dictationStarting = false; dictationBusy = false }
         let duration: TimeInterval?
         if let raw = ProcessInfo.processInfo.environment["VOICEOS_TEST_CAPTURE_SECONDS"] {
             guard let seconds = Double(raw), seconds.isFinite, seconds > 0, seconds <= 60 else { status = "限时采集参数无效，未开启麦克风"; return }
             duration = seconds
         } else { duration = nil }
-        guard await dictation.requestPermission() else { status = "麦克风未获授权，未开始录制；仍可导入文件"; return }
+        guard await StartupTrace.measureAsync("capture.microphonePermission", { await dictation.requestPermission() }) else {
+            status = "麦克风未获授权，未开始录制；仍可导入文件"
+            return
+        }
         do {
-            let intent = try await store.beginDictation()
+            let intent = try await StartupTrace.measureAsync("capture.beginIntent") { try await store.beginDictation() }
             dictationFullOrganization = processAfterTranscription
+            dictationShowsReceipt = showsReceipt
             dictationSource = intent.sourceID; dictationInterrupted = false; dictationDiscarding = false
-            try dictation.start(at:intent.stagingURL,maximumDuration:duration) { [weak self] success in Task { await self?.finishDictation(success:success) } }
+            try StartupTrace.measure("capture.startMicrophone") {
+                try dictation.start(at: intent.stagingURL, maximumDuration: duration) { [weak self] success in
+                    Task { await self?.finishDictation(success: success) }
+                }
+            }
             dictationStartedAt = Date(); dictationActive = true; selected = intent.sourceID
+            if showsReceipt { lastSavedDictation = nil }
             status = duration.map { "正在进行\($0)秒限时采集 · 到时自动停止 · 仅本地" } ?? "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
             if processAfterTranscription { status = "正在录制 · 停止后完整转写并整理所有意图；仅文字用于云端" }
-            dictationStatusBase = status
-            await refresh()
         } catch {
             if let id = dictationSource { try? await store.interruptDictation(sourceID:id) }
             dictationSource = nil; dictationActive = false; dictationFullOrganization = false
-            dictationStartedAt = nil; dictationStatusBase = ""; dictationDiscarding = false
+            dictationStartedAt = nil; dictationDiscarding = false
             status = error.localizedDescription; await refresh()
         }
     }
     func stopDictation(interrupted:Bool = false) {
         guard dictationActive, !dictationBusy else { return }
         dictationInterrupted = interrupted; dictationBusy = true
-        dictationStartedAt = nil; dictationStatusBase = ""
         status = interrupted ? "录制因系统中断结束，保留片段待核对" : "正在停止录制并核对原件…"
         dictation.stop()
     }
@@ -1172,7 +1193,6 @@ final class ControlCenter: ObservableObject {
         guard dictationActive, !dictationBusy, dictationSource != nil else { status = "没有可取消的录音"; return }
         dictationDiscarding = true
         dictationBusy = true
-        dictationStartedAt = nil; dictationStatusBase = ""
         status = "正在取消并丢弃这段口述…"
         dictation.stop()
     }
@@ -1184,18 +1204,21 @@ final class ControlCenter: ObservableObject {
         if dictationActive {
             stopDictation()
         } else {
-            Task { await startDictation(processAfterTranscription: recordingModelIssue == nil) }
+            Task { await startDictation(processAfterTranscription: recordingModelIssue == nil, showsReceipt: true) }
         }
     }
     private func finishDictation(success:Bool) async {
         guard let store, let id = dictationSource else { return }
+        dictationBusy = true
+        dictationSealing = true
         let organize = dictationFullOrganization
         let discard = dictationDiscarding
+        let showsReceipt = dictationShowsReceipt
         dictationFullOrganization = false
         dictationDiscarding = false
         dictationSource = nil; dictationActive = false
-        dictationStartedAt = nil; dictationStatusBase = ""
-        defer { dictationBusy = false }
+        dictationStartedAt = nil; dictationPaused = false
+        defer { dictationSealing = false; dictationBusy = false }
         if discard {
             await discardDictation(store: store, sourceID: id, recorded: success)
             await refresh()
@@ -1206,11 +1229,16 @@ final class ControlCenter: ObservableObject {
             return
         }
         if success && !dictationInterrupted {
-            do { try await store.sealDictation(sourceID:id); status = "口述原件已保存 · 本地转写随后处理" }
+            do {
+                try await store.sealDictation(sourceID:id)
+                if showsReceipt { lastSavedDictation = try? await store.sourceRecords(ids: [id]).first }
+                status = "口述原件已保存 · 本地转写随后处理"
+            }
             catch { try? await store.interruptDictation(sourceID:id); status = "录制封存未完成：" + error.localizedDescription + "；片段保留待核对，未报告保存成功" }
         } else {
             try? await store.interruptDictation(sourceID:id); status = "录制未正常结束，片段保留待核对；未报告保存成功"
         }
+        dictationSealing = false
         await refresh()
         if discussionRecordingID == id {
             discussionStatus=records.first(where: { $0.id == id })?.state == "saved" ? "本轮口述原件已保存；等待本地转写与核对，尚未关联和发送。" : "本轮录制尚未正常保存，片段保留待核对；尚未关联和发送。"
@@ -1227,7 +1255,7 @@ final class ControlCenter: ObservableObject {
         }
         do {
             try await store.sealDictation(sourceID: sourceID)
-            let audio = records.first(where: { $0.id == sourceID }).flatMap { record in
+            let audio = try await store.sourceRecords(ids: [sourceID]).first.flatMap { record in
                 libraryRoot.map { $0.appendingPathComponent(record.relativePath) }
             }
             if let audio { try? FileManager.default.removeItem(at: audio) }
@@ -2490,7 +2518,7 @@ final class ControlCenter: ObservableObject {
         backgroundOrganizationWorker = Task {
             defer { backgroundOrganizationWorker = nil }
             while !backgroundOrganizationQueue.isEmpty, !Task.isCancelled {
-                while worker != nil || fullRecordingBusy || understandingWorker != nil || transcriptReviewSourceID != nil {
+                while dictationActive || worker != nil || fullRecordingBusy || understandingWorker != nil || transcriptReviewSourceID != nil {
                     try? await Task.sleep(for: .milliseconds(400))
                     if Task.isCancelled { return }
                 }
@@ -4563,16 +4591,16 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     @objc private func dictationClockTick() {
-        guard let model = ControlCenter.primary, let start = model.dictationStartedAt else {
+        guard let model = ControlCenter.primary, model.dictationStartedAt != nil else {
             if let model = ControlCenter.primary, model.dictationActive { dictationMenuItem?.title = "正在封存录音…" }
             stopDictationClock()
             return
         }
-        let elapsed = ControlCenter.clockText(Date().timeIntervalSince(start))
-        model.noteDictationClock(elapsed)
+        let elapsed = model.dictationElapsedText
+        let state = model.dictationBusy ? "正在封存录音" : model.dictationPaused ? "录音已暂停" : "正在录音"
         statusItem?.button?.title = " " + elapsed
-        statusItem?.button?.toolTip = "VoiceOS · 正在录音 " + elapsed
-        dictationMenuItem?.title = "正在录音 " + elapsed + " · 停止并整理" + Self.dictationHotKeySuffix(model.dictationHotKeyConflict)
+        statusItem?.button?.toolTip = "VoiceOS · " + state + " " + elapsed
+        dictationMenuItem?.title = state + " " + elapsed + " · 停止" + Self.dictationHotKeySuffix(model.dictationHotKeyConflict)
     }
 
     private static func dictationHotKeySuffix(_ conflict: Bool) -> String {

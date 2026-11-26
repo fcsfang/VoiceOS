@@ -12,6 +12,13 @@ public final class NativeDictation: NSObject, AVAudioRecorderDelegate {
     private var recorder: AVAudioRecorder?
     private var finish: (@MainActor (Bool) -> Void)?
     private var watchdog: Task<Void,Never>?
+    private var pausedTime: TimeInterval?
+    public var elapsed: TimeInterval { pausedTime ?? recorder?.currentTime ?? 0 }
+    public var inputLevel: Double {
+        guard let recorder, recorder.isRecording else { return 0 }
+        recorder.updateMeters()
+        return max(0, min(1, (Double(recorder.averagePower(forChannel: 0)) + 55) / 55))
+    }
     public func requestPermission() async -> Bool { await AVCaptureDevice.requestAccess(for:.audio) }
     /// Read-only view of the system microphone permission. Requesting stays in `requestPermission`.
     public nonisolated static func authorizationStatus() -> MicrophoneAuthorization {
@@ -29,11 +36,23 @@ public final class NativeDictation: NSObject, AVAudioRecorderDelegate {
               !FileManager.default.fileExists(atPath:file.path) else { throw VoiceOSError("麦克风尚未授权、已有录制或暂存文件已存在") }
         let value = try AVAudioRecorder(url:file,settings:[AVFormatIDKey:kAudioFormatLinearPCM,AVSampleRateKey:24000,AVNumberOfChannelsKey:1,AVLinearPCMBitDepthKey:16,AVLinearPCMIsFloatKey:false,AVLinearPCMIsBigEndianKey:false])
         recorder = value; finish = finished; value.delegate = self; Self.owner = self
+        value.isMeteringEnabled = true
         let started = value.prepareToRecord() && (maximumDuration.map { value.record(forDuration:$0) } ?? value.record())
         guard started else {
             value.delegate = nil; recorder = nil; finish = nil; Self.owner = nil
             throw VoiceOSError("麦克风未开始录制，未报告保存成功")
         }
+    }
+    public func pause() -> Bool {
+        guard let recorder, recorder.isRecording else { return false }
+        pausedTime = recorder.currentTime
+        recorder.pause()
+        return true
+    }
+    public func resume() -> Bool {
+        guard let recorder, pausedTime != nil, recorder.record() else { return false }
+        pausedTime = nil
+        return true
     }
     public func stop() {
         guard let recorder else { return }
@@ -49,6 +68,7 @@ public final class NativeDictation: NSObject, AVAudioRecorderDelegate {
         guard let callback = finish else { return }
         watchdog?.cancel(); watchdog = nil
         recorder?.delegate = nil; recorder?.stop(); recorder = nil; finish = nil
+        pausedTime = nil
         if Self.owner === self { Self.owner = nil }
         callback(success)
     }

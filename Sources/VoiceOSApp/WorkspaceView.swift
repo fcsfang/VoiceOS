@@ -762,7 +762,9 @@ struct WorkspaceView: View {
                         .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
                 }.padding(.horizontal,20).padding(.vertical,10)
             }
-            if model.workspaceProcessingBarVisible, page != .tool("处理情况") {
+            if model.dictationActive || model.dictationSealing {
+                DictationRecordingBar(model: model)
+            } else if model.workspaceProcessingBarVisible, page != .tool("处理情况") {
                 WorkspaceProcessingBar(model: model) { go(.tool("处理情况")) }
             }
         }.frame(minWidth:440)
@@ -939,6 +941,7 @@ struct WorkspaceView: View {
                     .accessibilityIdentifier("workspace.discussion")
             }
             Button("记录想法", systemImage:"mic") { go(.capture) }.help("记录想法")
+                .accessibilityIdentifier("workspace.capture")
         }
     }
     private var showsBreadcrumb: Bool {
@@ -1051,10 +1054,32 @@ struct WorkspaceView: View {
             VStack(alignment:.leading,spacing:0) {
                 VStack(alignment:.leading,spacing:10) {
                     HStack {
-                        Button(model.dictationActive ? "停止录音" : "开始录音", systemImage:model.dictationActive ? "stop.circle" : "mic") {
-                            if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription: model.recordingModelIssue == nil) } }
-                        }.buttonStyle(.workspacePrimary).disabled(model.dictationBusy || model.fullRecordingBusy)
+                        if !model.dictationActive {
+                            Button(model.dictationStarting ? "正在打开麦克风…" : "开始录音",
+                                   systemImage: "mic", action: model.toggleCaptureDictation)
+                                .buttonStyle(.workspacePrimary)
+                                .disabled(!model.canToggleCaptureDictation || model.fullRecordingBusy)
+                                .accessibilityIdentifier("capture.record")
+                        }
                         Button("导入音频 / 视频") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
+                    }
+                    if let saved = model.lastSavedDictation,
+                       model.sourcePageIndex.recordsByID[saved.id]?.isTrashed != true {
+                        HStack(spacing: 10) {
+                            Label("录音已保存", systemImage: "checkmark.circle")
+                                .vosFont(WorkspaceText.meta)
+                            Spacer()
+                            Button(model.player == nil ? "回听" : "停止回听",
+                                   systemImage: model.player == nil ? "play" : "stop") {
+                                if model.player != nil { model.stopPlayback() }
+                                else { Task { _ = await model.playSpan(saved, milliseconds: 0) } }
+                            }
+                                .buttonStyle(.workspaceQuietCompact)
+                            Button("打开材料") { go(.source(saved.id)) }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .disabled(model.sourcePageIndex.recordsByID[saved.id] == nil)
+                        }
+                        .accessibilityIdentifier("capture.record.saved")
                     }
                     if let issue = model.recordingModelIssue {
                         HStack(spacing:10) {
