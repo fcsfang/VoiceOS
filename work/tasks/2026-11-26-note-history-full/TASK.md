@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: in_progress
 started: 2026-11-26
 updated: 2026-11-26
 branch: codex/edit-generated-content
@@ -16,6 +16,8 @@ owner: codex
 
 全量测试 592 项通过。状态提示调整后的 Debug 应用包构建并通过签名验证。
 
+钥匙串授权后，24 篇现有笔记已同步。Hindsight 的文档 ID 与本地账本逐条匹配，待同步为 0。原试点名单外的真实笔记生成 5 条批注，实际操作验证了定位正文和打开历史出处。
+
 ## 下一步
 
-在 macOS 系统弹窗允许 VoiceOS 读取现有 Hindsight 凭据。应用已发起同步，当前确认完成 0 篇。获得权限后核对首批同步数量和真实历史批注结果。
+功能分支已完成首次同步和回看验证，待进入发布评审。
