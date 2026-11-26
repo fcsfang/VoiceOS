@@ -1065,7 +1065,7 @@ struct WorkspaceView: View {
                     }
                     if let saved = model.lastSavedDictation,
                        model.sourcePageIndex.recordsByID[saved.id]?.isTrashed != true {
-                        VStack(spacing: 6) {
+                        VStack(spacing: 8) {
                             HStack(spacing: 10) {
                                 Label("录音已保存", systemImage: "checkmark.circle")
                                     .vosFont(WorkspaceText.meta)
@@ -1086,10 +1086,18 @@ struct WorkspaceView: View {
                                     .disabled(model.sourcePageIndex.recordsByID[saved.id] == nil)
                                     .accessibilityIdentifier("capture.record.open")
                             }
-                            if let player = model.player {
+                            if let player = model.player, let duration = saved.duration, duration.isFinite, duration > 0 {
+                                DictationPlaybackTimeline(player: player, duration: duration)
+                            } else if let player = model.player {
                                 NativePlayerView(player: player).frame(height: 56)
-                                    .accessibilityIdentifier("capture.record.player")
                             }
+                        }
+                        .padding(12)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
+                                .strokeBorder(palette.border)
+                                .allowsHitTesting(false)
                         }
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("capture.record.saved")
