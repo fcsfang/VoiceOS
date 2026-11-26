@@ -1103,6 +1103,9 @@ final class ControlCenter: ObservableObject {
     @Published private(set) var dictationPaused = false
     @Published private(set) var dictationSealing = false
     @Published private(set) var lastSavedDictation: SourceRecord?
+    @Published private(set) var lastInterruptedDictation: SourceRecord?
+    @Published private(set) var lastDictationOrganizationFailed = false
+    private var lastDictationRequestsOrganization = false
     private(set) var dictationStartedAt: Date?
     private var dictationShowsReceipt = false
     private var dictationDiscarding = false
@@ -1168,12 +1171,18 @@ final class ControlCenter: ObservableObject {
             dictationShowsReceipt = showsReceipt
             dictationSource = intent.sourceID; dictationInterrupted = false; dictationDiscarding = false
             try StartupTrace.measure("capture.startMicrophone") {
-                try dictation.start(at: intent.stagingURL, maximumDuration: duration) { [weak self] success in
+                try dictation.start(at: intent.stagingURL, maximumDuration: duration,
+                                    inputChanged: { [weak self] in self?.stopDictation(interrupted: true) }) { [weak self] success in
                     Task { await self?.finishDictation(success: success) }
                 }
             }
             dictationStartedAt = Date(); dictationActive = true; selected = intent.sourceID
-            if showsReceipt { lastSavedDictation = nil }
+            if showsReceipt {
+                lastSavedDictation = nil
+                lastInterruptedDictation = nil
+                lastDictationOrganizationFailed = false
+                lastDictationRequestsOrganization = processAfterTranscription
+            }
             status = duration.map { "正在进行\($0)秒限时采集 · 到时自动停止 · 仅本地" } ?? "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
             if processAfterTranscription { status = "正在录制 · 停止后完整转写并整理所有意图；仅文字用于云端" }
         } catch {
@@ -1186,7 +1195,7 @@ final class ControlCenter: ObservableObject {
     func stopDictation(interrupted:Bool = false) {
         guard dictationActive, !dictationBusy else { return }
         dictationInterrupted = interrupted; dictationBusy = true
-        status = interrupted ? "录制因系统中断结束，保留片段待核对" : "正在停止录制并核对原件…"
+        status = interrupted ? "录音已中断，正在保留片段…" : "正在停止录制并核对原件…"
         dictation.stop()
     }
     func cancelAndDiscardDictation() {
@@ -1238,6 +1247,10 @@ final class ControlCenter: ObservableObject {
         } else {
             try? await store.interruptDictation(sourceID:id); status = "录制未正常结束，片段保留待核对；未报告保存成功"
         }
+        if showsReceipt, lastSavedDictation == nil,
+           let interrupted = try? await store.sourceRecords(ids: [id]).first, interrupted.state == "interrupted" {
+            lastInterruptedDictation = interrupted
+        }
         dictationSealing = false
         await refresh()
         if discussionRecordingID == id {
@@ -1279,8 +1292,35 @@ final class ControlCenter: ObservableObject {
     func recoverDictation(_ record:SourceRecord) async {
         guard let store, !dictationBusy, !dictationActive else { return }
         dictationBusy = true; defer { dictationBusy = false }
-        do { try await store.sealDictation(sourceID:record.id); status = "可解码片段已保存；它是中断片段，不代表完整表达"; await refresh(); scheduleProcessing() }
+        do {
+            try await store.sealDictation(sourceID: record.id)
+            if lastInterruptedDictation?.id == record.id {
+                lastSavedDictation = try? await store.sourceRecords(ids: [record.id]).first
+                lastInterruptedDictation = nil
+                lastDictationRequestsOrganization = false
+            }
+            status = "可解码片段已保存"
+            await refresh()
+            scheduleProcessing()
+        }
         catch { status = "片段尚不能完整解码，保留待核对"; await refresh() }
+    }
+
+    func dictationReceiptStatus(for source: SourceRecord) -> String? {
+        if source.jobState == "failed" { return "转写未完成" }
+        if fullRecordingCompletedSourceID == source.id { return "已完成整理" }
+        if lastDictationOrganizationFailed { return "整理未完成" }
+        if source.jobState == "running" || (organizingSourceID == source.id && source.transcriptVersionID == nil) {
+            return "正在本地转写"
+        }
+        if source.jobState == "queued" {
+            return speechConfigured ? "等待转写" : "配置本地转写后可处理"
+        }
+        if source.transcriptVersionID != nil {
+            if organizingSourceID == source.id { return "正在整理观点与任务" }
+            return lastDictationRequestsOrganization ? "等待整理" : "转写已完成"
+        }
+        return nil
     }
     func startFeedbackDictation() async -> String? {
         guard speechPort is LocalQwenSpeechPort, !dictationActive, !dictationBusy else {
@@ -2536,9 +2576,11 @@ final class ControlCenter: ObservableObject {
                     LocalNotice.post(title: "口述整理完成", body: "「" + title + "」的观点与任务已保存。", sourceID: sourceID)
                 } catch is CancellationError {
                     refreshTask.cancel()
+                    if lastSavedDictation?.id == sourceID { lastDictationOrganizationFailed = true }
                     setFullRecordingStatus("后台整理已停止；录音、逐字稿与已完成结果保留")
                 } catch {
                     refreshTask.cancel()
+                    if lastSavedDictation?.id == sourceID { lastDictationOrganizationFailed = true }
                     let reason = error.localizedDescription
                     setFullRecordingStatus("上一段口述整理未完成：" + reason)
                     LocalNotice.post(title: "口述整理未完成", body: "「" + title + "」：" + reason, sourceID: sourceID)

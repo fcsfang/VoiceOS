@@ -1065,21 +1065,40 @@ struct WorkspaceView: View {
                     }
                     if let saved = model.lastSavedDictation,
                        model.sourcePageIndex.recordsByID[saved.id]?.isTrashed != true {
-                        HStack(spacing: 10) {
-                            Label("录音已保存", systemImage: "checkmark.circle")
-                                .vosFont(WorkspaceText.meta)
-                            Spacer()
-                            Button(model.player == nil ? "回听" : "停止回听",
-                                   systemImage: model.player == nil ? "play" : "stop") {
-                                if model.player != nil { model.stopPlayback() }
-                                else { Task { _ = await model.playSpan(saved, milliseconds: 0) } }
+                        VStack(spacing: 6) {
+                            HStack(spacing: 10) {
+                                Label("录音已保存", systemImage: "checkmark.circle")
+                                    .vosFont(WorkspaceText.meta)
+                                if let status = model.dictationReceiptStatus(for: model.sourcePageIndex.recordsByID[saved.id] ?? saved) {
+                                    Text(status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                                        .accessibilityIdentifier("capture.record.processing")
+                                }
+                                Spacer()
+                                Button(model.player == nil ? "回听" : "关闭回听",
+                                       systemImage: model.player == nil ? "play" : "xmark") {
+                                    if model.player != nil { model.stopPlayback() }
+                                    else { Task { _ = await model.playSpan(saved, milliseconds: 0) } }
+                                }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("capture.record.play")
+                                Button("打开材料") { go(.source(saved.id)) }
+                                    .buttonStyle(.workspaceQuietCompact)
+                                    .disabled(model.sourcePageIndex.recordsByID[saved.id] == nil)
+                                    .accessibilityIdentifier("capture.record.open")
                             }
-                                .buttonStyle(.workspaceQuietCompact)
-                            Button("打开材料") { go(.source(saved.id)) }
-                                .buttonStyle(.workspaceQuietCompact)
-                                .disabled(model.sourcePageIndex.recordsByID[saved.id] == nil)
+                            if let player = model.player {
+                                NativePlayerView(player: player).frame(height: 56)
+                                    .accessibilityIdentifier("capture.record.player")
+                            }
                         }
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("capture.record.saved")
+                    }
+                    if let interrupted = model.lastInterruptedDictation,
+                       (model.sourcePageIndex.recordsByID[interrupted.id] ?? interrupted).dictationRecoveryPending {
+                        Label("录音已中断", systemImage: "exclamationmark.circle")
+                            .vosFont(WorkspaceText.meta)
+                        DictationRecoveryControls(model: model, source: interrupted)
                     }
                     if let issue = model.recordingModelIssue {
                         HStack(spacing:10) {
