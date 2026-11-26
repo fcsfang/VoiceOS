@@ -10,7 +10,7 @@ owner: coordinator
 
 ## 目标
 
-规格：`VoiceOS_Task_Initiation_Dev_Package/feature-plans/VoiceOS_Task_Initiation_Feature_Spec.md`。VoiceOS 是任务启动层，不是执行者：把口述中的模糊任务、障碍和想法转成四种路线之一，交给 Agent 的可复制提示词、用户自己动手的教程、一个最关键的澄清问题、或仅记录。P0 完成 F-01 到 F-10，验收对应 T01 到 T13。不自动创建任务、不写提醒、不调起任何外部 Agent。
+规格：[原始需求与验收规格](VoiceOS_Task_Initiation_Feature_Spec.md)。VoiceOS 是任务启动层，不是执行者：把口述中的模糊任务、障碍和想法转成四种路线之一，交给 Agent 的可复制提示词、用户自己动手的教程、一个最关键的澄清问题、或仅记录。P0 完成 F-01 到 F-10，验收对应 T01 到 T13。不自动创建任务、不写提醒、不调起任何外部 Agent。
 
 ## 仓库审计（2026-11-10）
 
