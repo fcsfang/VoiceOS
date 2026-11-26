@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: in_review
 started: 2026-11-26
 updated: 2026-11-26
 branch: codex/edit-generated-content
-pr: -
+pr: 254
 owner: codex
 ---
 # 全库历史批注
@@ -20,4 +20,4 @@ owner: codex
 
 ## 下一步
 
-功能分支已完成首次同步和回看验证，待进入发布评审。
+功能分支已完成首次同步和回看验证。发布评审见 PR #254。
