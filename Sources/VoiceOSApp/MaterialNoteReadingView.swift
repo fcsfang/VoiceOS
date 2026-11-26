@@ -1076,7 +1076,7 @@ struct MaterialNoteReadingView: View {
     }
 
     private func historyVersionsMatch(_ result: NoteHistoryResult, store: VoiceOSStore) async -> Bool {
-        guard let records = try? await store.sources() else { return false }
+        guard let records = try? await store.sourceRecords(ids: Array(result.recordVersions.keys)) else { return false }
         let indexed = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
         guard result.recordVersions.allSatisfy({ id, version in
             indexed[id].map(NoteHistoryResult.version) == version

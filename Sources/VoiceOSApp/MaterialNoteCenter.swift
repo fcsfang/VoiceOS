@@ -197,7 +197,8 @@ extension ControlCenter {
             }
             materialNotePresence[sourceID] = true
             materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] = stored
-            let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let catalog = Dictionary(try await store.sourceRecords(ids: memberIDs).map { ($0.id, $0) },
+                                     uniquingKeysWith: { first, _ in first })
             let current = await store.materialNoteIsCurrent(stored, currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog))
             return (stored, current)
         } catch { return nil }

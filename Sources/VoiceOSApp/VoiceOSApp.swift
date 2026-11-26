@@ -856,6 +856,7 @@ final class ControlCenter: ObservableObject {
     private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
     @Published var workspaceLoaded = false
+    @Published var startupNoteRows: [NoteLibraryRow]?
     private var lastFullReloadGeneration: Int64?
     private var lastBackgroundResumeGeneration: Int64?
     @Published var textSize: AppTextSize = AppTextSize(rawValue: UserDefaults.standard.string(forKey: "voiceos.textSize.v1") ?? "") ?? .standard
@@ -1280,6 +1281,9 @@ final class ControlCenter: ObservableObject {
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             self.store = store
             StartupTrace.mark("start.storeInit")
+            startupNoteRows = try? await StartupTrace.measureAsync("start.noteRows") {
+                try await store.noteLibraryRows()
+            }
             try await store.recover()
             StartupTrace.mark("start.recoverDone")
             markdownMirror = MarkdownMirror(directory: root.appendingPathComponent("Mirror", isDirectory: true))
@@ -1339,6 +1343,7 @@ final class ControlCenter: ObservableObject {
                 })
         } catch {
             store = nil; initialized = false; workspaceLoaded = false
+            startupNoteRows = nil
             startupIssue = error.localizedDescription
             status = "资料库尚未打开：" + error.localizedDescription
         }

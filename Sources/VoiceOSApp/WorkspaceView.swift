@@ -748,7 +748,7 @@ struct WorkspaceView: View {
                         Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.workspacePrimary)
                         Button("打开其他资料库",action:chooseLibrary).buttonStyle(.workspaceSecondary)
                     }
-                } else if workspaceStarting {
+                } else if workspaceStarting && (page != .notes || model.startupNoteRows == nil) {
                     if showStartupProgress {
                         ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                     } else { Color.clear }

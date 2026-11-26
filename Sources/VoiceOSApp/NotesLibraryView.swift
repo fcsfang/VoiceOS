@@ -13,15 +13,17 @@ struct NotesLibraryView: View {
     /// 去材料页看全部来源。
     var openMaterials: () -> Void = {}
 
-    @State private var notes: [NoteLibraryRow] = []
+    @State private var loadedNotes: [NoteLibraryRow]?
     @State private var query = ""
     @State private var previewedNoteID: String?
-    @State private var notesLoaded = false
+    @State private var queuedNote: NoteLibraryRow?
     @State private var selectedPending: Set<String> = []
     @State private var organizingSelected = false
 
+    private var notes: [NoteLibraryRow] { loadedNotes ?? model.startupNoteRows ?? [] }
+
     private var pendingMaterials: [SourceRecord] {
-        guard notesLoaded else { return [] }
+        guard loadedNotes != nil else { return [] }
         let covered = Set(notes.flatMap { $0.expressionKey.split(separator: "|").map(String.init) })
         var seen = Set<String>()
         return model.records.filter { record in
@@ -59,7 +61,9 @@ struct NotesLibraryView: View {
                     .frame(maxWidth: 200)
                     .accessibilityIdentifier("notes.search")
             }
-            if notes.isEmpty {
+            if loadedNotes == nil && model.startupNoteRows == nil {
+                ProgressView().controlSize(.small)
+            } else if notes.isEmpty {
                 Text("还没有整理出笔记。打开一份材料让它整理成笔记后，会出现在这里。")
                     .foregroundStyle(palette.secondaryText)
             } else if filtered.isEmpty {
@@ -169,13 +173,19 @@ struct NotesLibraryView: View {
                 }
             }
         }
-        .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
-            guard let store = model.store else { return }
-            let trashed = Set(model.records.lazy.filter(\.isTrashed).map(\.id))
-            let rows = try? await store.noteLibraryRows(
-                sources: model.sourcePageIndex.recordsByID, excluding: trashed
-            )
-            if !Task.isCancelled, let rows { notes = rows; notesLoaded = true }
+        .task(id: NoteLibraryLoadKey(ready: model.workspaceLoaded, records: model.recordsRevision,
+                                     notes: model.materialNotesRevision)) {
+            guard model.workspaceLoaded, let store = model.store else { return }
+            let rows = try? await store.noteLibraryRows(sources: model.sourcePageIndex.recordsByID)
+            if !Task.isCancelled, let rows {
+                loadedNotes = rows
+                model.startupNoteRows = nil
+            }
+        }
+        .onChange(of: model.workspaceLoaded) { _, ready in
+            guard ready, let queuedNote else { return }
+            self.queuedNote = nil
+            open(queuedNote)
         }
     }
 
@@ -259,6 +269,10 @@ struct NotesLibraryView: View {
     }
 
     private func open(_ stored: NoteLibraryRow) {
+        guard model.workspaceLoaded else {
+            queuedNote = stored
+            return
+        }
         let ids = stored.expressionKey.split(separator: "|").map(String.init)
         let index = model.sourcePageIndex
         for id in ids {
@@ -275,12 +289,13 @@ struct NotesLibraryView: View {
     }
 }
 
-private struct HomeRecentNotesKeyForNotes: Equatable {
+private struct NoteLibraryLoadKey: Equatable {
+    let ready: Bool
     let records: Int
     let notes: Int
 }
 
-private struct NoteLibraryRow: Identifiable, Sendable {
+struct NoteLibraryRow: Identifiable, Sendable {
     let id: String
     let expressionKey: String
     let title: String
@@ -290,12 +305,19 @@ private struct NoteLibraryRow: Identifiable, Sendable {
     let searchableText: String
 }
 
-private extension VoiceOSStore {
-    func noteLibraryRows(sources: [String: SourceRecord], excluding trashed: Set<String>) throws -> [NoteLibraryRow] {
-        try recentMaterialNotes(limit: nil).compactMap { stored in
-            let ids = stored.expressionKey.split(separator: "|").map(String.init)
-            guard !ids.contains(where: trashed.contains) else { return nil }
-            let members = ids.compactMap { sources[$0] }
+extension VoiceOSStore {
+    /// Read saved notes before startup recovery and reuse the same ordering on refresh.
+    func noteLibraryRows(sources: [String: SourceRecord]? = nil) throws -> [NoteLibraryRow] {
+        let notes = try recentMaterialNotes(limit: nil).map { stored in
+            (stored, stored.expressionKey.split(separator: "|").map(String.init))
+        }
+        let catalog = try sources ?? Dictionary(
+            sourceRecords(ids: Array(Set(notes.flatMap { $0.1 }))).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return notes.compactMap { stored, ids in
+            let members = ids.compactMap { catalog[$0] }
+            guard !members.contains(where: \.isTrashed) else { return nil }
             let personal = members.filter { $0.origin == "user" }
             // Multi-part notes belong to the start of the user's material, even
             // when the expression also references an older external source.
