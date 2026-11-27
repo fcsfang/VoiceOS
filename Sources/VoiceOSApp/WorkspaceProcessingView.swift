@@ -301,7 +301,7 @@ struct WorkspaceProcessingView: View {
                             WorkspaceSectionHeading(title)
                             WorkspaceListDivider()
                             if let id=model.workspaceProcessingSourceID,let source=model.sourcePageIndex.recordsByID[id] {
-                                WorkspaceRow(title:source.displayTitle,subtitle:"当前正在处理这份完整材料",trailing:"查看原文",trailingStyle:.chevron) { openSource(id) }.processingRowInset()
+                                WorkspaceRow(title:source.displayTitle,subtitle:"当前正在处理这份完整材料",materialIcon:MaterialRowIconKind(source),trailing:"查看原文",trailingStyle:.chevron) { openSource(id) }.processingRowInset()
                             }
                             Text(model.transcriptReviewSourceID != nil ? model.transcriptReviewStatus : model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                             if !model.fullRecordingDetail.isEmpty,model.fullRecordingDetail != model.fullRecordingStatus {
@@ -356,7 +356,7 @@ struct WorkspaceProcessingView: View {
                                 WorkspaceListDivider()
                                 ForEach(failedSources) { source in
                                     VStack(alignment:.leading,spacing:6) {
-                                        WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断" : "本地转写未完成",trailing:"查看材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
+                                        WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断" : "本地转写未完成",materialIcon:MaterialRowIconKind(source),trailing:"查看材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
                                         if source.dictationRecoveryPending {
                                             DictationRecoveryControls(model:model,source:source).padding(.leading,44).padding(.bottom,8)
                                         }
@@ -378,7 +378,7 @@ struct WorkspaceProcessingView: View {
                                 WorkspaceListDivider()
                                 ForEach(emptySources) { source in
                                     VStack(alignment:.leading,spacing:6) {
-                                        WorkspaceRow(title:source.displayTitle,subtitle:emptyTranscriptSubtitle(source),trailing:"查看材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
+                                        WorkspaceRow(title:source.displayTitle,subtitle:emptyTranscriptSubtitle(source),materialIcon:MaterialRowIconKind(source),trailing:"查看材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
                                         HStack(spacing:12) {
                                             Button("重新转写") { Task { await model.retry(source) } }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("重新转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil).accessibilityIdentifier("processing.transcription." + source.id + ".retry")
                                             EmptyTranscriptTrashControl(model:model,source:source)
@@ -418,7 +418,7 @@ struct WorkspaceProcessingView: View {
                                 WorkspaceListDivider()
                                 ForEach(segmentedFailures) { batch in
                                     VStack(alignment:.leading,spacing:6) {
-                                        WorkspaceRow(title:name(batch.scope.plan.source.sourceID),subtitle:batch.state.allowsExplicitRetry ? "输出未通过校验，可整批重试" : "结果未知，未自动重发",trailing:"查看材料",trailingStyle:.chevron) { openSource(batch.scope.plan.source.sourceID) }.processingRowInset()
+                                        WorkspaceRow(title:name(batch.scope.plan.source.sourceID),subtitle:batch.state.allowsExplicitRetry ? "输出未通过校验，可整批重试" : "结果未知，未自动重发",materialIcon:model.sourcePageIndex.recordsByID[batch.scope.plan.source.sourceID].map(MaterialRowIconKind.init),trailing:"查看材料",trailingStyle:.chevron) { openSource(batch.scope.plan.source.sourceID) }.processingRowInset()
                                         if let error=batch.error { reason(error) }
                                         if batch.state.allowsExplicitRetry {
                                             Button("整批重试") { model.retrySegmentedBatch(batch) }
@@ -440,7 +440,7 @@ struct WorkspaceProcessingView: View {
                                 Text("原音与原文保留，尚未进入云端理解。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                                 WorkspaceListDivider()
                                 ForEach(reviewSources) { source in
-                                    WorkspaceRow(title:source.displayTitle,subtitle:"",trailing:"查看材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
+                                    WorkspaceRow(title:source.displayTitle,subtitle:"",materialIcon:MaterialRowIconKind(source),trailing:"查看材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
                                 }
                                 reasons(reviewErrors)
                                 if reviewSources.count > 1 {
@@ -470,7 +470,7 @@ struct WorkspaceProcessingView: View {
                                 WorkspaceListDivider()
                                 let ids=Set(pausedTasks.flatMap { task in model.sourcePageIndex.claim(for: task.claimID)?.references.map(\.sourceID) ?? [] })
                                 ForEach(model.records.filter { ids.contains($0.id) }) { source in
-                                    WorkspaceRow(title:source.displayTitle,subtitle:"待核对",trailing:"打开材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
+                                    WorkspaceRow(title:source.displayTitle,subtitle:"待核对",materialIcon:MaterialRowIconKind(source),trailing:"打开材料",trailingStyle:.chevron) { openSource(source.id) }.processingRowInset()
                                     ForEach(pausedTasks.filter { task in model.sourcePageIndex.claim(for: task.claimID)?.references.contains { $0.sourceID == source.id } == true }) { task in
                                         VStack(alignment:.leading,spacing:5) {
                                             Text(task.title)
@@ -894,9 +894,7 @@ struct WorkspaceExternalCompletionBatchSection: View {
                     ForEach(groups) { group in
                         VStack(alignment:.leading,spacing:0) {
                             HStack(spacing:12) {
-                                Image(systemName:"doc.text").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
-                                    .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
-                                    .accessibilityHidden(true)
+                                MaterialRowIcon(kind: model.sourcePageIndex.recordsByID[group.sourceID].map(MaterialRowIconKind.init) ?? .document)
                                 Text(group.title).vosFont(WorkspaceText.rowTitle)
                                 WorkspaceBadge(text:"\(group.items.count) 条", tone:.neutral)
                                 Spacer(minLength:8)

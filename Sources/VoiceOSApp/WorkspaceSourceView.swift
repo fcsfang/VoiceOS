@@ -419,7 +419,7 @@ struct WorkspaceSourceView: View {
     @ViewBuilder private func relatedActionRow(_ action: ActionRecord, in list: [ActionRecord], reads: ActionRowReads) -> some View {
         let reminder=actionReminderMeta(action,reads:reads)
         if let delivery=model.assistantExecutions.first(where: { $0.actionID == action.id && $0.validity == "current" && $0.state == "completed" }) {
-            WorkspaceRow(title:action.title,subtitle:actionSubtitle("AI 已交付",reminder:reminder),icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
+            WorkspaceRow(title:action.title,subtitle:actionSubtitle("AI 已交付",reminder:reminder),materialIcon:.delivery,trailing:"阅读结果") { openDelivery(delivery.id) }
         } else {
             WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:reminder),icon:"circle") { openTask(action.id) }
         }
@@ -1000,7 +1000,7 @@ struct WorkspaceSourceView: View {
             SourceSection(title:"相关材料",nested:true) {
                 ForEach(programPairs,id:\.externalSourceID) { pair in
                     if let external=catalog[pair.externalSourceID] {
-                        WorkspaceRow(title:external.displayTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文" : "节目原话或处理许可已变化，关联等待更新",icon:"headphones",trailing:"节目原文") { openSource(external.id) }
+                        WorkspaceRow(title:external.displayTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文" : "节目原话或处理许可已变化，关联等待更新",materialIcon: MaterialRowIconKind(external),trailing:"节目原文") { openSource(external.id) }
                     }
                 }
                 if !contextLinks.isEmpty {

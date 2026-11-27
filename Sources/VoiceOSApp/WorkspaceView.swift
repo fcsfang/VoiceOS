@@ -183,6 +183,7 @@ struct WorkspaceRow: View {
     /// Colors the second line without changing its type; reminder exceptions read in warning.
     var subtitleTone: Color? = nil
     var icon: String = "doc.text"
+    var materialIcon: MaterialRowIconKind? = nil
     var iconTint: Color? = nil
     var trailing: String = ""
     var trailingStyle: TrailingStyle = .secondary
@@ -222,9 +223,14 @@ struct WorkspaceRow: View {
         } else {
             Button(action:open) {
                 HStack(alignment:.top,spacing:14) {
-                    Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(iconTint ?? palette.accent)
-                        .frame(width:30 * vosLayoutScale(textScale),height:30 * vosLayoutScale(textScale)).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                        .accessibilityHidden(true)
+                    let iconSize = 30 * vosLayoutScale(textScale)
+                    if let materialIcon {
+                        MaterialRowIcon(kind: materialIcon, size: iconSize)
+                    } else {
+                        Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(iconTint ?? palette.accent)
+                            .frame(width:iconSize,height:iconSize).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                            .accessibilityHidden(true)
+                    }
                     titleAndTrailing
                 }.padding(.vertical,10).padding(.horizontal,10).padding(.trailing,trailingGutter)
                     .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -352,7 +358,12 @@ private final class TopicActionKeysCache {
 // Rebuilt only when records or secondary data change; survives body re-evaluation.
 private final class SearchSuggestionCache {
     struct Key: Equatable { let records: Int; let claims: Int }
-    struct Entry { let id: String; let title: String; let open: () -> Void }
+    struct Entry {
+        let id: String
+        let title: String
+        var materialIcon: MaterialRowIconKind? = nil
+        let open: () -> Void
+    }
     var key: Key?
     var materials: [Entry] = []
     var topics: [Entry] = []
@@ -1246,7 +1257,7 @@ struct WorkspaceView: View {
                 WorkspaceListSection(title:"今日阅读",count:todayReading.count) {
                     VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                         ForEach(todayReading) { item in
-                            WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
+                            WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),materialIcon: MaterialRowIconKind(item.source)) { go(.source(item.id)) }
                                 .materialCard(highlighted:false)
                         }
                     }
@@ -2055,7 +2066,7 @@ struct WorkspaceView: View {
             let unread = model.isDeliveryUnread(execution)
             WorkspaceRow(title:execution.title,
                          subtitle:(unread ? "未读 · " : "") + assistantExecutionLabel(execution),
-                         icon:execution.state == "completed" ? "doc.text" : "sparkles",
+                         icon:"sparkles",materialIcon:execution.state == "completed" ? .delivery : nil,
                          iconTint:unread ? palette.accent : nil,
                          trailing:unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
                          trailingStyle:unread ? .status(palette.accent) : .link) { go(.delivery(execution.id)) }
@@ -2171,7 +2182,7 @@ struct WorkspaceView: View {
                     let expand: (() -> Void)? = section.hasMore ? { expandSearchKind(section.kind) } : nil
                     WorkspaceSection(title:section.title,count:section.count,actionTitle:section.hasMore ? "显示全部" : "",action:expand) {
                         ForEach(section.rows) { row in
-                            SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
+                            SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon,materialIcon:row.materialIcon) { row.open() }
                                 .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                                 .workspaceFocusRing(searchKeyboardFocus.id == row.id, radius: WorkspaceMetrics.panelRadius)
                                 .id(row.id)
@@ -2192,17 +2203,15 @@ struct WorkspaceView: View {
         let catalog = recordCatalog
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
         let tokens = term.split(whereSeparator: \.isWhitespace).map(String.init)
-        func row(_ id:String,_ title:String,_ subtitle:String,_ icon:String,action:@escaping () -> Void) -> WorkspaceSearchRow {
-            WorkspaceSearchRow(id:id,title:highlighted(title,tokens:tokens),subtitle:highlighted(subtitle,tokens:tokens),icon:icon) {
+        func row(_ id:String,_ title:String,_ subtitle:String,_ icon:String, materialIcon: MaterialRowIconKind? = nil, action:@escaping () -> Void) -> WorkspaceSearchRow {
+            WorkspaceSearchRow(id:id,title:highlighted(title,tokens:tokens),subtitle:highlighted(subtitle,tokens:tokens),icon:icon,materialIcon:materialIcon) {
                 rememberSearch(term)
                 action()
             }
         }
-        let materials = searchHits.filter { hit in
-            guard hit.kind == .material, let source = catalog[hit.refID] else { return false }
-            return !source.isTrashed
-        }.map { hit in
-            row("material:" + hit.refID,hit.title,hit.snippet,"doc.text") { go(.source(hit.refID)) }
+        let materials = searchHits.compactMap { hit -> WorkspaceSearchRow? in
+            guard hit.kind == .material, let source = catalog[hit.refID], !source.isTrashed else { return nil }
+            return row("material:" + hit.refID,hit.title,hit.snippet,"doc.text",materialIcon:MaterialRowIconKind(source)) { go(.source(hit.refID)) }
         }
         let claimIDs = searchClaimIndex
         let claims = searchHits.filter { hit in
@@ -2283,7 +2292,7 @@ struct WorkspaceView: View {
         guard searchSuggestionCache.key != key else { return }
         searchSuggestionCache.key = key
         searchSuggestionCache.materials = model.records.filter { !$0.isTrashed }.map { source in
-            SearchSuggestionCache.Entry(id:"suggestion:material:" + source.id,title:displayTitle(source.displayTitle)) { go(.source(source.id)) }
+            SearchSuggestionCache.Entry(id:"suggestion:material:" + source.id,title:displayTitle(source.displayTitle),materialIcon:MaterialRowIconKind(source)) { go(.source(source.id)) }
         }
         searchSuggestionCache.topics = model.workspaceTopics.map { topic in
             SearchSuggestionCache.Entry(id:"suggestion:topic:" + topic.id,title:topic.title) { selectTopic(topic.id) }
@@ -2308,7 +2317,7 @@ struct WorkspaceView: View {
         let key = term.lowercased()
         func prefixed(_ text: String) -> Bool { !text.isEmpty && text.lowercased().hasPrefix(key) }
         let materials = searchSuggestionCache.materials.filter { prefixed($0.title) }.map { entry in
-            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"材料",icon:"doc.text",open:entry.open)
+            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"材料",icon:"doc.text",materialIcon:entry.materialIcon,open:entry.open)
         }
         let topics = searchSuggestionCache.topics.filter { prefixed($0.title) }.map { entry in
             WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"主题",icon:"circle.hexagongrid",open:entry.open)
@@ -2336,7 +2345,7 @@ struct WorkspaceView: View {
         let suggestions = searchSuggestions
         return VStack(alignment:.leading,spacing:0) {
             ForEach(Array(suggestions.enumerated()),id:\.element.id) { index,suggestion in
-                SearchResultRow(title:AttributedString(suggestion.title),subtitle:AttributedString(suggestion.subtitle),icon:suggestion.icon) {
+                SearchResultRow(title:AttributedString(suggestion.title),subtitle:AttributedString(suggestion.subtitle),icon:suggestion.icon,materialIcon:suggestion.materialIcon) {
                     rememberSearch(term)
                     suggestion.open()
                 }
@@ -3117,7 +3126,7 @@ struct WorkspaceView: View {
         let trailingText=openCount > 0 ? "\(openCount) 条待办" : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:title,subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
+        return WorkspaceRow(title:title,subtitle:subtitle,materialIcon: MaterialRowIconKind(source),trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
@@ -3901,7 +3910,7 @@ struct WorkspaceView: View {
             ScrollView {
                 LazyVStack(alignment:.leading,spacing:2) {
                     ForEach(rows) { source in
-                        WorkspaceListRow(density:.compact,title:fittedDisplayTitle(source.displayTitle),subtitle:source.recordingDateLabel,icon:source.kind.contains("text") ? "doc.text" : "waveform",highlighted:source.id == selectedID) { selectSource(source.id) }
+                        WorkspaceListRow(density:.compact,title:fittedDisplayTitle(source.displayTitle),subtitle:source.recordingDateLabel,materialIcon: MaterialRowIconKind(source),highlighted:source.id == selectedID) { selectSource(source.id) }
                             .help(fittedDisplayTitle(source.displayTitle))
                             .accessibilityIdentifier("sourceRail.item." + source.id)
                     }
@@ -4393,6 +4402,7 @@ private struct WorkspaceSearchSuggestion: Identifiable {
     let title: String
     let subtitle: String
     let icon: String
+    var materialIcon: MaterialRowIconKind? = nil
     let open: () -> Void
 }
 
@@ -4434,6 +4444,7 @@ private struct WorkspaceSearchRow: Identifiable {
     let title: AttributedString
     let subtitle: AttributedString
     let icon: String
+    var materialIcon: MaterialRowIconKind? = nil
     let open: () -> Void
 }
 
@@ -4454,15 +4465,20 @@ private struct SearchResultRow: View {
     let title: AttributedString
     let subtitle: AttributedString
     let icon: String
+    var materialIcon: MaterialRowIconKind? = nil
     let open: () -> Void
     private var titleText: String { String(title.characters) }
     private var subtitleText: String { String(subtitle.characters) }
     var body: some View {
         Button(action: open) {
             HStack(alignment:.top,spacing:14) {
-                Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
-                    .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                    .accessibilityHidden(true)
+                if let materialIcon {
+                    MaterialRowIcon(kind: materialIcon)
+                } else {
+                    Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                        .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .accessibilityHidden(true)
+                }
                 VStack(alignment:.leading,spacing:3) {
                     Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).textSelection(.enabled).help(titleText)
                     if !subtitle.characters.isEmpty {

@@ -591,7 +591,7 @@ struct WorkspaceTopicReadingView: View {
     }
 
     private func deliveryButton(_ result:AssistantExecutionRecord) -> some View {
-        WorkspaceRow(title:result.title,subtitle:"AI 交付",icon:"doc.text",trailing:"阅读") { openDelivery(result.id) }
+        WorkspaceRow(title:result.title,subtitle:"AI 交付",materialIcon:.delivery,trailing:"阅读") { openDelivery(result.id) }
     }
     private func sectionClaimCount(_ section:TopicReadingSection) -> Int {
         reading.sectionClaims[section.id]?.count ?? 0

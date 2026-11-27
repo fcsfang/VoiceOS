@@ -100,6 +100,7 @@ struct WorkspacePalette {
     // Graph colors distinguish kinds of evidence without tinting the workspace.
     var action: Color { adaptive(0x526B82, 0xA9BED1) }
     var outcome: Color { adaptive(0x826B52, 0xCDB99E) }
+    var materialAudio: Color { adaptive(0x395D53, 0xB1CFC3) }
     // Status roles. Warnings are recoverable; danger marks failed writes or
     // destructive results. Success is a fixed green so completion reads the same
     // in either theme.

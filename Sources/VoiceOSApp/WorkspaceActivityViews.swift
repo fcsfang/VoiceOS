@@ -788,7 +788,7 @@ struct WorkspaceTaskView: View {
                                 let unread = model.isDeliveryUnread(execution)
                                 WorkspaceRow(title: execution.title,
                                              subtitle: (unread ? "未读 · " : "") + assistantExecutionLabel(execution),
-                                             icon: execution.state == "completed" ? "doc.text" : "sparkles",
+                                             icon: "sparkles", materialIcon: execution.state == "completed" ? .delivery : nil,
                                              iconTint: unread ? palette.accent : nil,
                                              trailing: unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
                                              trailingStyle: unread ? .status(palette.accent) : .link) { openDelivery(execution.id) }
