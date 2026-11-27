@@ -822,7 +822,7 @@ struct WorkspaceView: View {
     @ViewBuilder private func noteReadingPage(_ id: String) -> some View {
         if let source = model.sourcePageIndex.recordsByID[id] {
             MaterialNoteReadingView(model: model, source: source,
-                openSource: { go(.source($0)) }, openTask: { go(.task($0)) },
+                openSource: { id in openSourceOriginal(id) }, openTask: { go(.task($0)) },
                 openDiscussion: { conv in Task { await openSavedDiscussion(conv) } },
                 openHistoryNote: { go(.note($0)) }, backToNotes: { back() },
                 hasNote: $notePageHasNote, restoreScroll: sourceScrollBinding("note-reading:" + id),
@@ -2359,25 +2359,29 @@ struct WorkspaceView: View {
         .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border,lineWidth:1) }
     }
     private func openClaimSource(_ claim: CandidateClaim) {
-        guard let reference=claim.references.first else { return }
-        let spanExists=model.sourcePageIndex.recordsByID[reference.sourceID]?.spans.contains(where: { $0.id == reference.spanID }) == true
-        if spanExists { revealSourceSpan(reference.sourceID, spanID: reference.spanID) }
-        go(.source(reference.sourceID))
+        guard let reference = claim.references.first else { return }
+        openSourceOriginal(reference.sourceID, spanID: reference.spanID)
     }
-    private func revealSourceSpan(_ sourceID: String, spanID: String) {
-        guard let source = model.sourcePageIndex.recordsByID[sourceID], !source.hasProvisionalRecordingTranscript else { return }
-        let timed = ["audio", "video"].contains(source.kind) && source.state == "saved"
-            && source.spans.contains { $0.id == spanID && $0.startMS != nil && $0.endMS != nil }
-        let inlineTimed = timed && ["audio", "video"].contains(source.kind)
-            && source.spans.allSatisfy { $0.startMS != nil && $0.endMS != nil }
-        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-original", anchor: .top)
-        var state = sourceFoldStates[sourceID] ?? SourceFoldState()
-        state.originalTarget = inlineTimed ? "source-span-" + spanID : timed ? "source-time-" + spanID : nil
-        if timed && !inlineTimed {
-            state.tools = true
-            state.timedSpans = true
+
+    private func openSourceOriginal(_ sourceID: String, spanID: String? = nil) {
+        if let source = model.sourcePageIndex.recordsByID[sourceID] {
+            var state = sourceFoldStates[sourceID] ?? SourceFoldState()
+            state.originalTarget = "source-original"
+            if let spanID, ["audio", "video"].contains(source.kind), source.state == "saved",
+               !source.hasProvisionalRecordingTranscript,
+               source.spans.contains(where: { $0.id == spanID && $0.startMS != nil && $0.endMS != nil }) {
+                if source.spans.allSatisfy({ $0.startMS != nil && $0.endMS != nil }) {
+                    state.originalTarget = "source-span-" + spanID
+                } else {
+                    state.tools = true
+                    state.timedSpans = true
+                    state.originalTarget = "source-time-" + spanID
+                }
+            }
+            sourceScrollPositions[sourceID] = ScrollPosition(edge: .top)
+            sourceFoldStates[sourceID] = state
         }
-        sourceFoldStates[sourceID] = state
+        go(.source(sourceID))
     }
 
     private var recentSearchChips: some View {

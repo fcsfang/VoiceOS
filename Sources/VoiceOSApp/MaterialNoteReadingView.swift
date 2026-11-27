@@ -73,8 +73,6 @@ struct MaterialNoteReadingView: View {
     @State private var requested = false
     @State private var loadedOnce = false
     @AppStorage("voiceos.note.annotations.visible") private var annotationsVisible = true
-    @State private var materialAnnotationsVisible = false
-    private var showAnnotations: Bool { materialReader ? materialAnnotationsVisible : annotationsVisible }
     @State private var probeBox = NoteReadingProbeBox()
     @State private var hasRestored = false
     @State private var boardNotice: String?
@@ -185,10 +183,14 @@ struct MaterialNoteReadingView: View {
                     .foregroundStyle(palette.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if waitsForMaterialReview && display == nil {
-                noteText("校正后可整理笔记")
+            if materialReader && !loadedOnce {
+                ProgressView().controlSize(.small).accessibilityLabel("正在读取笔记")
             } else {
-                statusRows
+                if waitsForMaterialReview && display == nil {
+                    noteText("校正后可整理笔记")
+                } else {
+                    statusRows
+                }
             }
             if let display {
                 article(display)
@@ -388,7 +390,7 @@ struct MaterialNoteReadingView: View {
                     .foregroundStyle(palette.tertiaryText)
                     .accessibilityLabel("这一段包含整理时补充的关联")
             }
-            if showAnnotations, let annotations = paragraph.annotations, !annotations.isEmpty {
+            if annotationsVisible, let annotations = paragraph.annotations, !annotations.isEmpty {
                 ForEach(annotations) { annotation in
                     annotationView(annotation)
                 }
@@ -599,7 +601,7 @@ struct MaterialNoteReadingView: View {
 
     @ViewBuilder
     private func insightBlockView(_ block: NoteBlock) -> some View {
-        if showAnnotations, let annotation = block.annotation {
+        if annotationsVisible, let annotation = block.annotation {
             VStack(alignment: .leading, spacing: 6) {
                 if let title = normalized(annotation.title) ?? normalized(block.titleOverride) {
                     Text(title)
@@ -701,9 +703,8 @@ struct MaterialNoteReadingView: View {
     private var noteActions: some View {
         Menu {
             Button("编辑笔记…") { editing = display?.note }
-            Button(showAnnotations ? "隐藏 AI 批注" : "显示 AI 批注") {
-                if materialReader { materialAnnotationsVisible.toggle() }
-                else { annotationsVisible.toggle() }
+            Button(annotationsVisible ? "隐藏 AI 批注" : "显示 AI 批注") {
+                annotationsVisible.toggle()
             }
             Button("重新整理笔记") { retry() }
                 .disabled(noteState == .generating || waitsForMaterialReview)

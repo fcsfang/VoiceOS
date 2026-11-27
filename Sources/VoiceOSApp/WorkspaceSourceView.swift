@@ -14,8 +14,8 @@ extension SourceRecord {
 }
 
 private enum SourceReadingTab: String, CaseIterable, Identifiable {
-    case original = "原文"
     case note = "笔记"
+    case original = "原文"
     case results = "提取结果"
 
     var id: Self { self }
@@ -380,7 +380,7 @@ struct WorkspaceSourceView: View {
         Binding(get: { folds[keyPath:keyPath] }, set: { folds[keyPath:keyPath]=$0 })
     }
     @State private var toast: String? = nil
-    @State private var readingTab = SourceReadingTab.original
+    @State private var selectedReadingTab = SourceReadingTab.note
     @State private var auxiliaryScroll = ScrollPosition(edge: .top)
     @State private var detailPanel: SourceDetailPanel?
     @State private var extractionFlag: SourceExtractionFlag? = nil
@@ -629,18 +629,25 @@ struct WorkspaceSourceView: View {
                     .scrollPosition(readingTab == .original ? scroll ?? $auxiliaryScroll : $auxiliaryScroll)
                     .id(readingTab)
                     .task(id: folds.originalTarget) {
-                        guard readingTab == .original, let anchor = folds.originalTarget else { return }
+                        guard let anchor = folds.originalTarget else { return }
+                        selectedReadingTab = .original
                         reader.scrollTo("source-original", anchor: .top)
-                        try? await Task.sleep(for: .milliseconds(120))
-                        guard !Task.isCancelled, folds.originalTarget == anchor else { return }
-                        let paragraph = transcriptParagraphs.first { paragraph in
-                            anchor.hasPrefix("source-span-") && paragraph.spanIDs.contains(String(anchor.dropFirst("source-span-".count)))
+                        if anchor != "source-original" {
+                            try? await Task.sleep(for: .milliseconds(120))
+                            guard !Task.isCancelled, folds.originalTarget == anchor else { return }
+                            let paragraph = transcriptParagraphs.first { paragraph in
+                                anchor.hasPrefix("source-span-") && paragraph.spanIDs.contains(String(anchor.dropFirst("source-span-".count)))
+                            }
+                            reader.scrollTo(paragraph.map { "source-span-" + $0.id } ?? anchor, anchor: .center)
                         }
-                        reader.scrollTo(paragraph.map { "source-span-" + $0.id } ?? anchor, anchor: .center)
                         folds.originalTarget = nil
                     }
             }
         }
+    }
+
+    private var readingTab: SourceReadingTab {
+        folds.originalTarget == nil ? selectedReadingTab : .original
     }
 
     private var readingControls: some View {
@@ -663,7 +670,13 @@ struct WorkspaceSourceView: View {
     }
 
     private var readingPicker: some View {
-        Picker("材料内容", selection: $readingTab) {
+        Picker("材料内容", selection: Binding(
+            get: { readingTab },
+            set: { tab in
+                folds.originalTarget = nil
+                selectedReadingTab = tab
+            }
+        )) {
             ForEach(SourceReadingTab.allCases) { tab in
                 Text(tab == .original && source.transcriptionReview?.isCompleteFullTextReview == true ? "校正稿" : tab.rawValue)
                     .tag(tab)
@@ -1455,8 +1468,9 @@ struct WorkspaceSourceView: View {
             detailPanel = .provisional
             return
         }
-        readingTab = .original
+        selectedReadingTab = .original
         var state = folds
+        state.originalTarget = "source-original"
         if let spanID {
             if transcriptParagraphs.contains(where: { $0.spanIDs.contains(spanID) }) {
                 state.originalTarget = "source-span-" + spanID
@@ -1469,7 +1483,6 @@ struct WorkspaceSourceView: View {
             }
         }
         folds = state
-        if let scroll { scroll.wrappedValue.scrollTo(id: "source-original", anchor: .top) }
     }
 
     private func unresolvedIssuePlaybackLabel(_ issue:TranscriptionReview.Issue)->String {
