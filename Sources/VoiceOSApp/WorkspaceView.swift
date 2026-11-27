@@ -538,6 +538,7 @@ struct WorkspaceView: View {
             }
             .navigationTitle(page == .notes ? model.libraryTitle : (showsBreadcrumb ? breadcrumb : section))
             .toolbar { workspaceToolbar }
+            .toolbarBackgroundVisibility(isMaterialDetail ? .visible : .automatic, for: .windowToolbar)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -770,6 +771,11 @@ struct WorkspaceView: View {
         }.frame(minWidth:440)
             .workspaceSlowLoading(workspaceStarting, into: $showStartupProgress)
     }
+    private var isMaterialDetail: Bool {
+        if case .source = page { return true }
+        return false
+    }
+
     private var showsProcessingInMaterial: Bool {
         guard case .source(let id) = page,
               let source = model.sourcePageIndex.recordsByID[id], !source.isTrashed,
@@ -1175,19 +1181,8 @@ struct WorkspaceView: View {
     private func sourceScrollBinding(_ id:String) -> Binding<ScrollPosition> {
         Binding(get: { sourceScrollPositions[id] ?? ScrollPosition(edge: .top) }, set: { sourceScrollPositions[id] = $0 })
     }
-    private func sourceFoldBinding(_ id:String) -> Binding<SourceFoldState> {
-        // 冷启动也能判断这篇是否有笔记：会话缓存与首页批量结果任一命中即可。
-        let hasNote = materialHasNote(id)
-        return Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(notePresent: hasNote) }, set: { sourceFoldStates[id] = $0 })
-    }
-    /// 这篇材料所属表达是否已有笔记（存在会话缓存或首页批量读取里）。
-    private func materialHasNote(_ id:String) -> Bool {
-        if model.materialNotePresence[id] == true { return true }
-        let memberIDs = model.sourcePageIndex.expression(for: id).map { expression in
-            expression.sourceIDs + (expression.externalVersions ?? [:]).keys.sorted()
-                .filter { !expression.sourceIDs.contains($0) }
-        } ?? [id]
-        return model.materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] != nil
+    private func sourceFoldBinding(_ id: String) -> Binding<SourceFoldState> {
+        Binding(get: { sourceFoldStates[id] ?? SourceFoldState() }, set: { sourceFoldStates[id] = $0 })
     }
     private func unavailable(_ title:String,description:String,actionTitle:String = "回到行动",action: (() -> Void)? = nil) -> some View {
         WorkspaceEmptyState(title:title,systemImage:"leaf",description:description) {
@@ -2361,16 +2356,18 @@ struct WorkspaceView: View {
         go(.source(reference.sourceID))
     }
     private func revealSourceSpan(_ sourceID: String, spanID: String) {
-        guard let source = model.sourcePageIndex.recordsByID[sourceID] else { return }
+        guard let source = model.sourcePageIndex.recordsByID[sourceID], !source.hasProvisionalRecordingTranscript else { return }
         let timed = ["audio", "video"].contains(source.kind) && source.state == "saved"
             && source.spans.contains { $0.id == spanID && $0.startMS != nil && $0.endMS != nil }
         let inlineTimed = timed && ["audio", "video"].contains(source.kind)
             && source.spans.allSatisfy { $0.startMS != nil && $0.endMS != nil }
-        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-original-fold", anchor: .top)
-        var state = sourceFoldStates[sourceID] ?? SourceFoldState.initial(notePresent: materialHasNote(sourceID))
-        state.original = true
+        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-original", anchor: .top)
+        var state = sourceFoldStates[sourceID] ?? SourceFoldState()
         state.originalTarget = inlineTimed ? "source-span-" + spanID : timed ? "source-time-" + spanID : nil
-        if timed && !inlineTimed { state.timedSpans = true }
+        if timed && !inlineTimed {
+            state.tools = true
+            state.timedSpans = true
+        }
         sourceFoldStates[sourceID] = state
     }
 

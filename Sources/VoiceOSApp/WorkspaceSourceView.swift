@@ -5,10 +5,27 @@ import AVFoundation
 import VoiceOSCore
 import VoiceOSPlatform
 
+extension SourceRecord {
+    var hasProvisionalRecordingTranscript: Bool {
+        ["audio", "video"].contains(kind) && transcript != nil
+            && transcriptionReview?.isCompleteFullTextReview != true
+            && transcriptVersionReason != "transcription_error"
+    }
+}
+
+private enum SourceReadingTab: String, CaseIterable, Identifiable {
+    case original = "原文"
+    case note = "笔记"
+    case results = "提取结果"
+
+    var id: Self { self }
+}
+
 private enum SourceDetailPanel: String, Identifiable {
     case history = "处理记录"
     case actions = "历史待办"
     case entities = "人名与术语"
+    case provisional = "待校正转写"
 
     var id: Self { self }
 }
@@ -22,10 +39,12 @@ private struct SourceEntityGroup:Identifiable {
     let entities:[SourceEntity]
     var id:String { kind }
 }
-private struct TranscriptParagraph:Identifiable {
-    let span:TranscriptSpan
-    let text:String
-    var id:String { span.id }
+private struct TranscriptParagraph: Identifiable {
+    let id: String
+    var spanIDs: Set<String>
+    let startMS: Int
+    var endMS: Int
+    var text: String
 }
 private final class SourcePlaybackClock: ObservableObject {
     @Published var milliseconds:Int?
@@ -107,21 +126,15 @@ private func stepSourcePlaybackSelection(_ selection:inout String?,up:Bool,over 
     return moved
 }
 struct SourceFoldState: Equatable {
-    var original = false
     var originalTarget: String?
+    var tools = false
     var fullText = false
     var timedSpans = false
-    var thoughts = true
+    var thoughts = false
     var overall = false
     var digest = false
     var outline = false
     var chapters = false
-    /// 有笔记时要点默认收起：材料页先读文章，要点是需要时才展开的材料工具。
-    static func initial(notePresent: Bool = false) -> SourceFoldState {
-        var state = SourceFoldState()
-        if notePresent { state.thoughts = false }
-        return state
-    }
 }
 private enum SourceLoadPhase: Equatable {
     case idle, loading, failed(String)
@@ -274,35 +287,6 @@ private struct SourceSection<Content: View>: View {
         }
     }
 }
-private struct SourceFollowupCard: View {
-    @Environment(\.workspacePalette) private var palette
-    let receipt:RecordingFollowupReceipt
-    @ObservedObject var model:ControlCenter
-    let open:()->Void
-    var body: some View {
-        WorkspaceCard(padding:16) {
-            HStack(alignment:.center,spacing:10) {
-                VStack(alignment:.leading,spacing:6) {
-                    if let result=receipt.result {
-                        HStack(spacing:6) {
-                            WorkspaceBadge(text:"旧思想关联 \(result.thoughtUpdates.count)")
-                            WorkspaceBadge(text:"目标下一步 \(result.goalPlans.count)")
-                            if result.english.isPractice { WorkspaceBadge(text:"英语反馈已接续",tone:.accent) }
-                        }
-                        if model.followupValidity[receipt.id]?.sourceCurrent != true {
-                            Text("录音依据已变化，历史结果保留；可重新生成跟进").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                        }
-                    } else {
-                        Text(receipt.state == "running" ? "正在后台生成思想关联与下一步" : receipt.state == "queued" ? "思想关联与下一步已排队，录音和任务已保存" : "自动跟进待完成，可重试")
-                            .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    }
-                }
-                Spacer(minLength:8)
-                Button("查看思想与下一步",action:open).buttonStyle(.workspaceQuietCompact)
-            }
-        }
-    }
-}
 struct WorkspaceSourceView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
@@ -396,8 +380,8 @@ struct WorkspaceSourceView: View {
         Binding(get: { folds[keyPath:keyPath] }, set: { folds[keyPath:keyPath]=$0 })
     }
     @State private var toast: String? = nil
-    @State private var materialNotePresent = false
-    @State private var materialNoteLoaded = false
+    @State private var readingTab = SourceReadingTab.original
+    @State private var auxiliaryScroll = ScrollPosition(edge: .top)
     @State private var detailPanel: SourceDetailPanel?
     @State private var extractionFlag: SourceExtractionFlag? = nil
     @State private var correctionsExpanded=false
@@ -532,7 +516,6 @@ struct WorkspaceSourceView: View {
               let offset=SelectableText.scalarOffset(ofUTF16Offset:selectedRange.location,in:transcript) else { return nil }
         return source.spans.first { $0.textStart <= offset && offset < $0.textEnd && $0.startMS != nil && $0.endMS != nil }
     }
-    /// Reading order: conclusions first, the verbatim transcript on demand.
     @ViewBuilder private var digestSections: some View {
         if let expression,expression.sourceIDs.count > 1 {
             SourceFold(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count,isExpanded:foldExpanded(\.overall)) {
@@ -553,7 +536,7 @@ struct WorkspaceSourceView: View {
                 }.padding(.top,12)
             }
         }
-        if !notePresent,(expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
+        if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
             SourceFold(title:"内容摘要",icon:"text.alignleft",isExpanded:foldExpanded(\.digest)) {
                 WorkspaceExpandableText(text:summary,label:"完整摘要",size:WorkspaceText.body.size).padding(.top,10)
             }
@@ -637,43 +620,69 @@ struct WorkspaceSourceView: View {
             }
         }
     }
-    @ViewBuilder private var readingContent:some View {
-        ScrollViewReader { reader in
-            Group {
-                if let scroll { readingScrollView.scrollPosition(scroll) }
-                else { readingScrollView }
+    private var readingContent: some View {
+        VStack(spacing: 0) {
+            readingControls
+            WorkspaceListDivider()
+            ScrollViewReader { reader in
+                readingScrollView
+                    .scrollPosition(readingTab == .original ? scroll ?? $auxiliaryScroll : $auxiliaryScroll)
+                    .id(readingTab)
+                    .task(id: folds.originalTarget) {
+                        guard readingTab == .original, let anchor = folds.originalTarget else { return }
+                        reader.scrollTo("source-original", anchor: .top)
+                        try? await Task.sleep(for: .milliseconds(120))
+                        guard !Task.isCancelled, folds.originalTarget == anchor else { return }
+                        let paragraph = transcriptParagraphs.first { paragraph in
+                            anchor.hasPrefix("source-span-") && paragraph.spanIDs.contains(String(anchor.dropFirst("source-span-".count)))
+                        }
+                        reader.scrollTo(paragraph.map { "source-span-" + $0.id } ?? anchor, anchor: .center)
+                        folds.originalTarget = nil
+                    }
             }
-            .task(id: materialNoteLoaded ? folds.originalTarget : nil) {
-                guard materialNoteLoaded, let anchor = folds.originalTarget else { return }
-                // Resolve the note before scrolling. The original's location
-                // can change when the article appears above the lazy section.
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                reader.scrollTo("source-original-fold", anchor: .top)
-                try? await Task.sleep(for: .milliseconds(120))
-                guard !Task.isCancelled, folds.originalTarget == anchor else { return }
-                reader.scrollTo(anchor, anchor: .center)
-                folds.originalTarget = nil
-            }
-        }.background(notePresenceObserver)
-    }
-    // 有笔记时页头让出大字标题。materialNotePresence 是同步的会话内缓存，
-    // 使重开与切换材料时首帧就按正确版式排版，避免先画大标题再塌缩。
-    private var noteAvailability: Binding<Bool> {
-        Binding(get: { materialNotePresent }, set: {
-            materialNotePresent = $0
-            materialNoteLoaded = true
-        })
+        }
     }
 
-    private var notePresent: Bool { materialNotePresent || (model.materialNotePresence[source.id] ?? false) }
-    /// 笔记在页面打开后才异步出现时，把默认展开的要点收一次；用户之后仍可手动展开。
-    private var notePresenceObserver: some View {
-        Color.clear
-            .onChange(of: notePresent) { _, present in
-                if present, folds.thoughts { folds.thoughts = false }
+    private var readingControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                readingPicker
+                Spacer(minLength: 8)
+                sourceActions
             }
+            VStack(alignment: .leading, spacing: 8) {
+                readingPicker
+                sourceActions
+            }
+        }
+        .frame(maxWidth: readingWidth, alignment: .leading)
+        .padding(.horizontal, WorkspaceMetrics.pagePadding)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(palette.canvas)
     }
+
+    private var readingPicker: some View {
+        Picker("材料内容", selection: $readingTab) {
+            ForEach(SourceReadingTab.allCases) { tab in
+                Text(tab == .original && source.transcriptionReview?.isCompleteFullTextReview == true ? "校正稿" : tab.rawValue)
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .accessibilityIdentifier("material.reader.mode")
+    }
+
+    private var noteRequestKey: [String] {
+        model.materialNoteMemberIDs(sourceID: source.id).map { id in
+            guard let record = catalog[id] else { return id }
+            return [id, record.transcriptVersionID ?? "", String(record.policyVersion),
+                    String(record.hasProvisionalRecordingTranscript)].joined(separator: "|")
+        }
+    }
+
     private var readingTitle: String {
         if let expression, expression.sourceIDs.count > 1 { return expression.displayTitle(in:catalog) }
         return source.displayTitle
@@ -686,11 +695,16 @@ struct WorkspaceSourceView: View {
                     .disabled(source.state != "saved")
                     .help(source.state == "saved" ? "在页内从开头回听" : "录音尚未就绪，暂时无法回听")
             }
-            if notePresent, source.transcript != nil {
-                Button("查看原文") { revealOriginal() }
-                    .buttonStyle(.workspaceQuietCompact)
-            }
             Menu {
+                if source.hasProvisionalRecordingTranscript {
+                    Button("查看待校正转写") { detailPanel = .provisional }
+                }
+                if playbackAvailable {
+                    Button("打开录音原件") { Task { await model.play(source) } }
+                }
+                if let url = captureInfo.flatMap({ captureLink($0.url) }) {
+                    Link("打开来源", destination: url)
+                }
                 Button(expression.map { $0.sourceIDs.count > 1 } == true ? "修改分组标题" : "修改标题") { naming=source }
                 Button("更正文字") { editing=source }.disabled(source.transcript == nil)
                     .help(source.transcript == nil ? "转写完成后才能更正文字" : "更正这段原文")
@@ -733,287 +747,234 @@ struct WorkspaceSourceView: View {
     private var readingScrollView: some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:WorkspaceMetrics.sectionGap) {
-                let reminderReads=ActionRowReads(reminderLinks:model.reminderLinks,executions:model.assistantExecutions)
-                let titleFit=WorkspaceTitleFit.present(readingTitle)
-                VStack(alignment: .leading, spacing: 8) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: 12) {
-                            sourceHeading(titleFit.title).fixedSize(horizontal: true, vertical: false)
-                            Spacer(minLength: 0)
-                            sourceActions
-                        }
-                        VStack(alignment: .leading, spacing: 10) {
-                            sourceHeading(titleFit.title)
-                            sourceActions
-                        }
-                    }
-                    if let origin = titleFit.source, !notePresent {
-                        Text(origin).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).textSelection(.enabled)
-                    }
-                    if let captureInfo {
-                        HStack(spacing: 14) {
-                            if let context = captureInfo.context, !context.isEmpty { Text("来自 " + context) }
-                            if let link = captureLink(captureInfo.url) { Link(link.host ?? "来源链接", destination: link) }
-                        }.vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                    }
-                    if let attachmentURL {
-                        Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图", systemImage: attachmentMime == "application/pdf" ? "doc.richtext" : "photo") {
-                            if !NSWorkspace.shared.open(attachmentURL) { error = "无法打开原件" }
-                        }.buttonStyle(.workspaceQuietCompact)
-                    }
-                }
-                materialStatus
-                MaterialNoteReadingView(model:model,source:source,openSource:openSource,openTask:openTask,openDiscussion:openDiscussion,relatedActions:actions,relatedDiscussions:loadedDiscussions,hasNote:noteAvailability,restoreScroll:folds.original ? nil : scroll,showsAvailability:source.transcript != nil && !processing)
-                if !notePresent, source.transcript != nil { originalSection }
-                if extractionFlag == .empty && !processing {
-                    WorkspaceCard(padding:16) {
-                        VStack(alignment:.leading,spacing:10) {
-                            Label("这段没有提取到想法",systemImage:"circle.dashed")
-                                .vosFont(WorkspaceText.meta.size, weight:.semibold)
-                                .foregroundStyle(palette.warning)
-                                .accessibilityAddTraits(.isHeader)
-                            HStack(spacing:14) {
-                                Button("重新整理这段",systemImage:"arrow.clockwise") { organize() }
-                                    .buttonStyle(.workspaceSecondaryCompact)
-                                    .disabled(source.transcript == nil || source.localOnly || !model.modelConfigured)
-                                    .help(source.localOnly ? "仅本机保存的文字不能交给模型整理" : !model.modelConfigured ? "先配置文本模型才能重新整理" : "会重做整段表达：这段和同一表达的其他分段都会重新整理")
-                                Button("视为无观点",systemImage:"checkmark.circle") { Task { await markExtractionAcknowledged() } }
-                                    .buttonStyle(.workspaceQuietCompact)
-                                    .help("确认这段没有可归属的观点；这条提示不会再出现")
-                            }
-                        }
-                    }
-                }
-                let issues=source.unresolvedTranscriptionIssues
-                if !issues.isEmpty {
-                    UnresolvedIssuesBlock(issues:issues,playbackAvailable:playbackAvailable,playbackLabel:{ unresolvedIssuePlaybackLabel($0) },play:{ playUnresolvedIssue($0) },jump:{ revealOriginal(spanID:$0) })
-                }
-                if let issue=source.recordingExpressionIssue(in:catalog) {
-                    WorkspaceCard(padding:16) {
-                        HStack(alignment:.firstTextBaseline,spacing:12) {
-                            Label("连续表达分组暂不可用 · \(issue)。",systemImage:"exclamationmark.triangle")
-                                .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                            Spacer(minLength:8)
-                            Button("重新判断连续表达") { rejudgeExpression(source.presentation?.expression?.sourceIDs ?? [source.id]) }
-                                .buttonStyle(.workspaceSecondaryCompact)
-                                .disabled(model.fullRecordingBusy || model.understandingSource != nil)
-                            Button("拆为独立录音") { splitExpression(source.presentation?.expression?.sourceIDs ?? [source.id]) }
-                                .buttonStyle(.workspaceSecondaryCompact)
-                                .disabled(model.fullRecordingBusy || model.understandingSource != nil)
-                        }
-                    }
-                }
-                if correctionJustSaved,!model.correctionImpacts.isEmpty {
-                    WorkspaceCard(padding:16) {
-                        HStack(alignment:.firstTextBaseline,spacing:12) {
-                            Label("\(model.correctionImpacts.count) 项任务受影响",systemImage:"exclamationmark.triangle")
-                                .vosFont(WorkspaceText.meta.size, weight:.semibold)
-                            Text("这些任务依赖更正前的内容；完成记录与已写入的外部提醒不会被自动删除。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                            Spacer(minLength:8)
-                            Button("查看纠错影响") { showingCorrectionImpacts=true }
-                                .buttonStyle(.workspaceSecondaryCompact)
-                            Button("知道了") { correctionJustSaved=false }
-                                .buttonStyle(.workspaceQuietCompact)
-                        }
-                    }
-                }
-                if source.transcript == nil {
-                    if source.dictationRecoveryPending {
-                        Text("这段录音在结束前被中断，还没有完整原件。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                        DictationRecoveryControls(model:model,source:source)
-                    } else if ["failed","blocked"].contains(source.jobState ?? "") {
-                        Button {
-                            guard !retryingTranscription else { return }
-                            retryingTranscription = true
-                            Task {
-                                await model.retry(source)
-                                retryingTranscription = false
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                if retryingTranscription { ProgressView().controlSize(.small) }
-                                Text(retryingTranscription ? "正在重试…" : "重试本地转写")
-                            }
-                        }
-                        .buttonStyle(.workspacePrimary)
-                        .disabled(retryingTranscription || model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
-                    }
-                }
-                digestSections
-                if !pausedThoughts.isEmpty && model.materialNoteStates[source.id] != .generating {
-                    WorkspaceCard() {
-                        VStack(alignment:.leading,spacing:12) {
-                        Label(automaticallyUpdating ? "正在自动更新理解" : pendingUnderstanding ? "理解尚未更新完成" : "AI 提取需要重新识别",systemImage:automaticallyUpdating ? "arrow.trianglehead.2.clockwise" : "pause.circle").vosFont(WorkspaceText.meta.size, weight: .semibold)
-                        Text(automaticallyUpdating ? "原文已保存；正在结合完整表达与节目背景更新观点、任务和关联，完成后会自动更新。" : pauseExplanation).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                        if !pausedActions.isEmpty {
-                            Text("受影响的任务与问题").vosFont(WorkspaceText.rowTitle)
-                            ForEach(pausedActions) { action in
-                                WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看任务") { openTask(action.id) }
-                                WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
-                            }
-                        }
-                        if pendingUnderstanding && !automaticallyUpdating {
-                            Text("自动更新尚未完成；原文与任务完成记录会保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                        }
-                        if source.localOnly {
-                            Text("当前仅本机保存。允许后会将这份完整文字发送给已配置的模型。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                            Button("允许这份文字用于云端并重新识别") { Task { await model.changeTextPolicy(source);organize() } }
-                                .buttonStyle(retryOffersPrimary ? .workspaceSecondary : .workspacePrimary)
-                                .disabled(!model.modelConfigured || model.fullRecordingBusy || model.understandingSource != nil)
-                        } else {
-                            Button(automaticallyUpdating ? "正在自动更新…" : processing ? "正在重新识别…" : pendingUnderstanding ? "重试更新理解" : "重新识别观点和任务",action:organize)
-                                .buttonStyle(retryOffersPrimary ? .workspaceSecondary : .workspacePrimary)
-                                .disabled(processing || model.fullRecordingBusy || model.understandingSource != nil || !model.modelConfigured || source.state == "quarantined")
-                                .help(automaticallyUpdating || processing ? "正在处理，完成后这里会自动更新" : pendingUnderstanding ? "查看处理进度或错误后，点此重试自动更新" : "AI 会读取完整文字和转写核对记录，重新提取观点和任务；只有文字记错时才需要更正转写")
-                        }
-                        if !model.modelConfigured {
-                            HStack(spacing:8) {
-                                Text("重新识别需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                                Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuietCompact)
-                            }
-                        }
-                        Text("旧提取保留为历史；已连接的提醒事项不受影响。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                        }
-                    }
-                }
-                if let followup = model.recordingFollowups.last(where: { expressionIDs.contains($0.sourceID) }) {
-                    SourceFollowupCard(receipt: followup, model: model, open: openFollowups)
-                }
-                if pausedThoughts.isEmpty && !pausedActions.isEmpty {
-                    SourceSection(title:"观点已更正，关联待办需要重新确认",count:pausedActions.count) {
-                        ForEach(pausedActions) { action in
-                            WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看与处理") { openTask(action.id) }
-                            WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
-                        }
-                    }
-                }
-                let currentActions = actions.filter { $0.validity == "current" }
-                let currentTasks = currentActions.filter { $0.kind == "task" }
-                let currentGoals = currentActions.filter { $0.kind != "task" }
-                if !currentTasks.isEmpty {
-                    SourceSection(title:"待办",count:currentTasks.count) {
-                        ForEach(currentTasks) { action in relatedActionRow(action, in: currentTasks, reads: reminderReads) }
-                    }
-                }
-                if !currentGoals.isEmpty {
-                    SourceSection(title:"问题与目标",count:currentGoals.count) {
-                        ForEach(currentGoals) { action in relatedActionRow(action, in: currentGoals, reads: reminderReads) }
-                    }
-                }
-                if let review {
-                    let open = review.openIssues(from: review.issues)
-                    if !open.isEmpty {
-                        SourceSection(title:"理解有需要补充的地方",count:open.count) {
-                            ForEach(open) { issue in
-                                VStack(alignment:.leading,spacing:8) {
-                                    WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:WorkspaceText.body.size)
-                                    KnowledgeReviewIssueStatusControls(model:model,record:review,issue:issue)
-                                }.padding(.vertical,8)
-                            }
-                        }
-                    }
-                }
-                if notePresent || source.transcript == nil { originalSection }
-                relatedMaterials
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
+                switch readingTab {
+                case .original:
+                    originalSection
+                case .note:
+                    MaterialNoteReadingView(model: model, source: source, openSource: openSource, openTask: openTask,
+                                            openDiscussion: openDiscussion, hasNote: .constant(false), materialReader: true)
+                case .results:
+                    extractionResults
+                }
             }.frame(maxWidth:readingWidth,alignment:.leading)
                 .padding(.horizontal,WorkspaceMetrics.pagePadding)
                 .padding(.top,16)
                 .padding(.bottom,WorkspaceMetrics.pagePadding)
                 .frame(maxWidth:.infinity,alignment:.top)
         }
-        .onDisappear { historyTask?.cancel();bilingualTask?.cancel() }
-    }
-    private func sourceHeading(_ title: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !notePresent {
-                Text(title).vosFont(WorkspaceText.pageTitle).fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled).accessibilityAddTraits(.isHeader)
-            }
-            let origin = source.origin == "ai" ? "AI 交付物" : source.origin == "user" ? "我的表达" : "外部资料"
-            Text([origin, notePresent ? "" : sourceMetadata(title: title)].filter { !$0.isEmpty }.joined(separator: " · "))
-                .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-        }
-    }
-
-    private func sourceMetadata(title: String) -> String {
-        let date = source.recordingDateLabel
-        let metadata = source.recordingSubtitle
-        if title.contains(date), metadata.hasPrefix(date) {
-            return String(metadata.dropFirst(date.count)).trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "·")))
-        }
-        return metadata
-    }
-
-    @ViewBuilder private var materialStatus: some View {
-        if transcriptionRunning {
-            HStack(spacing: 8) {
-                SourceLoadingRow(title: waitingForSpeech ? "等待本地转写模型" : "正在转写…")
-                if waitingForSpeech {
-                    Button("配置本地转写…") { model.chooseLocalSpeech() }.buttonStyle(.workspaceQuietCompact)
-                }
-            }
-        } else if source.transcript == nil {
-            Label(source.dictationRecoveryPending ? "录音中断" : source.error ?? (transcriptionFailed ? "转写失败 · 原件已保存" : "等待转写 · 原件已保存"),
-                  systemImage: "exclamationmark.circle")
-                .vosFont(WorkspaceText.meta).foregroundStyle(transcriptionFailed ? palette.warning : palette.secondaryText)
-                .textSelection(.enabled)
-        } else if model.materialNoteStates[source.id] != .generating {
-            if processing && !(automaticallyUpdating && !pausedThoughts.isEmpty) {
-                SourceLoadingRow(title: "正在整理材料…")
-            } else if let failure = processingFailure, pausedThoughts.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Label(failure.error ?? "材料整理未完成", systemImage: "exclamationmark.triangle")
-                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                        .textSelection(.enabled)
-                    Button("查看处理情况", action: openProcessing).buttonStyle(.workspaceQuietCompact)
-                }
-            }
-        }
     }
 
     @ViewBuilder private var originalSection: some View {
-        if source.transcript != nil && !notePresent {
+        let titleFit = WorkspaceTitleFit.present(readingTitle)
+        Text(titleFit.title).vosFont(WorkspaceText.pageTitle)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled).accessibilityAddTraits(.isHeader)
+        if let attachmentURL {
+            Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图", systemImage: "arrow.up.right.square") {
+                if !NSWorkspace.shared.open(attachmentURL) { error = "无法打开原件" }
+            }.buttonStyle(.workspaceQuietCompact)
+        }
+        if source.hasProvisionalRecordingTranscript {
             VStack(alignment: .leading, spacing: 12) {
-                Text("原文").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-                originalReading
-            }.id("source-original-fold")
-        } else if source.transcript != nil || playbackAvailable {
-            SourceFold(title: source.transcript != nil ? "原文" : "录音原件", isExpanded: foldExpanded(\.original)) {
-                originalReading
-            }.id("source-original-fold")
+                Text(model.transcriptReviewSourceID == source.id ? "正在校正逐字稿…" : "逐字稿待校正")
+                    .vosFont(WorkspaceText.body)
+                if source.needsTranscriptionReview && !source.localOnly && model.transcriptReviewSourceID != source.id {
+                    Button(source.transcriptionReviewFailure == nil ? "校正逐字稿" : "重试校正") {
+                        Task { await model.reviewTranscription(sourceID: source.id) }
+                    }
+                    .buttonStyle(.workspaceSecondaryCompact)
+                    .disabled(!model.modelConfigured || model.fullRecordingBusy || model.transcriptReviewSourceID != nil)
+                }
+            }
+        } else if source.transcript != nil {
+            originalReading.id("source-original")
+        } else {
+            transcriptUnavailable
+        }
+    }
+
+    @ViewBuilder private var transcriptUnavailable: some View {
+        if source.dictationRecoveryPending {
+            DictationRecoveryControls(model:model,source:source)
+        } else if transcriptionFailed {
+            Text(source.error ?? "转写失败").vosFont(WorkspaceText.body).foregroundStyle(palette.warning)
+            Button(retryingTranscription ? "正在重试…" : "重试本地转写") {
+                retryingTranscription = true
+                Task {
+                    await model.retry(source)
+                    retryingTranscription = false
+                }
+            }
+            .buttonStyle(.workspaceSecondaryCompact)
+            .disabled(retryingTranscription || model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
+        } else if transcriptionRunning {
+            SourceLoadingRow(title: waitingForSpeech ? "等待本地转写模型" : "正在转写…")
+            if waitingForSpeech {
+                Button("配置本地转写…") { model.chooseLocalSpeech() }.buttonStyle(.workspaceQuietCompact)
+            }
+        }
+    }
+
+    @ViewBuilder private var extractionResults: some View {
+        let reminderReads = ActionRowReads(reminderLinks: model.reminderLinks, executions: model.assistantExecutions)
+        if let failure = processingFailure, pausedThoughts.isEmpty {
+            HStack(spacing: 12) {
+                Text(failure.error ?? "整理未完成").vosFont(WorkspaceText.body).foregroundStyle(palette.warning)
+                Button("查看处理情况", action: openProcessing).buttonStyle(.workspaceQuietCompact)
+            }
+        }
+        if extractionFlag == .empty && !processing {
+            WorkspaceCard(padding:16) {
+                VStack(alignment:.leading,spacing:10) {
+                    Label("这段没有提取到想法",systemImage:"circle.dashed")
+                        .vosFont(WorkspaceText.meta.size, weight:.semibold)
+                        .foregroundStyle(palette.warning)
+                        .accessibilityAddTraits(.isHeader)
+                    HStack(spacing:14) {
+                        Button("重新整理这段",systemImage:"arrow.clockwise") { organize() }
+                            .buttonStyle(.workspaceSecondaryCompact)
+                            .disabled(source.transcript == nil || source.localOnly || !model.modelConfigured)
+                            .help(source.localOnly ? "仅本机保存的文字不能交给模型整理" : !model.modelConfigured ? "先配置文本模型才能重新整理" : "会重做整段表达：这段和同一表达的其他分段都会重新整理")
+                        Button("视为无观点",systemImage:"checkmark.circle") { Task { await markExtractionAcknowledged() } }
+                            .buttonStyle(.workspaceQuietCompact)
+                            .help("确认这段没有可归属的观点；这条提示不会再出现")
+                    }
+                }
+            }
+        }
+        if let issue=source.recordingExpressionIssue(in:catalog) {
+            WorkspaceCard(padding:16) {
+                HStack(alignment:.firstTextBaseline,spacing:12) {
+                    Label("连续表达分组暂不可用 · \(issue)。",systemImage:"exclamationmark.triangle")
+                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    Spacer(minLength:8)
+                    Button("重新判断连续表达") { rejudgeExpression(source.presentation?.expression?.sourceIDs ?? [source.id]) }
+                        .buttonStyle(.workspaceSecondaryCompact)
+                        .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                    Button("拆为独立录音") { splitExpression(source.presentation?.expression?.sourceIDs ?? [source.id]) }
+                        .buttonStyle(.workspaceSecondaryCompact)
+                        .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                }
+            }
+        }
+        if correctionJustSaved,!model.correctionImpacts.isEmpty {
+            WorkspaceCard(padding:16) {
+                HStack(alignment:.firstTextBaseline,spacing:12) {
+                    Label("\(model.correctionImpacts.count) 项任务受影响",systemImage:"exclamationmark.triangle")
+                        .vosFont(WorkspaceText.meta.size, weight:.semibold)
+                    Text("这些任务依赖更正前的内容；完成记录与已写入的外部提醒不会被自动删除。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    Spacer(minLength:8)
+                    Button("查看纠错影响") { showingCorrectionImpacts=true }
+                        .buttonStyle(.workspaceSecondaryCompact)
+                    Button("知道了") { correctionJustSaved=false }
+                        .buttonStyle(.workspaceQuietCompact)
+                }
+            }
+        }
+        let currentActions = actions.filter { $0.validity == "current" }
+        let currentTasks = currentActions.filter { $0.kind == "task" }
+        let currentGoals = currentActions.filter { $0.kind != "task" }
+        if !currentTasks.isEmpty {
+            SourceSection(title:"待办",count:currentTasks.count) {
+                ForEach(currentTasks) { action in relatedActionRow(action, in: currentTasks, reads: reminderReads) }
+            }
+        }
+        if !currentGoals.isEmpty {
+            SourceSection(title:"问题与目标",count:currentGoals.count) {
+                ForEach(currentGoals) { action in relatedActionRow(action, in: currentGoals, reads: reminderReads) }
+            }
+        }
+        digestSections
+        if !pausedThoughts.isEmpty {
+            WorkspaceCard() {
+                VStack(alignment:.leading,spacing:12) {
+                Label(automaticallyUpdating ? "正在自动更新理解" : pendingUnderstanding ? "理解尚未更新完成" : "AI 提取需要重新识别",systemImage:automaticallyUpdating ? "arrow.trianglehead.2.clockwise" : "pause.circle").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                if !automaticallyUpdating { Text(pauseExplanation).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText) }
+                if !pausedActions.isEmpty {
+                    Text("受影响的任务与问题").vosFont(WorkspaceText.rowTitle)
+                    ForEach(pausedActions) { action in
+                        WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看任务") { openTask(action.id) }
+                        WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
+                    }
+                }
+                if source.localOnly {
+                    Text("当前仅本机保存。允许后会将这份完整文字发送给已配置的模型。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    Button("允许这份文字用于云端并重新识别") { Task { await model.changeTextPolicy(source);organize() } }
+                        .buttonStyle(retryOffersPrimary ? .workspaceSecondary : .workspacePrimary)
+                        .disabled(!model.modelConfigured || model.fullRecordingBusy || model.understandingSource != nil)
+                } else {
+                    Button(automaticallyUpdating ? "正在自动更新…" : processing ? "正在重新识别…" : pendingUnderstanding ? "重试更新理解" : "重新识别观点和任务",action:organize)
+                        .buttonStyle(retryOffersPrimary ? .workspaceSecondary : .workspacePrimary)
+                        .disabled(processing || model.fullRecordingBusy || model.understandingSource != nil || !model.modelConfigured || source.state == "quarantined")
+                        .help(automaticallyUpdating || processing ? "正在处理，完成后这里会自动更新" : pendingUnderstanding ? "查看处理进度或错误后，点此重试自动更新" : "AI 会读取完整文字和转写核对记录，重新提取观点和任务；只有文字记错时才需要更正转写")
+                }
+                if !model.modelConfigured {
+                    HStack(spacing:8) {
+                        Text("重新识别需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                        Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuietCompact)
+                    }
+                }
+                }
+            }
+        }
+        if model.recordingFollowups.contains(where: { expressionIDs.contains($0.sourceID) }) {
+            Button("查看思想与下一步", action: openFollowups).buttonStyle(.workspaceQuietCompact)
+        }
+        if pausedThoughts.isEmpty && !pausedActions.isEmpty {
+            SourceSection(title:"观点已更正，关联待办需要重新确认",count:pausedActions.count) {
+                ForEach(pausedActions) { action in
+                    WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看与处理") { openTask(action.id) }
+                    WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
+                }
+            }
+        }
+        if let review {
+            let open = review.openIssues(from: review.issues)
+            if !open.isEmpty {
+                SourceSection(title:"理解有需要补充的地方",count:open.count) {
+                    ForEach(open) { issue in
+                        VStack(alignment:.leading,spacing:8) {
+                            WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:WorkspaceText.body.size)
+                            KnowledgeReviewIssueStatusControls(model:model,record:review,issue:issue)
+                        }.padding(.vertical,8)
+                    }
+                }
+            }
+        }
+        relatedMaterials
+        if thoughts.isEmpty && actions.isEmpty && extractionFlag != .empty && pausedThoughts.isEmpty && processingFailure == nil {
+            if processing { SourceLoadingRow(title: "正在提取…") }
+            else { Text("暂无提取结果").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText) }
         }
     }
 
     private var originalReading: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            originalNavigation
+        VStack(alignment: .leading, spacing: 18) {
             if let transcript = source.transcript {
                 if transcriptParagraphs.isEmpty {
                     MarkdownText(transcript).textSelection(.enabled)
                 } else {
                     SourceTranscriptBody(paragraphs: transcriptParagraphs, clock: playback)
                 }
-                DisclosureGroup("选择原文片段", isExpanded: foldExpanded(\.fullText)) {
+                DisclosureGroup("原文工具", isExpanded: foldExpanded(\.tools)) {
                     VStack(alignment: .leading, spacing: 12) {
-                        SelectionActions(selection:selectedText,canPlay:selectedSpan != nil,onSave:saveSelectionAsQuestion,onCopy:copySelectedText,onPlay:playSelectedSpan)
-                        SelectableText(text: transcript, textColor: palette.textNSColor) { text, range in
-                            selectedText = text
-                            selectedRange = range
-                        }.frame(minHeight: 180)
+                        originalNavigation
+                        DisclosureGroup("选择原文片段", isExpanded: foldExpanded(\.fullText)) {
+                            SelectionActions(selection: selectedText, canPlay: selectedSpan != nil, onSave: saveSelectionAsQuestion,
+                                             onCopy: copySelectedText, onPlay: playSelectedSpan)
+                            SelectableText(text: transcript, textColor: palette.textNSColor) { text, range in
+                                selectedText = text
+                                selectedRange = range
+                            }.frame(minHeight: 180)
+                        }
+                        let timedSpans = source.spans.filter { $0.startMS != nil && $0.endMS != nil }
+                        if playbackAvailable && !timedSpans.isEmpty {
+                            DisclosureGroup("按时间回听", isExpanded: foldExpanded(\.timedSpans)) {
+                                SourceSpanPlaybackList(model: model, source: source, spans: timedSpans, clock: playback, selection: $playbackSelection)
+                            }
+                        }
                     }.padding(.top, 8)
-                }
-            }
-            if playbackAvailable {
-                Button("打开录音原件", systemImage: "arrow.up.right.square") { Task { await model.play(source) } }
-                    .buttonStyle(.workspaceQuietCompact)
-            }
-            if playbackAvailable, !source.spans.isEmpty {
-                let timedSpans = source.spans.filter { $0.startMS != nil && $0.endMS != nil }
-                if !timedSpans.isEmpty {
-                    DisclosureGroup("按时间回听", isExpanded: foldExpanded(\.timedSpans)) {
-                        SourceSpanPlaybackList(model: model, source: source, spans: timedSpans, clock: playback, selection: $playbackSelection)
-                    }
                 }
             }
         }
@@ -1087,8 +1048,15 @@ struct WorkspaceSourceView: View {
 
     private var processingHistory: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("原文件 · " + MaterialNaming.displayName(source.name))
-                .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
+            Text(MaterialNaming.displayName(source.name))
+                .vosFont(WorkspaceText.body).textSelection(.enabled)
+            Text(source.recordingSubtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            if let info = captureInfo, let url = captureLink(info.url) {
+                Link(info.context ?? url.host ?? "来源", destination: url)
+            }
+            if source.transcriptionReview?.isCompleteFullTextReview == true {
+                Text("当前原文已校正").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }
             VStack(alignment: .leading, spacing: 0) {
                 DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id],carded:false).padding(.top,12) }.padding(.vertical,16)
                 WorkspaceListDivider()
@@ -1180,6 +1148,8 @@ struct WorkspaceSourceView: View {
                         }
                     case .entities:
                         entityPanel
+                    case .provisional:
+                        if let text = source.transcript { MarkdownText(text).textSelection(.enabled) }
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
             }
@@ -1190,6 +1160,14 @@ struct WorkspaceSourceView: View {
     var body:some View {
         readingContent
         .safeAreaInset(edge:.bottom,spacing:0) { playbackBar }
+        .task(id: noteRequestKey) {
+            let members = model.materialNoteMemberIDs(sourceID: source.id)
+            if !members.contains(where: { catalog[$0]?.hasProvisionalRecordingTranscript == true }) {
+                await model.requestMaterialNote(sourceID: source.id)
+            }
+        }
+        .onChange(of: readingTab) { _, _ in auxiliaryScroll = ScrollPosition(edge: .top) }
+        .onDisappear { historyTask?.cancel(); bilingualTask?.cancel() }
         .workspaceToast($toast)
         .sheet(item: $detailPanel, content: detailSheet)
         .sheet(item:$editing) { source in WorkspaceTranscriptEditor(model:model,source:source,onSaved:{ toast="原文已更正";correctionJustSaved=true }) { editing=nil } }
@@ -1436,19 +1414,34 @@ struct WorkspaceSourceView: View {
               source.spans.allSatisfy({ $0.startMS != nil && $0.endMS != nil }) else { return [] }
         return source.spans
     }
-    private var transcriptParagraphs:[TranscriptParagraph] {
-        guard let transcript=source.transcript else { return [] }
-        return timedTranscriptSpans.compactMap { span in
-            let text=SourceText.quote(span,in:transcript)
-            return text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? nil : TranscriptParagraph(span:span,text:text)
+    private var transcriptParagraphs: [TranscriptParagraph] {
+        guard let transcript = source.transcript else { return [] }
+        var paragraphs: [TranscriptParagraph] = []
+        let sentenceEnd = "。！？.!?…"
+        for span in timedTranscriptSpans {
+            guard let start = span.startMS, let end = span.endMS else { continue }
+            let text = SourceText.quote(span, in: transcript)
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if let last = paragraphs.indices.last {
+                let previous = paragraphs[last].text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let previousEndsSentence = previous.last.map(sentenceEnd.contains) == true
+                if (!previousEndsSentence && !paragraphs[last].text.hasSuffix("\n")) || trimmed.count <= 4 {
+                    paragraphs[last].spanIDs.insert(span.id)
+                    paragraphs[last].endMS = end
+                    paragraphs[last].text += text
+                    continue
+                }
+            }
+            paragraphs.append(.init(id: span.id, spanIDs: [span.id], startMS: start, endMS: end, text: text))
         }
+        return paragraphs
     }
     private func followPlaybackHighlight(_ milliseconds:Int?) {
         guard let ms=milliseconds else { autoScrolledSpanID=nil;return }
-        guard !notePresent || folds.original,let scroll else { return }
+        guard readingTab == .original, !source.hasProvisionalRecordingTranscript, let scroll else { return }
         guard let paragraph=transcriptParagraphs.first(where: { paragraph in
-            guard let start=paragraph.span.startMS,let end=paragraph.span.endMS else { return false }
-            return ms>=start && ms<end
+            ms >= paragraph.startMS && ms < paragraph.endMS
         }),paragraph.id != autoScrolledSpanID else { return }
         autoScrolledSpanID=paragraph.id
         let anchor="source-span-"+paragraph.id
@@ -1458,20 +1451,25 @@ struct WorkspaceSourceView: View {
         }
     }
     private func revealOriginal(spanID: String? = nil) {
+        guard !source.hasProvisionalRecordingTranscript else {
+            detailPanel = .provisional
+            return
+        }
+        readingTab = .original
         var state = folds
-        state.original = true
         if let spanID {
-            if transcriptParagraphs.contains(where: { $0.id == spanID }) {
+            if transcriptParagraphs.contains(where: { $0.spanIDs.contains(spanID) }) {
                 state.originalTarget = "source-span-" + spanID
             } else if playbackAvailable && source.spans.contains(where: {
                 $0.id == spanID && $0.startMS != nil && $0.endMS != nil
             }) {
+                state.tools = true
                 state.timedSpans = true
                 state.originalTarget = "source-time-" + spanID
             }
         }
         folds = state
-        if let scroll { scroll.wrappedValue.scrollTo(id: "source-original-fold", anchor: .top) }
+        if let scroll { scroll.wrappedValue.scrollTo(id: "source-original", anchor: .top) }
     }
 
     private func unresolvedIssuePlaybackLabel(_ issue:TranscriptionReview.Issue)->String {
@@ -1688,7 +1686,7 @@ private struct SourceTranscriptBody: View {
         self.paragraphs=paragraphs
         _clock=ObservedObject(wrappedValue:clock)
         window=SourceParagraphWindow(paragraphs:paragraphs.map {
-            .init(id:$0.id,startMS:$0.span.startMS ?? 0,endMS:$0.span.endMS ?? 0)
+            .init(id: $0.id, startMS: $0.startMS, endMS: $0.endMS)
         })
     }
     var body:some View {

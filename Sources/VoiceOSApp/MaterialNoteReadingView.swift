@@ -65,7 +65,7 @@ struct MaterialNoteReadingView: View {
     var sidebar: Binding<NoteSidebarTab?>? = nil
     var discussionPanel: AnyView? = nil
     var discussParagraph: ((String) -> Void)? = nil
-    var showsAvailability = true
+    var materialReader = false
 
     @State private var display: MaterialNoteDisplay?
     @State private var editing: StoredMaterialNote?
@@ -73,6 +73,8 @@ struct MaterialNoteReadingView: View {
     @State private var requested = false
     @State private var loadedOnce = false
     @AppStorage("voiceos.note.annotations.visible") private var annotationsVisible = true
+    @State private var materialAnnotationsVisible = false
+    private var showAnnotations: Bool { materialReader ? materialAnnotationsVisible : annotationsVisible }
     @State private var probeBox = NoteReadingProbeBox()
     @State private var hasRestored = false
     @State private var boardNotice: String?
@@ -92,6 +94,9 @@ struct MaterialNoteReadingView: View {
     }
     private var memberRecords: [SourceRecord] { memberIDs.compactMap { catalog[$0] } }
     private var noteState: MaterialNoteState? { model.materialNoteStates[source.id] }
+    private var waitsForMaterialReview: Bool {
+        materialReader && memberRecords.contains(where: \.hasProvisionalRecordingTranscript)
+    }
 
     // Policy and local-only changes also matter: they can unblock or block the
     // next attempt even when no transcript changed.
@@ -180,7 +185,11 @@ struct MaterialNoteReadingView: View {
                     .foregroundStyle(palette.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            statusRows
+            if waitsForMaterialReview && display == nil {
+                noteText("校正后可整理笔记")
+            } else {
+                statusRows
+            }
             if let display {
                 article(display)
             }
@@ -265,30 +274,34 @@ struct MaterialNoteReadingView: View {
 
     private func article(_ display: MaterialNoteDisplay) -> some View {
         HStack(alignment: .top, spacing: 18) {
-            Rectangle().fill(palette.border)
-                .frame(width: 1)
-                .frame(maxHeight: .infinity)
-                .accessibilityHidden(true)
+            if !materialReader {
+                Rectangle().fill(palette.border)
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 26) {
                 if !display.isCurrent { staleRow }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(articleTitle(display.note.note))
-                        .vosFont(WorkspaceText.pageTitle)
-                        .foregroundStyle(palette.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .id("note.title")
-                    // 手账感下划线：固定视觉语言，不消耗模型选择。
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(palette.warning.opacity(0.35))
-                        .frame(width: 88, height: 3)
-                        .accessibilityHidden(true)
-                        .onGeometryChange(for: CGFloat.self) { proxy in
-                            proxy.frame(in: .scrollView(axis: .vertical)).minY
-                        } action: { minY in
-                            probe(minY, anchor: "note.title")
-                        }
-                    metaLine
+                if materialReader {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        noteHeading(display.note.note)
+                        Spacer(minLength: 0)
+                        noteActions
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        noteHeading(display.note.note)
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(palette.warning.opacity(0.35))
+                            .frame(width: 88, height: 3)
+                            .accessibilityHidden(true)
+                            .onGeometryChange(for: CGFloat.self) { proxy in
+                                proxy.frame(in: .scrollView(axis: .vertical)).minY
+                            } action: { minY in
+                                probe(minY, anchor: "note.title")
+                            }
+                        metaLine
+                    }
                 }
                 if let lead = normalized(display.note.note.lead) {
                     Text(lead)
@@ -300,11 +313,20 @@ struct MaterialNoteReadingView: View {
                 ForEach(NoteBoardAdapting.blocks(for: display.note.note)) { block in
                     blockView(block)
                 }
-                relatedSection
+                if !materialReader { relatedSection }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .textSelection(.enabled)
+    }
+
+    private func noteHeading(_ note: MaterialNote) -> some View {
+        Text(articleTitle(note))
+            .vosFont(WorkspaceText.pageTitle)
+            .foregroundStyle(palette.text)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+            .id("note.title")
     }
 
     /// 成品视图：段落只有正文与「整理时补充的关联」标记。逐段原话与回听
@@ -366,7 +388,7 @@ struct MaterialNoteReadingView: View {
                     .foregroundStyle(palette.tertiaryText)
                     .accessibilityLabel("这一段包含整理时补充的关联")
             }
-            if annotationsVisible, let annotations = paragraph.annotations, !annotations.isEmpty {
+            if showAnnotations, let annotations = paragraph.annotations, !annotations.isEmpty {
                 ForEach(annotations) { annotation in
                     annotationView(annotation)
                 }
@@ -577,7 +599,7 @@ struct MaterialNoteReadingView: View {
 
     @ViewBuilder
     private func insightBlockView(_ block: NoteBlock) -> some View {
-        if annotationsVisible, let annotation = block.annotation {
+        if showAnnotations, let annotation = block.annotation {
             VStack(alignment: .leading, spacing: 6) {
                 if let title = normalized(annotation.title) ?? normalized(block.titleOverride) {
                     Text(title)
@@ -672,28 +694,30 @@ struct MaterialNoteReadingView: View {
                 .foregroundStyle(palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
-            Menu {
-                Button("编辑笔记…") { editing = display?.note }
-                Button(annotationsVisible ? "隐藏 AI 批注" : "显示 AI 批注") {
-                    annotationsVisible.toggle()
-                }
-                Button("重新整理笔记") {
-                    retry()
-                }
-                .disabled(noteState == .generating)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .vosFont(WorkspaceText.meta.size)
-                    .foregroundStyle(palette.secondaryText)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .help("笔记操作")
-            .accessibilityLabel("笔记操作")
+            noteActions
         }
+    }
+
+    private var noteActions: some View {
+        Menu {
+            Button("编辑笔记…") { editing = display?.note }
+            Button(showAnnotations ? "隐藏 AI 批注" : "显示 AI 批注") {
+                if materialReader { materialAnnotationsVisible.toggle() }
+                else { annotationsVisible.toggle() }
+            }
+            Button("重新整理笔记") { retry() }
+                .disabled(noteState == .generating || waitsForMaterialReview)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .vosFont(WorkspaceText.meta.size)
+                .foregroundStyle(palette.secondaryText)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .help("笔记操作")
+        .accessibilityLabel("笔记操作")
     }
 
     private var metaText: String {
@@ -791,7 +815,7 @@ struct MaterialNoteReadingView: View {
                 .accessibilityElement(children: .combine)
             case .unavailable(let reason):
                 // 已有可读笔记时不再显示「不能整理」类横幅：内容与横幅会自相矛盾。
-                if display == nil && showsAvailability { unavailableRow(reason) }
+                if display == nil { unavailableRow(reason) }
             case .failed(let message):
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Label("整理没有完成：\(message)", systemImage: "exclamationmark.triangle")
@@ -812,7 +836,7 @@ struct MaterialNoteReadingView: View {
 
     @ViewBuilder
     private var idleRow: some View {
-        if display == nil, loadedOnce, requested, showsAvailability {
+        if display == nil, loadedOnce, requested {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("还没有整理成笔记。")
                     .vosFont(WorkspaceText.meta)
@@ -1208,6 +1232,7 @@ struct MaterialNoteReadingView: View {
 
     @MainActor
     private func requestNote() async {
+        guard !waitsForMaterialReview else { return }
         await model.requestMaterialNote(sourceID: source.id)
         guard !Task.isCancelled else { return }
         requested = true
