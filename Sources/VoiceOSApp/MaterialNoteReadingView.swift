@@ -398,13 +398,12 @@ struct MaterialNoteReadingView: View {
         }
     }
 
-    /// 一条 AI 批注：低饱和暖色底、左缘色条、轻标签；形式与长度随内容，
-    /// 理论出处与身份（voice）有就给一行。批注是成品的一部分。
     private func annotationView(_ annotation: MaterialNote.Annotation) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let ink = annotationColor(annotation.kind)
+        return VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Text("AI 批注").vosFont(WorkspaceText.caption.size, weight: .semibold)
-                        .foregroundStyle(palette.warning)
+                        .foregroundStyle(ink)
                     if let label = Self.annotationKindLabel(annotation.kind) {
                         Text(label).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     }
@@ -428,10 +427,10 @@ struct MaterialNoteReadingView: View {
         .padding(12)
         .padding(.leading, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.warning.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        .background(ink.opacity(0.09), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1)
-                .fill(palette.warning.opacity(0.45))
+                .fill(ink.opacity(0.60))
                 .frame(width: 2)
                 .padding(.vertical, 12)
                 .padding(.leading, 10)
@@ -439,6 +438,16 @@ struct MaterialNoteReadingView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("AI 批注" + (Self.annotationKindLabel(annotation.kind).map { "，" + $0 } ?? ""))
+    }
+
+    private func annotationColor(_ kind: String) -> Color {
+        switch kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "question", "analysis", "distinction", "research_frame": return palette.noteBlue
+        case "pattern", "theory", "insight", "reflection": return palette.noteViolet
+        case "extension", "advice", "coaching", "suggestion": return palette.noteGreen
+        case "assumption": return palette.noteRose
+        default: return palette.noteAmber
+        }
     }
 
     private static func annotationKindLabel(_ kind: String) -> String? {
@@ -624,7 +633,7 @@ struct MaterialNoteReadingView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(markToneColor(block.tone), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .background(markInk(block.tone).opacity(0.12), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
         }
     }
 
@@ -668,7 +677,7 @@ struct MaterialNoteReadingView: View {
     }
 
     private func apply(_ mark: MaterialNote.InlineMark, to attributed: inout AttributedString, range: Range<AttributedString.Index>) {
-        let color = markToneColor(mark.tone)
+        let ink = markInk(mark.tone)
         switch (mark.style ?? "marker").lowercased() {
         case "underline":
             attributed[range].underlineStyle = .single
@@ -677,15 +686,17 @@ struct MaterialNoteReadingView: View {
         case "italic":
             attributed[range].inlinePresentationIntent = .emphasized
         default:
-            attributed[range].backgroundColor = color
+            attributed[range].backgroundColor = ink.opacity(0.24)
         }
     }
 
-    private func markToneColor(_ tone: String?) -> Color {
-        switch (tone ?? "").lowercased() {
-        case "accent": return palette.accent.opacity(0.16)
-        case "muted": return palette.secondaryText.opacity(0.07)
-        default: return palette.warning.opacity(0.16)
+    private func markInk(_ tone: String?) -> Color {
+        switch tone?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "accent", "blue": return palette.noteBlue
+        case "muted", "violet", "purple": return palette.noteViolet
+        case "green", "mint": return palette.noteGreen
+        case "rose", "pink": return palette.noteRose
+        default: return palette.noteAmber
         }
     }
 
