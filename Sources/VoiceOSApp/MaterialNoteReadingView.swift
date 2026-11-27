@@ -65,6 +65,7 @@ struct MaterialNoteReadingView: View {
     var sidebar: Binding<NoteSidebarTab?>? = nil
     var discussionPanel: AnyView? = nil
     var discussParagraph: ((String) -> Void)? = nil
+    var showsAvailability = true
 
     @State private var display: MaterialNoteDisplay?
     @State private var editing: StoredMaterialNote?
@@ -783,14 +784,14 @@ struct MaterialNoteReadingView: View {
             case .generating:
                 HStack(spacing: 9) {
                     ProgressView().controlSize(.small).accessibilityHidden(true)
-                    Text(display == nil ? "正在整理成笔记…" : "正在重新整理…")
+                    Text(display == nil ? "正在整理笔记…" : "正在重新整理…")
                         .vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText)
                 }
                 .accessibilityElement(children: .combine)
             case .unavailable(let reason):
                 // 已有可读笔记时不再显示「不能整理」类横幅：内容与横幅会自相矛盾。
-                if display == nil { unavailableRow(reason) }
+                if display == nil && showsAvailability { unavailableRow(reason) }
             case .failed(let message):
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Label("整理没有完成：\(message)", systemImage: "exclamationmark.triangle")
@@ -811,7 +812,7 @@ struct MaterialNoteReadingView: View {
 
     @ViewBuilder
     private var idleRow: some View {
-        if display == nil, loadedOnce, requested {
+        if display == nil, loadedOnce, requested, showsAvailability {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("还没有整理成笔记。")
                     .vosFont(WorkspaceText.meta)

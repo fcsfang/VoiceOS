@@ -764,12 +764,21 @@ struct WorkspaceView: View {
             }
             if model.dictationActive || model.dictationSealing {
                 DictationRecordingBar(model: model)
-            } else if model.workspaceProcessingBarVisible, page != .tool("处理情况") {
+            } else if model.workspaceProcessingBarVisible, page != .tool("处理情况"), !showsProcessingInMaterial {
                 WorkspaceProcessingBar(model: model) { go(.tool("处理情况")) }
             }
         }.frame(minWidth:440)
             .workspaceSlowLoading(workspaceStarting, into: $showStartupProgress)
     }
+    private var showsProcessingInMaterial: Bool {
+        guard case .source(let id) = page,
+              let source = model.sourcePageIndex.recordsByID[id], !source.isTrashed,
+              !model.dictationBusy, model.pausedActionBatch?.isRunning != true,
+              model.workspaceProcessingTitle != nil,
+              let processingID = model.workspaceProcessingSourceID else { return false }
+        return processingID == id || model.sourcePageIndex.expression(for: id)?.sourceIDs.contains(processingID) == true
+    }
+
     private var workspaceStarting: Bool { !model.initialized || !model.workspaceLoaded }
     @ViewBuilder private var workspaceErrorBanner: some View {
         if let message = model.workspaceLastError {
@@ -953,11 +962,17 @@ struct WorkspaceView: View {
     }
     private var breadcrumb: String {
         switch page {
-        case .source(let id): (sourceOpenedFromTheme ? "主题 / " + (sourceIDs.contains(id) ? topic?.title ?? "全部材料" : "全部材料") : "材料") + " / " + sourceNavigationTitle(id)
-        case .delivery: "行动 / AI 交付"
-        case .task: "行动 / 任务与结果"
-        case .themes: topic.map { "主题 / " + $0.title } ?? "主题"
-        default: section
+        case .source(let id):
+            let parent = sourceOpenedFromTheme ? "主题 / " + (sourceIDs.contains(id) ? topic?.title ?? "全部材料" : "全部材料") : "材料"
+            if let expression = model.sourcePageIndex.expression(for: id), expression.sourceIDs.count > 1,
+               let index = expression.sourceIDs.firstIndex(of: id) {
+                return parent + " / 第 \(index + 1) 段原文"
+            }
+            return parent
+        case .delivery: return "行动 / AI 交付"
+        case .task: return "行动 / 任务与结果"
+        case .themes: return topic.map { "主题 / " + $0.title } ?? "主题"
+        default: return section
         }
     }
     @ViewBuilder private var pageContent: some View {
@@ -1030,7 +1045,7 @@ struct WorkspaceView: View {
                                 model.initiationSourceID = id
                                 model.initiationText = model.sourcePageIndex.recordsByID[id]?.transcript ?? ""
                                 go(.initiate)
-                            },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id),folds:sourceFoldBinding(id,transcript:source.transcript))
+                            },openFollowups:{ go(.tool("思想与下一步")) },openProcessing:{ go(.tool("处理情况")) },scroll:sourceScrollBinding(id),folds:sourceFoldBinding(id))
                                 .id(id)
                         }
                     } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。",actionTitle:"回到主题") { go(.themes) } }
@@ -1087,7 +1102,7 @@ struct WorkspaceView: View {
                                     .accessibilityIdentifier("capture.record.open")
                             }
                             if let player = model.player, let duration = saved.duration, duration.isFinite, duration > 0 {
-                                DictationPlaybackTimeline(player: player, duration: duration)
+                                RecordingPlaybackTimeline(player: player, duration: duration)
                             } else if let player = model.player {
                                 NativePlayerView(player: player).frame(height: 56)
                             }
@@ -1160,10 +1175,10 @@ struct WorkspaceView: View {
     private func sourceScrollBinding(_ id:String) -> Binding<ScrollPosition> {
         Binding(get: { sourceScrollPositions[id] ?? ScrollPosition(edge: .top) }, set: { sourceScrollPositions[id] = $0 })
     }
-    private func sourceFoldBinding(_ id:String,transcript:String?) -> Binding<SourceFoldState> {
+    private func sourceFoldBinding(_ id:String) -> Binding<SourceFoldState> {
         // 冷启动也能判断这篇是否有笔记：会话缓存与首页批量结果任一命中即可。
         let hasNote = materialHasNote(id)
-        return Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(transcript:transcript, notePresent: hasNote) }, set: { sourceFoldStates[id] = $0 })
+        return Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(notePresent: hasNote) }, set: { sourceFoldStates[id] = $0 })
     }
     /// 这篇材料所属表达是否已有笔记（存在会话缓存或首页批量读取里）。
     private func materialHasNote(_ id:String) -> Bool {
@@ -2345,13 +2360,20 @@ struct WorkspaceView: View {
         if spanExists { revealSourceSpan(reference.sourceID, spanID: reference.spanID) }
         go(.source(reference.sourceID))
     }
-    /// 锚点跳转前先展开「原文与回听」，否则收起状态下面板内锚点不存在，页面会停在顶部。
     private func revealSourceSpan(_ sourceID: String, spanID: String) {
-        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-span-" + spanID)
-        var state = sourceFoldStates[sourceID] ?? SourceFoldState.initial(transcript: nil)
+        guard let source = model.sourcePageIndex.recordsByID[sourceID] else { return }
+        let timed = ["audio", "video"].contains(source.kind) && source.state == "saved"
+            && source.spans.contains { $0.id == spanID && $0.startMS != nil && $0.endMS != nil }
+        let inlineTimed = timed && ["audio", "video"].contains(source.kind)
+            && source.spans.allSatisfy { $0.startMS != nil && $0.endMS != nil }
+        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-original-fold", anchor: .top)
+        var state = sourceFoldStates[sourceID] ?? SourceFoldState.initial(notePresent: materialHasNote(sourceID))
         state.original = true
+        state.originalTarget = inlineTimed ? "source-span-" + spanID : timed ? "source-time-" + spanID : nil
+        if timed && !inlineTimed { state.timedSpans = true }
         sourceFoldStates[sourceID] = state
     }
+
     private var recentSearchChips: some View {
         ScrollView(.horizontal,showsIndicators:false) {
             HStack(spacing:8) {
@@ -3022,14 +3044,6 @@ struct WorkspaceView: View {
         case .unreadable: return "无法读取"
         case .bytes(let bytes): return sizeText(bytes)
         }
-    }
-    private func sourceNavigationTitle(_ id:String) -> String {
-        let pageIndex=model.sourcePageIndex
-        let catalog=pageIndex.recordsByID
-        guard let source=catalog[id] else { return "材料" }
-        if let expression=pageIndex.expression(for:id),expression.sourceIDs.count > 1,
-           let index=expression.sourceIDs.firstIndex(of:id) { return fittedDisplayTitle(expression.displayTitle(in:catalog))+" / 第 \(index+1) 段原文" }
-        return fittedDisplayTitle(source.displayTitle)
     }
     private var todayReading: [TodayReadingItem] {
         let catalog=recordCatalog

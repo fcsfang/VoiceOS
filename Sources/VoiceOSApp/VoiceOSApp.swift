@@ -866,6 +866,7 @@ final class ControlCenter: ObservableObject {
     }
     @Published var startupIssue = ""
     @Published var player: AVPlayer?
+    private(set) var playbackSourceID: String?
     private var playbackBoundary: Any?
     private var playbackGeneration = 0
     @Published var history: [TranscriptVersion] = []
@@ -3620,6 +3621,7 @@ final class ControlCenter: ObservableObject {
         guard let player else { return }
         player.pause()
         if let playbackBoundary { player.removeTimeObserver(playbackBoundary); self.playbackBoundary = nil }
+        playbackSourceID = nil
         self.player = nil
     }
     @discardableResult
@@ -3629,6 +3631,7 @@ final class ControlCenter: ObservableObject {
             stopPlayback()
             let generation = playbackGeneration
             let playback = AVPlayer(url: url)
+            playbackSourceID = record.id
             player = playback
             await playback.seek(to: CMTime(value: Int64(milliseconds), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
             guard playbackGeneration == generation, player === playback else { return false }

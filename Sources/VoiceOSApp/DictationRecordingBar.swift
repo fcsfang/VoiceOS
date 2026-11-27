@@ -90,10 +90,11 @@ struct DictationRecordingBar: View {
     }
 }
 
-struct DictationPlaybackTimeline: View {
+struct RecordingPlaybackTimeline: View {
     @Environment(\.workspacePalette) private var palette
     let player: AVPlayer
     let duration: TimeInterval
+    var timelineIdentifier = "capture.record.timeline"
     @State private var scrubPosition: Double?
 
     var body: some View {
@@ -127,7 +128,7 @@ struct DictationPlaybackTimeline: View {
                     }
                 }
                 .accessibilityLabel("回听进度")
-                .accessibilityIdentifier("capture.record.timeline")
+                .accessibilityIdentifier(timelineIdentifier)
                 Text(ControlCenter.clockText(duration)).monospacedDigit()
             }
             .vosFont(WorkspaceText.meta)
