@@ -36,7 +36,7 @@ extension VoiceOSStore {
         let before = try Self.scheduleBefore(plan), desired = try Self.compensationDesired(plan)
         let id = UUID().uuidString
         try db.execute("INSERT INTO reminder_compensation_operations(id,plan_id,grant_id,link_id,state,attempted,save_acknowledged,validity,reason,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'reserved',0,0,'current','等待补偿写前核对',?,?,?)",
-                       [id,planID,grantID,link["id"],commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                       [id,planID,grantID,link["id"],commandID,hash,TimestampFormatting.iso.string(from: Date())])
         activeReminderLinks.insert(link["id"]!); defer { activeReminderLinks.remove(link["id"]!) }
         do {
             try checkpoint(.compensationOperationReserved)
@@ -135,6 +135,6 @@ extension VoiceOSStore {
     }
     private func setCompensationOperation(_ id: String, state: ReminderScheduleOperationState, reason: String, observationID: String? = nil) throws {
         try db.execute("UPDATE reminder_compensation_operations SET state=?,reason=?,result_observation_id=?,checked_at=? WHERE id=?",
-                       [state.rawValue,reason,observationID,ISO8601DateFormatter().string(from: Date()),id])
+                       [state.rawValue,reason,observationID,TimestampFormatting.iso.string(from: Date()),id])
     }
 }

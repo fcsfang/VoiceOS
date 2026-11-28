@@ -67,7 +67,7 @@ extension VoiceOSStore {
         try requireReviewedTranscriptions(sourceIDs:context.sources.map(\.sourceID),destination:config.destination)
         if config.destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源禁止云端发送") }
         let attempt = UUID().uuidString
-        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date()),try db.nextModelProducerSequence()])
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,TimestampFormatting.iso.string(from: Date()),try db.nextModelProducerSequence()])
         try checkpoint(.modelReserved)
         let response: ModelResponse
         do { response = try await port.generate(ModelRequest(attemptID: attempt, context: context, configuration: config)) }

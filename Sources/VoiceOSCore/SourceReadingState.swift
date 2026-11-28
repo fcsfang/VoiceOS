@@ -19,6 +19,6 @@ extension VoiceOSStore {
         try db.execute("""
         INSERT INTO source_reading_states(source_id,state,updated_at) VALUES(?,?,?)
         ON CONFLICT(source_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at
-        """, [sourceID, state.rawValue, ISO8601DateFormatter().string(from: Date())])
+        """, [sourceID, state.rawValue, TimestampFormatting.iso.string(from: Date())])
     }
 }

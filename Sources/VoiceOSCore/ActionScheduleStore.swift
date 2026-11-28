@@ -85,7 +85,7 @@ extension VoiceOSStore {
                 validity,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'current',?,?,?)
                 """, [id,actionID,String(expectedActionVersion),String(expectedScheduleVersion+1),dueJSON,proposal.authority.rawValue,
                         actor.rawValue,proposal.rawExpression,anchor,anchorTimeZone,baseObservationID,baseAuthority.rawValue,
-                        expectedAccessVersion.map(String.init),commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                        expectedAccessVersion.map(String.init),commandID,hash,TimestampFormatting.iso.string(from: Date())])
             if baseObservationID != nil {
                 try db.execute("INSERT INTO reminder_schedule_bases(id,intent_id,authority,operation_id) VALUES(?,?,?,?)",
                                [UUID().uuidString,id,baseAuthority.rawValue,baseOperationID])

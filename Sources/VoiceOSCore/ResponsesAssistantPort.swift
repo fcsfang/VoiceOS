@@ -85,8 +85,7 @@ public struct ResponsesAssistantPort: AssistantModelPort {
         guard !input.context.sources.isEmpty, !input.context.sources.contains(where: \.localOnly),
               input.actionVersion > 0 else { throw VoiceOSError("仅本地委托依据不能发送至云端") }
         let encoder = StableJSON.makeEncoder()
-        let clock = ISO8601DateFormatter(); clock.timeZone = .current
-        let text = "当前执行时间：\(clock.string(from: Date()))；时区：\(TimeZone.current.identifier)。报告涉及今天或核查日期时以此为准，这个时间本身不代表已核查任何资料。\n" + String(decoding: try encoder.encode(input), as: UTF8.self)
+        let text = "当前执行时间：\(TimestampFormatting.local(Date()))；时区：\(TimeZone.current.identifier)。报告涉及今天或核查日期时以此为准，这个时间本身不代表已核查任何资料。\n" + String(decoding: try encoder.encode(input), as: UTF8.self)
         return ["model":configuration.model,"store":false,"reasoning":["effort":"high"],"max_output_tokens":16384,"truncation":"disabled","input":[["role":"user","content":text]]]
     }
     private func send(_ payload: [String: Any]) async throws -> Data {

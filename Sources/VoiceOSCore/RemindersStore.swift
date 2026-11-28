@@ -143,7 +143,7 @@ extension VoiceOSStore {
         return ReminderSyncAnomalySummary(items: items, failures: failures)
     }
     func recordReminderSyncFailure(actionID: String, stage: ReminderSyncFailureStage, reason: String,
-                                   at timestamp: String = ISO8601DateFormatter().string(from: Date())) throws {
+                                   at timestamp: String = TimestampFormatting.iso.string(from: Date())) throws {
         try db.execute("INSERT INTO reminder_sync_failures(action_id,stage,reason,failed_at) VALUES(?,?,?,?) ON CONFLICT(action_id,stage) DO UPDATE SET reason=excluded.reason,failed_at=excluded.failed_at",
                        [actionID, stage.rawValue, reason, timestamp])
     }
@@ -177,7 +177,7 @@ extension VoiceOSStore {
             guard try reminderCognitionIsLatest(claim) else { throw VoiceOSError("行动认知批次已更新，停止历史任务外写") }
         }
         let id = UUID().uuidString; let marker = "voiceos-action:" + id
-        try db.execute("INSERT INTO reminder_links(id,action_id,action_version,calendar_id,marker,desired_title,state,created_at) VALUES(?,?,?,?,?,?,'reserved',?)", [id,actionID,String(expectedVersion),calendarID,marker,action.title,ISO8601DateFormatter().string(from: Date())])
+        try db.execute("INSERT INTO reminder_links(id,action_id,action_version,calendar_id,marker,desired_title,state,created_at) VALUES(?,?,?,?,?,?,'reserved',?)", [id,actionID,String(expectedVersion),calendarID,marker,action.title,TimestampFormatting.iso.string(from: Date())])
         activeReminderLinks.insert(id); defer { activeReminderLinks.remove(id) }
         do {
             try checkpoint(.reminderReserved)
@@ -278,7 +278,7 @@ extension VoiceOSStore {
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first else { throw VoiceOSError("提醒事项关联缺失") }
         guard matches.count == 1, let remote = matches.first else {
             try db.transaction {
-                try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",ISO8601DateFormatter().string(from: Date()),linkID])
+                try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",TimestampFormatting.iso.string(from: Date()),linkID])
                 _ = try observePendingScheduleOperations(matches, linkID: linkID, including: includingScheduleOperation)
                 _ = try observePendingCompensationOperations(matches,linkID: linkID,including: includingCompensationOperation)
             }
@@ -317,7 +317,7 @@ extension VoiceOSStore {
                     let note = "Apple 提醒事项唯一关联项回读为已完成；不代表观点已验证"
                     let fields = [action.id,String(action.version),"completed",note]
                     let hash = Digest.sha256(try JSONSerialization.data(withJSONObject: fields))
-                    try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'external',?,?,?)", [revisionID,action.id,String(next),String(action.version),"completed",note,"reminder-feedback:"+observationID,hash,ISO8601DateFormatter().string(from: Date())])
+                    try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'external',?,?,?)", [revisionID,action.id,String(next),String(action.version),"completed",note,"reminder-feedback:"+observationID,hash,TimestampFormatting.iso.string(from: Date())])
                     try db.execute("UPDATE actions SET state='completed',version=? WHERE id=?", [String(next),action.id])
                     feedbackID = revisionID
                 } else if remote.completed != (action.state == "completed") {
@@ -329,14 +329,14 @@ extension VoiceOSStore {
             let priorDue = try storedReminderDue(observationID: prior?["id"])
             let changed = prior?["external_id"] != remote.id || prior?["title"] != remote.title || prior?["completed"] != (remote.completed ? "1" : "0") || prior?["marker_valid"] != (validMarker ? "1" : "0") || priorDue != remote.dueDate
             if changed || feedbackID != nil {
-                try db.execute("INSERT INTO reminder_observations(id,link_id,external_id,title,completed,marker_valid,feedback_revision_id,created_at,sequence) VALUES(?,?,?,?,?,?,?,?,?)", [observationID,linkID,remote.id,remote.title,remote.completed ? "1" : "0",validMarker ? "1" : "0",feedbackID,ISO8601DateFormatter().string(from: Date()),String(sequence)])
+                try db.execute("INSERT INTO reminder_observations(id,link_id,external_id,title,completed,marker_valid,feedback_revision_id,created_at,sequence) VALUES(?,?,?,?,?,?,?,?,?)", [observationID,linkID,remote.id,remote.title,remote.completed ? "1" : "0",validMarker ? "1" : "0",feedbackID,TimestampFormatting.iso.string(from: Date()),String(sequence)])
                 if let due = remote.dueDate {
                     let encoder = StableJSON.makeEncoder()
                     let json = String(decoding: try encoder.encode(due), as: UTF8.self)
                     try db.execute("INSERT INTO reminder_time_observations(id,due_json) VALUES(?,?)", [observationID,json])
                 }
             }
-            try db.execute("UPDATE reminder_links SET state=?,external_id=?,last_checked_at=? WHERE id=?", [conflict ? "conflict" : "linked",link["external_id"] ?? remote.id,ISO8601DateFormatter().string(from: Date()),linkID])
+            try db.execute("UPDATE reminder_links SET state=?,external_id=?,last_checked_at=? WHERE id=?", [conflict ? "conflict" : "linked",link["external_id"] ?? remote.id,TimestampFormatting.iso.string(from: Date()),linkID])
             confirmedScheduleOperations = try observePendingScheduleOperations(matches, linkID: linkID, including: includingScheduleOperation)
             confirmedCompensations = try observePendingCompensationOperations(matches,linkID: linkID,including: includingCompensationOperation)
             try checkpoint(.reminderFeedbackUncommitted)

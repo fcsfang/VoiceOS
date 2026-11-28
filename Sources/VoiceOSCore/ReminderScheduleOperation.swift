@@ -69,7 +69,7 @@ extension VoiceOSStore {
             state,attempted,save_acknowledged,validity,reason,command_id,input_fingerprint,created_at,grant_id)
             VALUES(?,?,?,?,?,?,?,'reserved',0,0,'current','等待新鲜回读',?,?,?,?)
             """, [id,intentID,input.link.id,expectedObservationID,String(expectedAccessVersion),try Self.scheduleJSON(before),
-                    try Self.scheduleJSON(input.intent.due),commandID,hash,ISO8601DateFormatter().string(from: Date()),grantID])
+                    try Self.scheduleJSON(input.intent.due),commandID,hash,TimestampFormatting.iso.string(from: Date()),grantID])
         activeReminderLinks.insert(input.link.id); defer { activeReminderLinks.remove(input.link.id) }
         do {
             try checkpoint(.scheduleOperationReserved)
@@ -205,7 +205,7 @@ extension VoiceOSStore {
     }
     private func setScheduleOperation(_ id: String, state: ReminderScheduleOperationState, reason: String, observationID: String? = nil) throws {
         try db.execute("UPDATE reminder_schedule_operations SET state=?,reason=?,result_observation_id=?,checked_at=? WHERE id=?",
-                       [state.rawValue,reason,observationID,ISO8601DateFormatter().string(from: Date()),id])
+                       [state.rawValue,reason,observationID,TimestampFormatting.iso.string(from: Date()),id])
     }
     func scheduleObservationSnapshot(_ id: String, marker: String) throws -> ReminderSnapshot {
         guard let row = try db.query("SELECT * FROM reminder_observations WHERE id=?", [id]).first,

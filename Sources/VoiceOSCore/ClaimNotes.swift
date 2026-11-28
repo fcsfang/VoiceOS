@@ -32,7 +32,7 @@ extension VoiceOSStore {
         guard !body.isEmpty else { throw VoiceOSError("旁注正文不能为空") }
         guard body.unicodeScalars.count <= 1000 else { throw VoiceOSError("旁注正文不能超过 1000 字") }
         guard try db.query("SELECT id FROM claims WHERE id=?", [claimID]).first != nil else { throw VoiceOSError("观点不存在") }
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = TimestampFormatting.iso.string(from: Date())
         if let existing = try db.query("SELECT created_at FROM claim_notes WHERE claim_id=?", [claimID]).first {
             let createdAt = existing["created_at"]!
             try db.execute("UPDATE claim_notes SET body=?,updated_at=? WHERE claim_id=?", [body, now, claimID])

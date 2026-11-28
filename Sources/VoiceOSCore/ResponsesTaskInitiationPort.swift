@@ -65,8 +65,7 @@ public struct ResponsesTaskInitiationPort: TaskInitiationModelPort {
     }
     private func basePayload(_ input: TaskInitiationInput) throws -> [String: Any] {
         let encoder = StableJSON.makeEncoder()
-        let clock = ISO8601DateFormatter(); clock.timeZone = .current
-        let text = "当前时间：\(clock.string(from: Date()))；时区：\(TimeZone.current.identifier)。这个时间不代表已核查任何资料。\n"
+        let text = "当前时间：\(TimestampFormatting.local(Date()))；时区：\(TimeZone.current.identifier)。这个时间不代表已核查任何资料。\n"
             + String(decoding: try encoder.encode(input), as: UTF8.self)
         return ["model": configuration.model, "store": false, "reasoning": ["effort": "high"],
                 "max_output_tokens": 8192, "truncation": "disabled", "input": [["role": "user", "content": text]]]

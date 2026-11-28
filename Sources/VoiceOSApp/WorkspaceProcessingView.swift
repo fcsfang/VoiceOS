@@ -1,10 +1,6 @@
 import SwiftUI
 import VoiceOSCore
 
-private enum WorkspaceProcessingFormatting {
-    static let iso8601 = ISO8601DateFormatter()
-}
-
 struct WorkspaceProcessingActivity {
     let sourceID: String
     let label: String
@@ -755,7 +751,7 @@ struct WorkspaceProcessingView: View {
     }
     private func reminderSyncFailureSubtitle(_ failure: ReminderSyncFailure) -> String {
         let stage = failure.stage == .expression ? "提醒补录" : "新任务发送"
-        let at = WorkspaceProcessingFormatting.iso8601.date(from: failure.failedAt).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? failure.failedAt
+        let at = TimestampFormatting.iso.date(from: failure.failedAt).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? failure.failedAt
         return stage + "失败 · " + at
     }
     @ViewBuilder private func reasons(_ entries:[(String,String)]) -> some View {

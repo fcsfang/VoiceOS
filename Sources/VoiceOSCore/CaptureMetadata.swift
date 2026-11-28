@@ -20,7 +20,7 @@ extension VoiceOSStore {
         try db.execute("""
         INSERT INTO source_capture_metadata(source_id,source_url,context,captured_at) VALUES(?,?,?,?)
         ON CONFLICT(source_id) DO UPDATE SET source_url=excluded.source_url,context=excluded.context,captured_at=excluded.captured_at
-        """, [sourceID, url, storedContext, ISO8601DateFormatter().string(from: Date())])
+        """, [sourceID, url, storedContext, TimestampFormatting.iso.string(from: Date())])
     }
 
     public func captureMetadata() throws -> [String: CaptureMetadata] {

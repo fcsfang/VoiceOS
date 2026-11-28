@@ -321,9 +321,9 @@ public struct MessageMonitorRunner: Sendable {
         return formatter.string(from: date)
     }
 
-    static func isoString(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
+    static func isoString(_ date: Date) -> String { TimestampFormatting.iso.string(from: date) }
 
-    static func isoDate(_ text: String) -> Date? { ISO8601DateFormatter().date(from: text) }
+    static func isoDate(_ text: String) -> Date? { TimestampFormatting.iso.date(from: text) }
 }
 
 /// The quoted message as qq_read_range.py forwards it inside meta.replyContext.

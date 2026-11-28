@@ -121,8 +121,8 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
             "cache_dir": settings.cacheDir,
             "account": settings.account ?? NSNull(),
             "conversation_id": conversationID,
-            "start_iso8601": ISO8601DateFormatter().string(from: start),
-            "end_iso8601": ISO8601DateFormatter().string(from: end),
+            "start_iso8601": TimestampFormatting.iso.string(from: start),
+            "end_iso8601": TimestampFormatting.iso.string(from: end),
         ]
         let input = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
         let result = try await Self.run(pythonPath: settings.pythonPath, arguments: [settings.scriptPath],

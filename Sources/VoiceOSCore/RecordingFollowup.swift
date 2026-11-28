@@ -419,7 +419,7 @@ extension VoiceOSStore {
             guard seen.insert($0.sourceID).inserted else { return false }
             if $0.state == "queued" { return true }
             guard $0.state == "failed", let retryAt = $0.retryAt,
-                  let date = ISO8601DateFormatter().date(from: retryAt) else { return false }
+                  let date = TimestampFormatting.iso.date(from: retryAt) else { return false }
             return date <= now
         }.reversed()
     }
@@ -722,7 +722,7 @@ extension VoiceOSStore {
     }
     static func conformanceRetryAt(now: Date = Date()) -> String { followupRetryAt(now: now, after: 60) }
     static func followupRetryAt(now: Date = Date(), after seconds: TimeInterval) -> String {
-        ISO8601DateFormatter().string(from: now.addingTimeInterval(seconds))
+        TimestampFormatting.iso.string(from: now.addingTimeInterval(seconds))
     }
     private static func isTransientFollowupError(_ failure: Error) -> Bool {
         let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure

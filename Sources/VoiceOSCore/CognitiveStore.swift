@@ -93,7 +93,7 @@ extension VoiceOSStore {
         try understandingPause(sourceID: sourceID).summary
     }
     private static func pauseTime(_ iso: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
+        guard let date = TimestampFormatting.iso.date(from: iso) else { return iso }
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = .current

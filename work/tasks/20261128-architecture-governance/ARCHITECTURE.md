@@ -89,6 +89,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A47 · 已统一 SHA-256 摘要编码 | 十六进制 SHA-256 在 22 个文件内联手写 30 处，另有 `relevanceHash`、`CognitiveStore.hash`、`BGEAssets.hash` 三份等价封装。 | 归一到 `Digest.sha256(_:)` 与 `Digest.hex(of:)`；`%02x` 只在 `Digest.swift` 出现的机器检查。摘要值逐字节不变，业务身份与回执格式不变。 |
 | A48 · 已核对不收敛 | UserDefaults 有 30 个键、约 44 处访问，多数已由就近常量持有，少数键在同一文件重复字面量。 | 全局键注册表只是浅常量层，键值是持久化契约、值不会变，删除检验不支持；保留就近所有权。新键继续用 `voiceos.` 前缀并就近声明。 |
 | A49 · 已统一确定性 JSON 编码 | 26 个文件 33 处各自配置 `JSONEncoder` 的 sortedKeys 输出；讨论端口另带 iso8601 日期策略。 | 归一到 `StableJSON.makeEncoder()`（可选日期策略），`outputFormatting = [.sortedKeys]` 只允许出现在工厂内。pretty 与无斜杠转义等不同格式保留原处。 |
+| A50 · 已统一 ISO 8601 构造 | 60 处直接链式 `ISO8601DateFormatter()` 仍在各文件构造默认格式器；应用两处静态实例与模型提示的两处本地偏移格式器也各自构造。 | 直链迁到 `TimestampFormatting.iso`；提示语境改用新变体 `local(_:)`（带时区偏移，语义不同不并入 UTC 档）；删除两个 App 静态枚举；`ISO8601DateFormatter()` 只允许在 `TimestampFormatting.swift` 的机器检查。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -171,7 +172,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 
 - A08 抽查了两个最像重复的测试文件，确认场景不同、共享的只是样板；三处 makeStore 各五行的样板合并会引入跨套件依赖，按删除检验不值得。测试层的重复不再收敛，覆盖差异改由上方覆盖表记录。
 
-- A13 用探针确认 `withInternetDateTime` 输出不受 `timeZone` 设置影响、分数秒格式不解析无分数时间戳，再归一为单一 `TimestampFormatting`：格式按分数秒与纯秒两档，解析按分数秒→纯秒回退（与原 `MaterialNaming`/`ReflectionTimeline` 的宽容解析一致，`ReminderFields.date` 保持分数秒严格语义）。删除 `ActionTimeFormatting`、`ActionDateFormatting` 的 ISO 对、`MaterialNaming` 静态对、`ReminderSchedule.instantFormatter` 等五套载体，17 个文件净删 69 行。真实副本列表与完整详情 JSON 逐字一致。
+- A13 用探针确认默认与 GMT 格式器输出一致（同为 `Z`）、分数秒格式不解析无分数时间戳，再归一为单一 `TimestampFormatting`：格式按分数秒与纯秒两档，解析按分数秒→纯秒回退（与原 `MaterialNaming`/`ReflectionTimeline` 的宽容解析一致，`ReminderFields.date` 保持分数秒严格语义）。删除 `ActionTimeFormatting`、`ActionDateFormatting` 的 ISO 对、`MaterialNaming` 静态对、`ReminderSchedule.instantFormatter` 等五套载体，17 个文件净删 69 行。真实副本列表与完整详情 JSON 逐字一致。
 
 - A14 六个端口的身份校验比较过保留、抽自由函数、放到 `ModelConfiguration` 上。采用方法形式，因为规则读的是两个配置值的全部身份字段，且端口配置都由云端目的地构造；`accepts` 同时表达「双方都面向云端」，调用方只保留各自其余校验与错误文案。
 
@@ -186,6 +187,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A48 盘点 30 个 UserDefaults 键后判定不做全局注册表：多数键已有就近常量，键值本身是持久化契约、重命名不改变存储值，注册表只会增加一层间接。若未来出现同键多写或孤儿键问题，再以机器检查处理。
 
 - A49 33 处 sortedKeys 配置分散在 26 个文件，配置知识完全重复。抽出 `StableJSON.makeEncoder(dateEncodingStrategy:)` 后，调用方只声明需要的编码器；带 pretty、无斜杠转义或动态 pretty 的四处格式不同，保留原实现。编码字节不变，身份与回执无需迁移。
+
+- A50 复核 A13 的时区探针只比较了默认与 GMT 两种 UTC 写法；非 UTC 时区会把偏移写进输出（`+08:00`），所以模型提示里的本地墙钟时间是独立语义，不能并入 UTC 档。60 处默认格式器直链迁到 `TimestampFormatting.iso`（同为 `Z` 输出），提示语境改用显式变体 `local(_:)`；两个 App 静态解析实例删除。至此 `ISO8601DateFormatter()` 的构造只出现在权威文件一处，由机器检查保证。
 
 ## 待确认的兼容性取舍
 

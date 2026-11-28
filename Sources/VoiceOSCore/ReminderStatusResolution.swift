@@ -49,7 +49,7 @@ extension VoiceOSStore {
         let revisionCommand = "reminder-status-resolution:" + resolutionID
         let revisionHash = try Self.actionHash([initial.action.id, String(expectedActionVersion), target, note])
         let baseline = try reminderStatusBaseline(link)
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = TimestampFormatting.iso.string(from: Date())
         try db.transaction {
             try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)",
                            [revisionID, initial.action.id, String(next), String(expectedActionVersion), target, note, revisionCommand, revisionHash, now])

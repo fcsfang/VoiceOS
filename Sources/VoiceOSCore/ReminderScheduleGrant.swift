@@ -76,7 +76,7 @@ extension VoiceOSStore {
                 INSERT INTO reminder_schedule_grants(id,intent_id,link_id,observation_id,access_version,before_json,desired_json,
                 effect_digest,actor,validity,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,'user','current',?,?,?)
                 """, [id,intentID,effect.linkID,expectedObservationID,String(expectedAccessVersion),try Self.scheduleJSON(effect.before),
-                        try Self.scheduleJSON(effect.desired),effect.digest,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                        try Self.scheduleJSON(effect.desired),effect.digest,commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try checkpoint(.scheduleGrantUncommitted)
         }
         try checkpoint(.scheduleGrantCommitted)
@@ -98,7 +98,7 @@ extension VoiceOSStore {
         let id = UUID().uuidString
         try db.transaction {
             try db.execute("INSERT INTO reminder_schedule_grant_revocations(id,grant_id,actor,reason,command_id,input_fingerprint,created_at) VALUES(?,?,'user',?,?,?,?)",
-                           [id,grantID,reason,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                           [id,grantID,reason,commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try checkpoint(.scheduleGrantRevocationUncommitted)
         }
         try checkpoint(.scheduleGrantRevocationCommitted)

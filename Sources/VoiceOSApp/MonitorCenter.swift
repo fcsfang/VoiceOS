@@ -4,10 +4,6 @@ import Foundation
 import VoiceOSCore
 import VoiceOSPlatform
 
-private enum MonitorDateFormatting {
-    static let iso8601 = ISO8601DateFormatter()
-}
-
 struct MonitorSettings: Codable, Equatable {
     var hour: Int = 9
     var minute: Int = 0
@@ -886,12 +882,12 @@ extension ControlCenter {
     }
 
     static func monitorTimeText(_ iso: String?) -> String {
-        guard let iso, let date = MonitorDateFormatting.iso8601.date(from: iso) else { return iso ?? "时间未知" }
+        guard let iso, let date = TimestampFormatting.iso.date(from: iso) else { return iso ?? "时间未知" }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     static func monitorGeneratedText(_ report: MonitorReport) -> String? {
-        guard let date = MonitorDateFormatting.iso8601.date(from: report.createdAt) else { return nil }
+        guard let date = TimestampFormatting.iso.date(from: report.createdAt) else { return nil }
         return "生成于 " + date.formatted(date: .omitted, time: .shortened)
     }
 }

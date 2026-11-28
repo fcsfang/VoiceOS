@@ -948,7 +948,7 @@ final class ControlCenter: ObservableObject {
     func enqueuePendingReminderSync(_ action: ActionRecord, link: ReminderLink, externalID: String, desiredState: LocalActionState) {
         pendingReminderSyncs[action.id] = PendingReminderSync(actionID: action.id, linkID: link.id, calendarID: link.calendarID,
             externalID: externalID, marker: "voiceos-action:" + link.id, title: action.title,
-            desiredState: desiredState.rawValue, createdAt: ISO8601DateFormatter().string(from: Date()))
+            desiredState: desiredState.rawValue, createdAt: TimestampFormatting.iso.string(from: Date()))
         savePendingReminderSyncs()
     }
     func removePendingReminderSync(actionID: String) {
@@ -957,7 +957,7 @@ final class ControlCenter: ObservableObject {
     }
     func recordPendingReminderSyncFailure(actionID: String, reason: String) {
         guard var entry = pendingReminderSyncs[actionID] else { return }
-        entry.recordFailure(reason, at: ISO8601DateFormatter().string(from: Date()))
+        entry.recordFailure(reason, at: TimestampFormatting.iso.string(from: Date()))
         pendingReminderSyncs[actionID] = entry
         savePendingReminderSyncs()
     }
@@ -3274,7 +3274,7 @@ final class ControlCenter: ObservableObject {
         guard !exporting else { return }
         let panel = NSSavePanel()
         panel.title = includeMedia ? "导出资料与原件" : "导出结构化资料"
-        panel.nameFieldStringValue = "VoiceOS-导出-" + ISO8601DateFormatter().string(from: Date()).prefix(10)
+        panel.nameFieldStringValue = "VoiceOS-导出-" + TimestampFormatting.iso.string(from: Date()).prefix(10)
         panel.prompt = "导出"
         panel.begin { response in
             guard response == .OK, let url = panel.url, let store = self.store else { return }
@@ -5030,7 +5030,7 @@ struct PackageRestoreView: View {
     @State private var package: URL?
     @State private var summary: PackageSummary?
     @State private var parent: URL?
-    @State private var folderName = "VoiceOS-恢复-" + String(ISO8601DateFormatter().string(from:Date()).prefix(10))
+    @State private var folderName = "VoiceOS-恢复-" + String(TimestampFormatting.iso.string(from:Date()).prefix(10))
     @State private var restoring = false
     @State private var errorText = ""
     @State private var restored: URL?
@@ -5116,7 +5116,7 @@ struct BackupLibraryRestoreView: View {
     init(currentRoot: URL?, dismiss: @escaping () -> Void) {
         self.currentRoot = currentRoot
         self.dismiss = dismiss
-        let stamp = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
+        let stamp = String(TimestampFormatting.iso.string(from: Date()).prefix(10))
         _parent = State(initialValue: currentRoot?.deletingLastPathComponent())
         _folderName = State(initialValue: "VoiceOS-备份恢复-" + stamp)
     }

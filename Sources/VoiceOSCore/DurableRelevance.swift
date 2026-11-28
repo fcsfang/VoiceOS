@@ -47,7 +47,7 @@ extension VoiceOSStore {
             INSERT INTO relevance_attempts(id,command_id,fingerprint,snapshot_json,snapshot_digest,destination,provider,model,prompt_version,schema_version,state,validity,created_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,'reserved','current',?)
             """, [id,command,fingerprint,try Self.relevanceJSON(snapshot),snapshot.contentDigest,snapshot.destination.rawValue,
-                    config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date())])
+                    config.provider,config.model,config.promptVersion,config.schemaVersion,TimestampFormatting.iso.string(from: Date())])
             for (ordinal, hit) in snapshot.candidates.enumerated() {
                 try db.execute("INSERT INTO relevance_inputs(id,attempt_id,source_id,transcript_version_id,policy_version,ordinal) VALUES(?,?,?,?,?,?)",
                                [UUID().uuidString,id,hit.document.sourceID,hit.document.transcriptVersionID,String(hit.document.policyVersion),String(ordinal)])

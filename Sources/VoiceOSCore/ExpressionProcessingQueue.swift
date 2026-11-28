@@ -42,7 +42,7 @@ extension VoiceOSStore {
                            destination: identity.destination)
     }
 
-    static func processingNow() -> String { ISO8601DateFormatter().string(from: Date()) }
+    static func processingNow() -> String { TimestampFormatting.iso.string(from: Date()) }
 
     static func processingSnapshotDigest(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> String {
         let encoder = StableJSON.makeEncoder()

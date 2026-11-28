@@ -61,7 +61,7 @@ extension VoiceOSStore {
         let note = "用户确认提醒事项观测 " + expectedObservationID + " 已完成；原始冻结声明与理解继续保留"
         try db.transaction {
             try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'completed',?,'user',?,?,?)",
-                           [UUID().uuidString, actionID, String(next), String(version), note, command, fingerprint, ISO8601DateFormatter().string(from: Date())])
+                           [UUID().uuidString, actionID, String(next), String(version), note, command, fingerprint, TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET state='completed',version=? WHERE id=?", [String(next), actionID])
         }
         return next

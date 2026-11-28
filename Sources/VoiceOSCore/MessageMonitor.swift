@@ -335,7 +335,7 @@ extension VoiceOSStore {
     /// the run's message ids so a failed analysis can retry without re-collecting.
     public func advanceMonitorCursor(sourceID: String, lastSuccessEnd: Date, newMessageIDs: [String]) throws {
         struct CursorState: Encodable { let last_success_end: String; let last_run_message_ids: [String] }
-        let iso = ISO8601DateFormatter().string(from: lastSuccessEnd)
+        let iso = TimestampFormatting.iso.string(from: lastSuccessEnd)
         let cursor = try Self.relevanceJSON(CursorState(last_success_end: iso, last_run_message_ids: newMessageIDs))
         try db.execute("""
             INSERT INTO monitor_cursors(source_id,cursor_json,last_success_at,last_error,updated_at) VALUES(?,?,?,NULL,?)

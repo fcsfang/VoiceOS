@@ -312,3 +312,9 @@
 - 完成：A48 判定不做 UserDefaults 全局注册表（就近所有权足够）。A49 新增 `StableJSON.makeEncoder()`，26 个文件的 33 处 sortedKeys 配置归一，`outputFormatting = [.sortedKeys]` 规则只允许工厂内出现。
 - 证据：架构检查 0 违规；593 项 Swift 测试通过。编码字节不变；四处不同格式（pretty、无斜杠转义、动态 pretty）保留原实现。
 - 下一步：扫描子进程、临时文件与文件读写工具层。
+
+## 2026-11-28T16:27:34Z
+
+- 完成：A50 默认 ISO 8601 构造归一。60 处直链迁到 `TimestampFormatting.iso`；提示语境的本地偏移时钟改为新变体 `local(_:)`；删除两个 App 静态解析枚举；`ISO8601DateFormatter()` 构造仅允许权威文件。
+- 证据：架构检查 0 违规；593 项 Swift 测试通过。复核发现 A13 的时区探针只覆盖 UTC 两写法，已更正决策记录。
+- 下一步：本轮工具层与相似度扫描无可安全高价值项，收敛到待确认清单。

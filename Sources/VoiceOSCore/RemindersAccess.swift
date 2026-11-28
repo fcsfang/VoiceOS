@@ -19,7 +19,7 @@ extension VoiceOSStore {
         guard !calendarID.isEmpty, calendarID.utf8.count <= 4096, !title.isEmpty, title.unicodeScalars.count <= 2000 else { throw VoiceOSError("请选择有效的提醒事项清单") }
         if prior?.calendarID == calendarID && prior?.title == title && prior?.enabled == enabled { return prior! }
         let next = expectedVersion + 1
-        try db.execute("INSERT INTO reminder_access(id,version,calendar_id,title,enabled,created_at) VALUES(?,?,?,?,?,?)", [UUID().uuidString,String(next),calendarID,title,enabled ? "1" : "0",ISO8601DateFormatter().string(from: Date())])
+        try db.execute("INSERT INTO reminder_access(id,version,calendar_id,title,enabled,created_at) VALUES(?,?,?,?,?,?)", [UUID().uuidString,String(next),calendarID,title,enabled ? "1" : "0",TimestampFormatting.iso.string(from: Date())])
         return try reminderAccess()!
     }
     func checkReminderAccess(calendarID: String, expectedVersion: Int?) throws {

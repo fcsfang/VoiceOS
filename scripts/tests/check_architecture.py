@@ -34,6 +34,11 @@ RULES = (
         "ISO 8601 formatOptions belong in",
     ),
     (
+        (Path("Sources/VoiceOSCore/TimestampFormatting.swift"),),
+        re.compile(r"\bISO8601DateFormatter\(\)"),
+        "ISO 8601 formatter construction belongs in",
+    ),
+    (
         (Path("Sources/VoiceOSCore/Digest.swift"),),
         re.compile(r'"%02x"'),
         "Hex-encoded SHA-256 belongs in",
