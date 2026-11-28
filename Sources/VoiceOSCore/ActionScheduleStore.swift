@@ -136,10 +136,8 @@ extension VoiceOSStore {
 
     static func scheduleTime(_ date: Date) throws -> String {
         guard date.timeIntervalSince1970.isFinite else { throw VoiceOSError("排期锚点时刻无效") }
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        let text = formatter.string(from: date)
-        guard date.timeIntervalSince1970.isFinite, text.utf8.count == 24, formatter.date(from: text) != nil else { throw VoiceOSError("排期锚点时刻无效") }
+        let text = TimestampFormatting.isoFractional.string(from: date)
+        guard date.timeIntervalSince1970.isFinite, text.utf8.count == 24, TimestampFormatting.isoFractional.date(from: text) != nil else { throw VoiceOSError("排期锚点时刻无效") }
         return text
     }
     private static func scheduleDueJSON(_ due: ReminderDueDate) throws -> String {
@@ -147,13 +145,12 @@ extension VoiceOSStore {
         return String(decoding: try encoder.encode(due), as: UTF8.self)
     }
     private static func scheduleIntent(_ row: [String: String], baseOperationID: String? = nil, eligible: Bool) throws -> ActionScheduleIntent {
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let id = row["id"], let actionID = row["action_id"], let actionVersion = row["action_version"].flatMap(Int.init),
               let version = row["schedule_version"].flatMap(Int.init), let json = row["due_json"], json.utf8.count <= 4096,
               let authority = row["authority"].flatMap(ScheduleAuthority.init(rawValue:)),
               authority == .aiFlexible || authority == .userCommitment,
               let actor = row["actor"].flatMap(ActionScheduleActor.init(rawValue:)), actor != .ai || authority == .aiFlexible,
-              let raw = row["raw_expression"], let anchor = row["anchor_event_time"].flatMap(formatter.date(from:)),
+              let raw = row["raw_expression"], let anchor = row["anchor_event_time"].flatMap(TimestampFormatting.isoFractional.date(from:)),
               let zone = row["anchor_time_zone"], TimeZone(identifier: zone) != nil,
               let baseAuthority = row["base_authority"].flatMap(ScheduleAuthority.init(rawValue:)),
               let validity = row["validity"], ["current","frozen"].contains(validity) else { throw VoiceOSError("排期记录缺少有效字段或归属") }

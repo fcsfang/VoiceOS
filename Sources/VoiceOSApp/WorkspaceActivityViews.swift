@@ -46,16 +46,6 @@ private enum ActionDateFormatting {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
-    static let iso8601Fractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-    static let iso8601: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
 }
 
 struct WorkspaceDeliveryView: View {
@@ -1501,8 +1491,8 @@ struct WorkspaceTaskView: View {
         switch due {
         case .none: return false
         case let .instant(utc, _):
-            if let date = ActionDateFormatting.iso8601Fractional.date(from: utc) { return date < Date() }
-            guard let date = ActionDateFormatting.iso8601.date(from: utc) else { return false }
+            if let date = TimestampFormatting.isoFractional.date(from: utc) { return date < Date() }
+            guard let date = TimestampFormatting.iso.date(from: utc) else { return false }
             return date < Date()
         case let .dateOnly(localDate, zone):
             var calendar = Calendar(identifier: .gregorian)

@@ -29,6 +29,11 @@ RULES = (
         re.compile(r"\bSecItem(?:Add|Update|Delete|CopyMatching)\b"),
         "Keychain access belongs in",
     ),
+    (
+        (Path("Sources/VoiceOSCore/TimestampFormatting.swift"),),
+        re.compile(r"\.formatOptions\s*=\s*\[\.withInternetDateTime"),
+        "ISO 8601 formatOptions belong in",
+    ),
 )
 
 

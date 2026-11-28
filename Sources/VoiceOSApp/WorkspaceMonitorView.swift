@@ -139,7 +139,7 @@ struct WorkspaceMonitorView: View {
     private var todayKey: String { MonitorSourceConfigParser.dayString(Date()) }
 
     private func localizedReportDate(_ key: String) -> String {
-        guard let date = ActionTimeFormatting.dayKey.date(from: key) else { return key }
+        guard let date = TimestampFormatting.dayKey.date(from: key) else { return key }
         return date.formatted(date: .abbreviated, time: .omitted)
     }
 

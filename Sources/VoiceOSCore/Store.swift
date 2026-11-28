@@ -461,5 +461,5 @@ public actor VoiceOSStore {
         guard relativePath.hasPrefix("assets/"), path.deletingLastPathComponent() == root.appendingPathComponent("assets") else { throw VoiceOSError("非法资产路径") }
         return path
     }
-    static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
+    static func now() -> String { TimestampFormatting.iso.string(from: Date()) }
 }

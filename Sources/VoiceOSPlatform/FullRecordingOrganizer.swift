@@ -69,8 +69,7 @@ public enum FullRecordingOrganizer {
             return audio
         })
         if let value=probe.format.tags?["creation_time"] {
-            let fractional=ISO8601DateFormatter();fractional.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
-            if let date=ISO8601DateFormatter().date(from:value) ?? fractional.date(from:value) { info.recordedAt=date.ISO8601Format() }
+            if let date=TimestampFormatting.parse(value) { info.recordedAt=date.ISO8601Format() }
         }
         return info
     }

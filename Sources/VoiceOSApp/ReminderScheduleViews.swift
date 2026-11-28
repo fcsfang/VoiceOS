@@ -32,8 +32,7 @@ struct ActionScheduleEditor: View {
                 initialDate = formatter.date(from: text) ?? initialDate
             case let .instant(utc, identifier):
                 zone = TimeZone(identifier: identifier) ?? zone
-                let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime,.withFractionalSeconds]
-                initialDate = formatter.date(from: utc) ?? initialDate; initialMode = "time"
+                initialDate = TimestampFormatting.isoFractional.date(from: utc) ?? initialDate; initialMode = "time"
             }
         }
         _timeZoneIdentifier = State(initialValue: zone.identifier)
@@ -48,8 +47,7 @@ struct ActionScheduleEditor: View {
         }
         components.second = 0
         guard let instant = calendar.date(from: components) else { throw VoiceOSError("选定时刻无法解析") }
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime,.withFractionalSeconds]
-        return .instant(utc: formatter.string(from: instant), timeZone: timeZone.identifier)
+        return .instant(utc: TimestampFormatting.isoFractional.string(from: instant), timeZone: timeZone.identifier)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {

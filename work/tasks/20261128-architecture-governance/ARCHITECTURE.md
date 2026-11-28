@@ -52,6 +52,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A10 · 已建立渠道地图并删除无读端诊断 | 启动/HTTP 诊断、持久化业务错误和用户提示各有写端；监测、整理、备份的错误分类缺少同处的调用方地图。`ModelHTTPDiagnostics` 只有写端，没有读者。 | 已核对五类渠道与三类重试语义，未发现可安全合并的重复分类；无读端的 `ModelHTTPDiagnostics` 连同传输层计时一起删除。字符串分类点与子进程错误载体记录在下方地图。 |
 | A11 · 已统一行动时间与只读投影 | 部分搜索、外部 CLI、工作区和详情各自读取行动与材料；日期、展示标题和有效性已部分有共享解析。只读 CLI 的列表与详情曾各自重复行动 SQL、到期/计划/提醒查询。 | 从同一个材料或行动沿正常入口核对重复投影，避免把分页与轻量快照强行合并。CLI 列表与详情共用一份投影，隐私字段按需投影。unknown 链接语义待确认。 |
 | A12 · 已核对入口分工并加钥匙串边界检查 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 已确认一个打包入口（`build.py` 内联运行 `check_architecture.py`），预览启动器与重启闸门各司其职，未发现重复打包路径。新增 SecItem 只允许在 `KeychainCredential` 与 `NoteHistoryMemory` 的机器检查。 |
+| A13 · 已统一时间戳格式与解析 | 分数秒 ISO 8601 格式器在 17 个文件手写构造；`ActionTimeFormatting`、`ActionDateFormatting`、`MaterialNaming`、`ReminderSchedule`、`ReminderFields`、`MonitorSourceConfig` 各有一套时间戳实现。 | 归一为 `TimestampFormatting`（fractional/plain/parse/dayKey），迁移全部调用方并删除旧载体；`check_architecture.py` 限制 `formatOptions` 只在权威文件出现。真实副本 553 条列表与完整详情 JSON 逐字一致。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -133,6 +134,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A12 比较过把 Python 测试并进打包入口、与保留独立验证入口。选择保留独立入口，只把边界检查放进打包，因为打包链已经包含构建、签名与元数据，塞入测试会拖长且扩大失败面。钥匙串规则把 A09 的归一变成机器检查，防止第三份手写 SecItem 回潮。
 
 - A08 抽查了两个最像重复的测试文件，确认场景不同、共享的只是样板；三处 makeStore 各五行的样板合并会引入跨套件依赖，按删除检验不值得。测试层的重复不再收敛，覆盖差异改由上方覆盖表记录。
+
+- A13 用探针确认 `withInternetDateTime` 输出不受 `timeZone` 设置影响、分数秒格式不解析无分数时间戳，再归一为单一 `TimestampFormatting`：格式按分数秒与纯秒两档，解析按分数秒→纯秒回退（与原 `MaterialNaming`/`ReflectionTimeline` 的宽容解析一致，`ReminderFields.date` 保持分数秒严格语义）。删除 `ActionTimeFormatting`、`ActionDateFormatting` 的 ISO 对、`MaterialNaming` 静态对、`ReminderSchedule.instantFormatter` 等五套载体，17 个文件净删 69 行。真实副本列表与完整详情 JSON 逐字一致。
 
 ## 待确认的兼容性取舍
 

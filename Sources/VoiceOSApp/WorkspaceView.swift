@@ -1695,7 +1695,7 @@ struct WorkspaceView: View {
         let now = Date()
         let upcoming: [Date] = (surface.today + surface.soon).compactMap { entry in
             guard case let .instant(utc, _)? = entry.due else { return nil }
-            let parsed = ActionTimeFormatting.isoFractional.date(from: utc) ?? ActionTimeFormatting.iso.date(from: utc)
+            let parsed = TimestampFormatting.parse(utc)
             guard let parsed, parsed > now, parsed.timeIntervalSince(now) < 61 else { return nil }
             return parsed
         }

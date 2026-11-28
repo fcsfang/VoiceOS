@@ -15,16 +15,6 @@ public enum MaterialNaming {
     private static let prefixes = ["行动反馈 · ", "我的表达 · ", "我的口述 · "]
     private static let stampPattern = try! NSRegularExpression(
         pattern: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$"#)
-    private static let fractionalISO: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-    private static let plainISO: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
     // NSCache 线程安全；按 ID 缓存，测试里的显式时区也走同一份缓存。
     private static let formatters = NSCache<NSString, DateFormatter>()
 
@@ -42,7 +32,5 @@ public enum MaterialNaming {
         return formatter
     }
 
-    private static func iso8601Date(_ text: String) -> Date? {
-        fractionalISO.date(from: text) ?? plainISO.date(from: text)
-    }
+    private static func iso8601Date(_ text: String) -> Date? { TimestampFormatting.parse(text) }
 }
