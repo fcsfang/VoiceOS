@@ -103,3 +103,8 @@
 - 完成：A14 端口身份校验归一。`ModelConfiguration.accepts(_:)` 表达「四字段一致且双方面向云端」，替换六个端口的重复校验。
 - 证据：592 项 Swift 测试通过；边界检查 0 违规；无 `== configuration.provider` 残留。
 - 下一步：第二轮扫描继续。
+
+## 2026-11-28T04:19:53Z
+
+- 完成：A15 死代码清算。删除无构造点的 `NativeSpeechPort`（Apple SpeechAnalyzer，41 行）与仅它使用的 `import Speech`。
+- 证据：592 项 Swift 测试通过；全仓类型扫描后其余候选为系统/模块级名字。第二轮剩余候选（UI 令牌、环境变量常量）记入待确认，无安全可实施项，本轮收敛。

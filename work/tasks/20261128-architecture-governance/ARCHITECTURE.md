@@ -54,6 +54,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A12 · 已核对入口分工并加钥匙串边界检查 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 已确认一个打包入口（`build.py` 内联运行 `check_architecture.py`），预览启动器与重启闸门各司其职，未发现重复打包路径。新增 SecItem 只允许在 `KeychainCredential` 与 `NoteHistoryMemory` 的机器检查。 |
 | A13 · 已统一时间戳格式与解析 | 分数秒 ISO 8601 格式器在 17 个文件手写构造；`ActionTimeFormatting`、`ActionDateFormatting`、`MaterialNaming`、`ReminderSchedule`、`ReminderFields`、`MonitorSourceConfig` 各有一套时间戳实现。 | 归一为 `TimestampFormatting`（fractional/plain/parse/dayKey），迁移全部调用方并删除旧载体；`check_architecture.py` 限制 `formatOptions` 只在权威文件出现。真实副本 553 条列表与完整详情 JSON 逐字一致。 |
 | A14 · 已统一端口身份校验 | 六个 Responses 端口各自比较 provider/model/promptVersion/schemaVersion 与 destination，同一规则六份实现。 | 归一到 `ModelConfiguration.accepts(_:)`；端口自有身份与请求身份都必须是云端且四字段一致。错误文案与各端口的其余校验保持原样。 |
+| A15 · 已删除未使用的 Apple 转写后端 | `NativeSpeechPort`（Apple SpeechAnalyzer）无任何构造点；应用与工具只使用 `LocalQwenSpeechPort`，多处类型判断只认后者。 | 删除该结构体与仅它使用的 `import Speech`。若未来恢复，需先有真实的转写后端选择路径，而不是留着无调用方的实现。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -140,8 +141,14 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 
 - A14 六个端口的身份校验比较过保留、抽自由函数、放到 `ModelConfiguration` 上。采用方法形式，因为规则读的是两个配置值的全部身份字段，且端口配置都由云端目的地构造；`accepts` 同时表达「双方都面向云端」，调用方只保留各自其余校验与错误文案。
 
+- A15 用「类型名在 Sources/Tests 中只出现于定义处」扫描全仓，得到三个候选：App Shortcuts 提供者与 CLI 模块名是系统或模块级名字，保留；`NativeSpeechPort` 无任何构造点，应用各处只认 `LocalQwenSpeechPort`，按删除检验直接删除（41 行）。Git 历史保留实现，恢复时需要真实的转写后端选择路径。
+
 ## 待确认的兼容性取舍
 
 - A11：行动时间页排除 unknown 提醒链接作为实际到期依据，只读 CLI 仍可从该链接读取最近观察。普通日期解析与逾期计算可先统一。修改 CLI 的有效到期结果前，区分外部调用使用的原始观察和应用显示的到期日期，明确兼容方式。
 
 - A11 复用 ReminderDueDate 的展示投影，归一行动界面和只读 CLI 的时间、时区及逾期计算。以调用方的日历比较日期，保留既有来源选择及 CLI 对明确无期限的序列化。
+
+- UI 间距与图标尺寸令牌化：约 700 处 padding 字面量与混用的面板宽度、图标尺寸共存，`WorkspaceMetrics` 已承担部分间距令牌。全面令牌化需要先定语义分组（行内、容器、工具条、图标），否则只是形式统一，按待确认处理。
+
+- 环境变量名（`VOICEOS_TEXT_MODEL` 等）在 Swift 与 Python 两侧共同读取，属外部契约。Swift 侧每名约 3 处，抽常量只减字面量不减同步成本；跨语言契约以文档与脚本测试保证，暂不引入常量层。
