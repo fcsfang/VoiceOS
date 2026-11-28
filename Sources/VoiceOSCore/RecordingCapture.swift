@@ -52,11 +52,14 @@ extension VoiceOSStore {
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
         try DurableFiles.syncDirectory(file.deletingLastPathComponent())
         try checkpoint(.copyComplete)
+        let fingerprint = try DurableFiles.fingerprint(file)
         let hash = try DurableFiles.hash(file)
         guard hash.0 > 0 else { throw VoiceOSError("录制为空，未保存为原件") }
         let info = try await inspectRecording(file)
-        let after = try DurableFiles.hash(file)
-        guard info.kind == "audio", info.duration > 0, hash.0 == after.0, hash.1 == after.1 else { throw VoiceOSError("录制核对期间文件变化或无音轨") }
+        guard info.kind == "audio", info.duration > 0, hash.0 == fingerprint.bytes,
+              try DurableFiles.fingerprint(file) == fingerprint else {
+            throw VoiceOSError("录制核对期间文件变化或无音轨")
+        }
         try db.execute("UPDATE sources SET state='sealed',duration=?,expected_bytes=?,expected_hash=?,error=NULL WHERE id=?",[String(info.duration),String(hash.0),hash.1,sourceID])
         try checkpoint(.sealed)
         try place(file,try assetURL(relativePath:row["relative_path"]!)); try checkpoint(.renamed)

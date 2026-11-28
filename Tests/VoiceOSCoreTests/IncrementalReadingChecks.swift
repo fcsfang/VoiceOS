@@ -52,7 +52,7 @@ final class IncrementalReadingChecks: XCTestCase {
     func testMigrationAddsIncrementalReading() async throws {
         let store = try await openStore()
         let db = await store.db
-        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         XCTAssertEqual(try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='incremental_reading'").count, 1)
     }
 

@@ -152,8 +152,7 @@ extension VoiceOSStore {
                   row["input_fingerprint"] == (try actionHash([row["effect_digest"]!,"user"])) else { throw VoiceOSError("迁移具体效果确认的身份、权限或摘要不一致") }
             let due = try JSONDecoder().decode(ReminderDueDate.self, from: Data(row["desired_json"]!.utf8))
             _ = try due.writableComponents()
-            let anchor = ISO8601DateFormatter(); anchor.formatOptions = [.withInternetDateTime,.withFractionalSeconds]
-            let proposal = try ReminderScheduleProposal(due: due,authority: ScheduleAuthority(rawValue: intent["authority"]!)!,rawExpression: intent["raw_expression"]!,anchorEventTime: anchor.date(from: intent["anchor_event_time"]!)!)
+            let proposal = try ReminderScheduleProposal(due: due,authority: ScheduleAuthority(rawValue: intent["authority"]!)!,rawExpression: intent["raw_expression"]!,anchorEventTime: TimestampFormatting.isoFractional.date(from: intent["anchor_event_time"]!)!)
             let baseJSON = try db.query("SELECT due_json FROM reminder_time_observations WHERE id=?", [intent["base_observation_id"]]).first?["due_json"]
             let base = try baseJSON.map { try JSONDecoder().decode(ReminderDueDate.self, from: Data($0.utf8)) }
             guard try ReminderScheduleMerge.decide(base: base,baseAuthority: ScheduleAuthority(rawValue: intent["base_authority"]!)!,remote: before.dueDate,desired: proposal,

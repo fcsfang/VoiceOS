@@ -15,17 +15,11 @@ public enum ReminderDueDate: Equatable, Sendable, Codable {
                 throw VoiceOSError("提醒事项日期或时区无效")
             }
         case let .instant(utc, zone):
-            guard let date = Self.instantFormatter.date(from: utc), date.timeIntervalSince1970.isFinite,
-                  Self.instantFormatter.string(from: date) == utc, TimeZone(identifier: zone) != nil else {
+            guard let date = TimestampFormatting.isoFractional.date(from: utc), date.timeIntervalSince1970.isFinite,
+                  TimestampFormatting.isoFractional.string(from: date) == utc, TimeZone(identifier: zone) != nil else {
                 throw VoiceOSError("提醒事项时刻必须是规范 UTC 与有效时区")
             }
         }
-    }
-    private static var instantFormatter: ISO8601DateFormatter {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        return formatter
     }
     private static func calendarDate(_ text: String) -> DateComponents? {
         let parts = text.split(separator: "-", omittingEmptySubsequences: false)
@@ -61,7 +55,7 @@ public enum ReminderDueDate: Equatable, Sendable, Codable {
         let before = calendar.startOfDay(for: candidate).addingTimeInterval(-1)
         guard let first = calendar.nextDate(after: before, matching: match, matchingPolicy: .strict, repeatedTimePolicy: .first),
               let last = calendar.nextDate(after: before, matching: match, matchingPolicy: .strict, repeatedTimePolicy: .last), first == last else { return nil }
-        return .instant(utc: instantFormatter.string(from: first), timeZone: zone.identifier)
+        return .instant(utc: TimestampFormatting.isoFractional.string(from: first), timeZone: zone.identifier)
     }
     /// Only write values that the same connector can read back losslessly.
     public func writableComponents() throws -> DateComponents? {
@@ -76,7 +70,7 @@ public enum ReminderDueDate: Equatable, Sendable, Codable {
             return result
         case let .instant(utc, zone):
             var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: zone)!
-            var result = calendar.dateComponents([.year,.month,.day,.hour,.minute,.second], from: Self.instantFormatter.date(from: utc)!)
+            var result = calendar.dateComponents([.year,.month,.day,.hour,.minute,.second], from: TimestampFormatting.isoFractional.date(from: utc)!)
             result.calendar = calendar; result.timeZone = calendar.timeZone
             guard Self.reading(result) == self else { throw VoiceOSError("重复墙上时刻或亚秒期限不能无损核对，停止写入") }
             return result
@@ -87,7 +81,7 @@ public enum ReminderDueDate: Equatable, Sendable, Codable {
         case .none: return "未设置期限"
         case let .dateOnly(date, _): return date + " · 仅日期"
         case let .instant(utc, zone):
-            guard let date = Self.instantFormatter.date(from: utc), let timeZone = TimeZone(identifier: zone) else { return "期限未能核对" }
+            guard let date = TimestampFormatting.isoFractional.date(from: utc), let timeZone = TimeZone(identifier: zone) else { return "期限未能核对" }
             let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN")
             formatter.calendar = Calendar(identifier: .gregorian); formatter.timeZone = timeZone
             formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"

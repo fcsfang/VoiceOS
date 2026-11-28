@@ -115,7 +115,7 @@ extension ControlCenter {
     }
     func rejudgeRecordingExpressions(sourceIDs: Set<String>) async throws -> Int {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
-        guard let port = recordingExpressionModel else { throw VoiceOSError("需要先配置文本模型，才能重新判断连续表达") }
+        guard let port = textModels?.recordingExpressions else { throw VoiceOSError("需要先配置文本模型，才能重新判断连续表达") }
         guard !fullRecordingBusy, understandingSource == nil else { throw VoiceOSError("当前录音仍在处理，完成后再重新判断") }
         _ = try await store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
         let groups = try await store.connectRecordingExpressions(using: port)
@@ -183,6 +183,7 @@ struct WorkspaceRow: View {
     /// Colors the second line without changing its type; reminder exceptions read in warning.
     var subtitleTone: Color? = nil
     var icon: String = "doc.text"
+    var materialIcon: MaterialRowIconKind? = nil
     var iconTint: Color? = nil
     var trailing: String = ""
     var trailingStyle: TrailingStyle = .secondary
@@ -222,9 +223,14 @@ struct WorkspaceRow: View {
         } else {
             Button(action:open) {
                 HStack(alignment:.top,spacing:14) {
-                    Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(iconTint ?? palette.accent)
-                        .frame(width:30 * vosLayoutScale(textScale),height:30 * vosLayoutScale(textScale)).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                        .accessibilityHidden(true)
+                    let iconSize = 30 * vosLayoutScale(textScale)
+                    if let materialIcon {
+                        MaterialRowIcon(kind: materialIcon, size: iconSize)
+                    } else {
+                        Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(iconTint ?? palette.accent)
+                            .frame(width:iconSize,height:iconSize).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                            .accessibilityHidden(true)
+                    }
                     titleAndTrailing
                 }.padding(.vertical,10).padding(.horizontal,10).padding(.trailing,trailingGutter)
                     .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -352,7 +358,12 @@ private final class TopicActionKeysCache {
 // Rebuilt only when records or secondary data change; survives body re-evaluation.
 private final class SearchSuggestionCache {
     struct Key: Equatable { let records: Int; let claims: Int }
-    struct Entry { let id: String; let title: String; let open: () -> Void }
+    struct Entry {
+        let id: String
+        let title: String
+        var materialIcon: MaterialRowIconKind? = nil
+        let open: () -> Void
+    }
     var key: Key?
     var materials: [Entry] = []
     var topics: [Entry] = []
@@ -538,6 +549,7 @@ struct WorkspaceView: View {
             }
             .navigationTitle(page == .notes ? model.libraryTitle : (showsBreadcrumb ? breadcrumb : section))
             .toolbar { workspaceToolbar }
+            .toolbarBackgroundVisibility(isMaterialDetail ? .visible : .automatic, for: .windowToolbar)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -748,7 +760,7 @@ struct WorkspaceView: View {
                         Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.workspacePrimary)
                         Button("打开其他资料库",action:chooseLibrary).buttonStyle(.workspaceSecondary)
                     }
-                } else if workspaceStarting {
+                } else if workspaceStarting && (page != .notes || model.startupNoteRows == nil) {
                     if showStartupProgress {
                         ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                     } else { Color.clear }
@@ -762,12 +774,28 @@ struct WorkspaceView: View {
                         .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
                 }.padding(.horizontal,20).padding(.vertical,10)
             }
-            if model.workspaceProcessingBarVisible, page != .tool("处理情况") {
+            if model.dictationActive || model.dictationSealing {
+                DictationRecordingBar(model: model)
+            } else if model.workspaceProcessingBarVisible, page != .tool("处理情况"), !showsProcessingInMaterial {
                 WorkspaceProcessingBar(model: model) { go(.tool("处理情况")) }
             }
         }.frame(minWidth:440)
             .workspaceSlowLoading(workspaceStarting, into: $showStartupProgress)
     }
+    private var isMaterialDetail: Bool {
+        if case .source = page { return true }
+        return false
+    }
+
+    private var showsProcessingInMaterial: Bool {
+        guard case .source(let id) = page,
+              let source = model.sourcePageIndex.recordsByID[id], !source.isTrashed,
+              !model.dictationBusy, model.pausedActionBatch?.isRunning != true,
+              model.workspaceProcessingTitle != nil,
+              let processingID = model.workspaceProcessingSourceID else { return false }
+        return processingID == id || model.sourcePageIndex.expression(for: id)?.sourceIDs.contains(processingID) == true
+    }
+
     private var workspaceStarting: Bool { !model.initialized || !model.workspaceLoaded }
     @ViewBuilder private var workspaceErrorBanner: some View {
         if let message = model.workspaceLastError {
@@ -794,7 +822,7 @@ struct WorkspaceView: View {
     @ViewBuilder private func noteReadingPage(_ id: String) -> some View {
         if let source = model.sourcePageIndex.recordsByID[id] {
             MaterialNoteReadingView(model: model, source: source,
-                openSource: { go(.source($0)) }, openTask: { go(.task($0)) },
+                openSource: { id in openSourceOriginal(id) }, openTask: { go(.task($0)) },
                 openDiscussion: { conv in Task { await openSavedDiscussion(conv) } },
                 openHistoryNote: { go(.note($0)) }, backToNotes: { back() },
                 hasNote: $notePageHasNote, restoreScroll: sourceScrollBinding("note-reading:" + id),
@@ -939,6 +967,7 @@ struct WorkspaceView: View {
                     .accessibilityIdentifier("workspace.discussion")
             }
             Button("记录想法", systemImage:"mic") { go(.capture) }.help("记录想法")
+                .accessibilityIdentifier("workspace.capture")
         }
     }
     private var showsBreadcrumb: Bool {
@@ -950,11 +979,17 @@ struct WorkspaceView: View {
     }
     private var breadcrumb: String {
         switch page {
-        case .source(let id): (sourceOpenedFromTheme ? "主题 / " + (sourceIDs.contains(id) ? topic?.title ?? "全部材料" : "全部材料") : "材料") + " / " + sourceNavigationTitle(id)
-        case .delivery: "行动 / AI 交付"
-        case .task: "行动 / 任务与结果"
-        case .themes: topic.map { "主题 / " + $0.title } ?? "主题"
-        default: section
+        case .source(let id):
+            let parent = sourceOpenedFromTheme ? "主题 / " + (sourceIDs.contains(id) ? topic?.title ?? "全部材料" : "全部材料") : "材料"
+            if let expression = model.sourcePageIndex.expression(for: id), expression.sourceIDs.count > 1,
+               let index = expression.sourceIDs.firstIndex(of: id) {
+                return parent + " / 第 \(index + 1) 段原文"
+            }
+            return parent
+        case .delivery: return "行动 / AI 交付"
+        case .task: return "行动 / 任务与结果"
+        case .themes: return topic.map { "主题 / " + $0.title } ?? "主题"
+        default: return section
         }
     }
     @ViewBuilder private var pageContent: some View {
@@ -1027,7 +1062,7 @@ struct WorkspaceView: View {
                                 model.initiationSourceID = id
                                 model.initiationText = model.sourcePageIndex.recordsByID[id]?.transcript ?? ""
                                 go(.initiate)
-                            },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id),folds:sourceFoldBinding(id,transcript:source.transcript))
+                            },openFollowups:{ go(.tool("思想与下一步")) },openProcessing:{ go(.tool("处理情况")) },scroll:sourceScrollBinding(id),folds:sourceFoldBinding(id))
                                 .id(id)
                         }
                     } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。",actionTitle:"回到主题") { go(.themes) } }
@@ -1051,16 +1086,65 @@ struct WorkspaceView: View {
             VStack(alignment:.leading,spacing:0) {
                 VStack(alignment:.leading,spacing:10) {
                     HStack {
-                        Button(model.dictationActive ? "停止录音" : "开始录音", systemImage:model.dictationActive ? "stop.circle" : "mic") {
-                            if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription: model.recordingModelIssue == nil) } }
-                        }.buttonStyle(.workspacePrimary).disabled(model.dictationBusy || model.fullRecordingBusy)
+                        if !model.dictationActive {
+                            Button(model.dictationStarting ? "正在打开麦克风…" : "开始录音",
+                                   systemImage: "mic", action: model.toggleCaptureDictation)
+                                .buttonStyle(.workspacePrimary)
+                                .disabled(!model.canToggleCaptureDictation || model.fullRecordingBusy)
+                                .accessibilityIdentifier("capture.record")
+                        }
                         Button("导入音频 / 视频") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
+                    }
+                    if let saved = model.lastSavedDictation,
+                       model.sourcePageIndex.recordsByID[saved.id]?.isTrashed != true {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 10) {
+                                Label("录音已保存", systemImage: "checkmark.circle")
+                                    .vosFont(WorkspaceText.meta)
+                                if let status = model.dictationReceiptStatus(for: model.sourcePageIndex.recordsByID[saved.id] ?? saved) {
+                                    Text(status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                                        .accessibilityIdentifier("capture.record.processing")
+                                }
+                                Spacer()
+                                Button(model.player == nil ? "回听" : "关闭回听",
+                                       systemImage: model.player == nil ? "play" : "xmark") {
+                                    if model.player != nil { model.stopPlayback() }
+                                    else { Task { _ = await model.playSpan(saved, milliseconds: 0) } }
+                                }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("capture.record.play")
+                                Button("打开材料") { go(.source(saved.id)) }
+                                    .buttonStyle(.workspaceQuietCompact)
+                                    .disabled(model.sourcePageIndex.recordsByID[saved.id] == nil)
+                                    .accessibilityIdentifier("capture.record.open")
+                            }
+                            if let player = model.player, let duration = saved.duration, duration.isFinite, duration > 0 {
+                                RecordingPlaybackTimeline(player: player, duration: duration)
+                            } else if let player = model.player {
+                                NativePlayerView(player: player).frame(height: 56)
+                            }
+                        }
+                        .padding(12)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
+                                .strokeBorder(palette.border)
+                                .allowsHitTesting(false)
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("capture.record.saved")
+                    }
+                    if let interrupted = model.lastInterruptedDictation,
+                       (model.sourcePageIndex.recordsByID[interrupted.id] ?? interrupted).dictationRecoveryPending {
+                        Label("录音已中断", systemImage: "exclamationmark.circle")
+                            .vosFont(WorkspaceText.meta)
+                        DictationRecoveryControls(model: model, source: interrupted)
                     }
                     if let issue = model.recordingModelIssue {
                         HStack(spacing:10) {
                             Text(issue).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                             if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.controlSize(.small) }
-                            if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
+                            if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
                         }
                     }
                 }.padding(24)
@@ -1108,19 +1192,8 @@ struct WorkspaceView: View {
     private func sourceScrollBinding(_ id:String) -> Binding<ScrollPosition> {
         Binding(get: { sourceScrollPositions[id] ?? ScrollPosition(edge: .top) }, set: { sourceScrollPositions[id] = $0 })
     }
-    private func sourceFoldBinding(_ id:String,transcript:String?) -> Binding<SourceFoldState> {
-        // 冷启动也能判断这篇是否有笔记：会话缓存与首页批量结果任一命中即可。
-        let hasNote = materialHasNote(id)
-        return Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(transcript:transcript, notePresent: hasNote) }, set: { sourceFoldStates[id] = $0 })
-    }
-    /// 这篇材料所属表达是否已有笔记（存在会话缓存或首页批量读取里）。
-    private func materialHasNote(_ id:String) -> Bool {
-        if model.materialNotePresence[id] == true { return true }
-        let memberIDs = model.sourcePageIndex.expression(for: id).map { expression in
-            expression.sourceIDs + (expression.externalVersions ?? [:]).keys.sorted()
-                .filter { !expression.sourceIDs.contains($0) }
-        } ?? [id]
-        return model.materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] != nil
+    private func sourceFoldBinding(_ id: String) -> Binding<SourceFoldState> {
+        Binding(get: { sourceFoldStates[id] ?? SourceFoldState() }, set: { sourceFoldStates[id] = $0 })
     }
     private func unavailable(_ title:String,description:String,actionTitle:String = "回到行动",action: (() -> Void)? = nil) -> some View {
         WorkspaceEmptyState(title:title,systemImage:"leaf",description:description) {
@@ -1184,7 +1257,7 @@ struct WorkspaceView: View {
                 WorkspaceListSection(title:"今日阅读",count:todayReading.count) {
                     VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                         ForEach(todayReading) { item in
-                            WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
+                            WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),materialIcon: MaterialRowIconKind(item.source)) { go(.source(item.id)) }
                                 .materialCard(highlighted:false)
                         }
                     }
@@ -1622,7 +1695,7 @@ struct WorkspaceView: View {
         let now = Date()
         let upcoming: [Date] = (surface.today + surface.soon).compactMap { entry in
             guard case let .instant(utc, _)? = entry.due else { return nil }
-            let parsed = ActionTimeFormatting.isoFractional.date(from: utc) ?? ActionTimeFormatting.iso.date(from: utc)
+            let parsed = TimestampFormatting.parse(utc)
             guard let parsed, parsed > now, parsed.timeIntervalSince(now) < 61 else { return nil }
             return parsed
         }
@@ -1993,7 +2066,7 @@ struct WorkspaceView: View {
             let unread = model.isDeliveryUnread(execution)
             WorkspaceRow(title:execution.title,
                          subtitle:(unread ? "未读 · " : "") + assistantExecutionLabel(execution),
-                         icon:execution.state == "completed" ? "doc.text" : "sparkles",
+                         icon:"sparkles",materialIcon:execution.state == "completed" ? .delivery : nil,
                          iconTint:unread ? palette.accent : nil,
                          trailing:unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
                          trailingStyle:unread ? .status(palette.accent) : .link) { go(.delivery(execution.id)) }
@@ -2109,7 +2182,7 @@ struct WorkspaceView: View {
                     let expand: (() -> Void)? = section.hasMore ? { expandSearchKind(section.kind) } : nil
                     WorkspaceSection(title:section.title,count:section.count,actionTitle:section.hasMore ? "显示全部" : "",action:expand) {
                         ForEach(section.rows) { row in
-                            SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
+                            SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon,materialIcon:row.materialIcon) { row.open() }
                                 .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                                 .workspaceFocusRing(searchKeyboardFocus.id == row.id, radius: WorkspaceMetrics.panelRadius)
                                 .id(row.id)
@@ -2130,17 +2203,15 @@ struct WorkspaceView: View {
         let catalog = recordCatalog
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
         let tokens = term.split(whereSeparator: \.isWhitespace).map(String.init)
-        func row(_ id:String,_ title:String,_ subtitle:String,_ icon:String,action:@escaping () -> Void) -> WorkspaceSearchRow {
-            WorkspaceSearchRow(id:id,title:highlighted(title,tokens:tokens),subtitle:highlighted(subtitle,tokens:tokens),icon:icon) {
+        func row(_ id:String,_ title:String,_ subtitle:String,_ icon:String, materialIcon: MaterialRowIconKind? = nil, action:@escaping () -> Void) -> WorkspaceSearchRow {
+            WorkspaceSearchRow(id:id,title:highlighted(title,tokens:tokens),subtitle:highlighted(subtitle,tokens:tokens),icon:icon,materialIcon:materialIcon) {
                 rememberSearch(term)
                 action()
             }
         }
-        let materials = searchHits.filter { hit in
-            guard hit.kind == .material, let source = catalog[hit.refID] else { return false }
-            return !source.isTrashed
-        }.map { hit in
-            row("material:" + hit.refID,hit.title,hit.snippet,"doc.text") { go(.source(hit.refID)) }
+        let materials = searchHits.compactMap { hit -> WorkspaceSearchRow? in
+            guard hit.kind == .material, let source = catalog[hit.refID], !source.isTrashed else { return nil }
+            return row("material:" + hit.refID,hit.title,hit.snippet,"doc.text",materialIcon:MaterialRowIconKind(source)) { go(.source(hit.refID)) }
         }
         let claimIDs = searchClaimIndex
         let claims = searchHits.filter { hit in
@@ -2221,7 +2292,7 @@ struct WorkspaceView: View {
         guard searchSuggestionCache.key != key else { return }
         searchSuggestionCache.key = key
         searchSuggestionCache.materials = model.records.filter { !$0.isTrashed }.map { source in
-            SearchSuggestionCache.Entry(id:"suggestion:material:" + source.id,title:displayTitle(source.displayTitle)) { go(.source(source.id)) }
+            SearchSuggestionCache.Entry(id:"suggestion:material:" + source.id,title:displayTitle(source.displayTitle),materialIcon:MaterialRowIconKind(source)) { go(.source(source.id)) }
         }
         searchSuggestionCache.topics = model.workspaceTopics.map { topic in
             SearchSuggestionCache.Entry(id:"suggestion:topic:" + topic.id,title:topic.title) { selectTopic(topic.id) }
@@ -2246,7 +2317,7 @@ struct WorkspaceView: View {
         let key = term.lowercased()
         func prefixed(_ text: String) -> Bool { !text.isEmpty && text.lowercased().hasPrefix(key) }
         let materials = searchSuggestionCache.materials.filter { prefixed($0.title) }.map { entry in
-            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"材料",icon:"doc.text",open:entry.open)
+            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"材料",icon:"doc.text",materialIcon:entry.materialIcon,open:entry.open)
         }
         let topics = searchSuggestionCache.topics.filter { prefixed($0.title) }.map { entry in
             WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"主题",icon:"circle.hexagongrid",open:entry.open)
@@ -2274,7 +2345,7 @@ struct WorkspaceView: View {
         let suggestions = searchSuggestions
         return VStack(alignment:.leading,spacing:0) {
             ForEach(Array(suggestions.enumerated()),id:\.element.id) { index,suggestion in
-                SearchResultRow(title:AttributedString(suggestion.title),subtitle:AttributedString(suggestion.subtitle),icon:suggestion.icon) {
+                SearchResultRow(title:AttributedString(suggestion.title),subtitle:AttributedString(suggestion.subtitle),icon:suggestion.icon,materialIcon:suggestion.materialIcon) {
                     rememberSearch(term)
                     suggestion.open()
                 }
@@ -2288,18 +2359,31 @@ struct WorkspaceView: View {
         .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border,lineWidth:1) }
     }
     private func openClaimSource(_ claim: CandidateClaim) {
-        guard let reference=claim.references.first else { return }
-        let spanExists=model.sourcePageIndex.recordsByID[reference.sourceID]?.spans.contains(where: { $0.id == reference.spanID }) == true
-        if spanExists { revealSourceSpan(reference.sourceID, spanID: reference.spanID) }
-        go(.source(reference.sourceID))
+        guard let reference = claim.references.first else { return }
+        openSourceOriginal(reference.sourceID, spanID: reference.spanID)
     }
-    /// 锚点跳转前先展开「原文与回听」，否则收起状态下面板内锚点不存在，页面会停在顶部。
-    private func revealSourceSpan(_ sourceID: String, spanID: String) {
-        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-span-" + spanID)
-        var state = sourceFoldStates[sourceID] ?? SourceFoldState.initial(transcript: nil)
-        state.original = true
-        sourceFoldStates[sourceID] = state
+
+    private func openSourceOriginal(_ sourceID: String, spanID: String? = nil) {
+        if let source = model.sourcePageIndex.recordsByID[sourceID] {
+            var state = sourceFoldStates[sourceID] ?? SourceFoldState()
+            state.originalTarget = "source-original"
+            if let spanID, ["audio", "video"].contains(source.kind), source.state == "saved",
+               !source.hasProvisionalRecordingTranscript,
+               source.spans.contains(where: { $0.id == spanID && $0.startMS != nil && $0.endMS != nil }) {
+                if source.spans.allSatisfy({ $0.startMS != nil && $0.endMS != nil }) {
+                    state.originalTarget = "source-span-" + spanID
+                } else {
+                    state.tools = true
+                    state.timedSpans = true
+                    state.originalTarget = "source-time-" + spanID
+                }
+            }
+            sourceScrollPositions[sourceID] = ScrollPosition(edge: .top)
+            sourceFoldStates[sourceID] = state
+        }
+        go(.source(sourceID))
     }
+
     private var recentSearchChips: some View {
         ScrollView(.horizontal,showsIndicators:false) {
             HStack(spacing:8) {
@@ -2416,7 +2500,7 @@ struct WorkspaceView: View {
                 Button("更改") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改语音转文字")
             }
             WorkspaceSettingsRow(title:"理解、核对与 AI 助理",
-                                 subtitle:model.textModelConfigured ? model.modelSummary : (model.modelConfigIssue ?? "尚未配置文本模型")) {
+                                 subtitle:model.modelConfigured ? model.modelSummary : (model.modelConfigIssue ?? "尚未配置文本模型")) {
                 HStack(spacing:8) {
                     if model.modelConfigured {
                         Button("清除") { model.clearTextModel() }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("清除文本模型配置")
@@ -2971,14 +3055,6 @@ struct WorkspaceView: View {
         case .bytes(let bytes): return sizeText(bytes)
         }
     }
-    private func sourceNavigationTitle(_ id:String) -> String {
-        let pageIndex=model.sourcePageIndex
-        let catalog=pageIndex.recordsByID
-        guard let source=catalog[id] else { return "材料" }
-        if let expression=pageIndex.expression(for:id),expression.sourceIDs.count > 1,
-           let index=expression.sourceIDs.firstIndex(of:id) { return fittedDisplayTitle(expression.displayTitle(in:catalog))+" / 第 \(index+1) 段原文" }
-        return fittedDisplayTitle(source.displayTitle)
-    }
     private var todayReading: [TodayReadingItem] {
         let catalog=recordCatalog
         let items=readingPlans.compactMap { plan -> TodayReadingItem? in
@@ -3054,7 +3130,7 @@ struct WorkspaceView: View {
         let trailingText=openCount > 0 ? "\(openCount) 条待办" : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:title,subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
+        return WorkspaceRow(title:title,subtitle:subtitle,materialIcon: MaterialRowIconKind(source),trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
@@ -3838,7 +3914,7 @@ struct WorkspaceView: View {
             ScrollView {
                 LazyVStack(alignment:.leading,spacing:2) {
                     ForEach(rows) { source in
-                        WorkspaceListRow(density:.compact,title:fittedDisplayTitle(source.displayTitle),subtitle:source.recordingDateLabel,icon:source.kind.contains("text") ? "doc.text" : "waveform",highlighted:source.id == selectedID) { selectSource(source.id) }
+                        WorkspaceListRow(density:.compact,title:fittedDisplayTitle(source.displayTitle),subtitle:source.recordingDateLabel,materialIcon: MaterialRowIconKind(source),highlighted:source.id == selectedID) { selectSource(source.id) }
                             .help(fittedDisplayTitle(source.displayTitle))
                             .accessibilityIdentifier("sourceRail.item." + source.id)
                     }
@@ -4056,7 +4132,14 @@ struct WorkspaceView: View {
     }
     private func chooseLibrary() {
         let panel=NSOpenPanel();panel.title="打开已有 VoiceOS 资料库";panel.canChooseDirectories=true;panel.canChooseFiles=false
-        panel.begin { response in guard response == .OK,let url=panel.url else { return };guard FileManager.default.fileExists(atPath:url.appendingPathComponent("voiceos.sqlite").path) else { error="所选目录不是 VoiceOS 资料库";return };openWindow(id:"restored-library",value:url.path) }
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            guard FileManager.default.fileExists(atPath: LibraryLayout.database(in: url).path) else {
+                error = "所选目录不是 VoiceOS 资料库"
+                return
+            }
+            openWindow(id: "restored-library", value: url.path)
+        }
     }
     private var isNotePage: Bool {
         if case .note = page { return true }
@@ -4330,6 +4413,7 @@ private struct WorkspaceSearchSuggestion: Identifiable {
     let title: String
     let subtitle: String
     let icon: String
+    var materialIcon: MaterialRowIconKind? = nil
     let open: () -> Void
 }
 
@@ -4371,6 +4455,7 @@ private struct WorkspaceSearchRow: Identifiable {
     let title: AttributedString
     let subtitle: AttributedString
     let icon: String
+    var materialIcon: MaterialRowIconKind? = nil
     let open: () -> Void
 }
 
@@ -4391,15 +4476,20 @@ private struct SearchResultRow: View {
     let title: AttributedString
     let subtitle: AttributedString
     let icon: String
+    var materialIcon: MaterialRowIconKind? = nil
     let open: () -> Void
     private var titleText: String { String(title.characters) }
     private var subtitleText: String { String(subtitle.characters) }
     var body: some View {
         Button(action: open) {
             HStack(alignment:.top,spacing:14) {
-                Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
-                    .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                    .accessibilityHidden(true)
+                if let materialIcon {
+                    MaterialRowIcon(kind: materialIcon)
+                } else {
+                    Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                        .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .accessibilityHidden(true)
+                }
                 VStack(alignment:.leading,spacing:3) {
                     Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).textSelection(.enabled).help(titleText)
                     if !subtitle.characters.isEmpty {

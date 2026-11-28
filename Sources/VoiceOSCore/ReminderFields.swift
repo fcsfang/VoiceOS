@@ -14,14 +14,8 @@ public struct ReminderFields: Codable, Sendable, Equatable {
     public init(due: ReminderDueDate = .none, alerts: [String] = [], priority: Int = 0, location: ReminderLocation? = nil) {
         self.due = due; self.alerts = alerts; self.priority = priority; self.location = location
     }
-    public static func timestamp(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
-    }
-    public static func date(_ timestamp: String) -> Date? {
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: timestamp)
-    }
+    public static func timestamp(_ date: Date) -> String { TimestampFormatting.isoFractional.string(from: date) }
+    public static func date(_ timestamp: String) -> Date? { TimestampFormatting.isoFractional.date(from: timestamp) }
     public static func nextDefaultAlert(due: ReminderDueDate, now: Date, calendar: Calendar) -> Date? {
         guard case let .dateOnly(localDate, _) = due else { return nil }
         let parts = localDate.split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
@@ -37,8 +31,7 @@ public struct ReminderFields: Codable, Sendable, Equatable {
         var copy = self; copy.alerts = [Self.timestamp(date)]; return copy
     }
     public static func relativeDates(expressedAt: String?, timeZone: String) -> [String: String] {
-        let plain = ISO8601DateFormatter()
-        guard let text = expressedAt, let instant = date(text) ?? plain.date(from: text),
+        guard let text = expressedAt, let instant = date(text) ?? TimestampFormatting.iso.date(from: text),
               let zone = TimeZone(identifier: timeZone) else { return [:] }
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
         let day = calendar.startOfDay(for: instant)

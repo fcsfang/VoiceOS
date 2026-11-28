@@ -65,6 +65,7 @@ struct MaterialNoteReadingView: View {
     var sidebar: Binding<NoteSidebarTab?>? = nil
     var discussionPanel: AnyView? = nil
     var discussParagraph: ((String) -> Void)? = nil
+    var materialReader = false
 
     @State private var display: MaterialNoteDisplay?
     @State private var editing: StoredMaterialNote?
@@ -75,7 +76,6 @@ struct MaterialNoteReadingView: View {
     @State private var probeBox = NoteReadingProbeBox()
     @State private var hasRestored = false
     @State private var boardNotice: String?
-    @State private var historyPilot: NoteHistoryPilot?
     @State private var historyResult: NoteHistoryResult?
     @State private var historyRun = false
     @State private var historyNotice: String?
@@ -92,6 +92,9 @@ struct MaterialNoteReadingView: View {
     }
     private var memberRecords: [SourceRecord] { memberIDs.compactMap { catalog[$0] } }
     private var noteState: MaterialNoteState? { model.materialNoteStates[source.id] }
+    private var waitsForMaterialReview: Bool {
+        materialReader && memberRecords.contains(where: \.hasProvisionalRecordingTranscript)
+    }
 
     // Policy and local-only changes also matter: they can unblock or block the
     // next attempt even when no transcript changed.
@@ -180,14 +183,14 @@ struct MaterialNoteReadingView: View {
                     .foregroundStyle(palette.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            statusRows
-            if historyRun {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    noteText("正在回看相关历史…")
+            if materialReader && !loadedOnce {
+                ProgressView().controlSize(.small).accessibilityLabel("正在读取笔记")
+            } else {
+                if waitsForMaterialReview && display == nil {
+                    noteText("校正后可整理笔记")
+                } else {
+                    statusRows
                 }
-            } else if let historyNotice {
-                noteText(historyNotice)
             }
             if let display {
                 article(display)
@@ -273,30 +276,34 @@ struct MaterialNoteReadingView: View {
 
     private func article(_ display: MaterialNoteDisplay) -> some View {
         HStack(alignment: .top, spacing: 18) {
-            Rectangle().fill(palette.border)
-                .frame(width: 1)
-                .frame(maxHeight: .infinity)
-                .accessibilityHidden(true)
+            if !materialReader {
+                Rectangle().fill(palette.border)
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 26) {
                 if !display.isCurrent { staleRow }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(articleTitle(display.note.note))
-                        .vosFont(WorkspaceText.pageTitle)
-                        .foregroundStyle(palette.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .id("note.title")
-                    // 手账感下划线：固定视觉语言，不消耗模型选择。
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(palette.warning.opacity(0.35))
-                        .frame(width: 88, height: 3)
-                        .accessibilityHidden(true)
-                        .onGeometryChange(for: CGFloat.self) { proxy in
-                            proxy.frame(in: .scrollView(axis: .vertical)).minY
-                        } action: { minY in
-                            probe(minY, anchor: "note.title")
-                        }
-                    metaLine
+                if materialReader {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        noteHeading(display.note.note)
+                        Spacer(minLength: 0)
+                        noteActions
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        noteHeading(display.note.note)
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(palette.warning.opacity(0.35))
+                            .frame(width: 88, height: 3)
+                            .accessibilityHidden(true)
+                            .onGeometryChange(for: CGFloat.self) { proxy in
+                                proxy.frame(in: .scrollView(axis: .vertical)).minY
+                            } action: { minY in
+                                probe(minY, anchor: "note.title")
+                            }
+                        metaLine
+                    }
                 }
                 if let lead = normalized(display.note.note.lead) {
                     Text(lead)
@@ -308,11 +315,20 @@ struct MaterialNoteReadingView: View {
                 ForEach(NoteBoardAdapting.blocks(for: display.note.note)) { block in
                     blockView(block)
                 }
-                relatedSection
+                if !materialReader { relatedSection }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .textSelection(.enabled)
+    }
+
+    private func noteHeading(_ note: MaterialNote) -> some View {
+        Text(articleTitle(note))
+            .vosFont(WorkspaceText.pageTitle)
+            .foregroundStyle(palette.text)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+            .id("note.title")
     }
 
     /// 成品视图：段落只有正文与「整理时补充的关联」标记。逐段原话与回听
@@ -382,13 +398,12 @@ struct MaterialNoteReadingView: View {
         }
     }
 
-    /// 一条 AI 批注：低饱和暖色底、左缘色条、轻标签；形式与长度随内容，
-    /// 理论出处与身份（voice）有就给一行。批注是成品的一部分。
     private func annotationView(_ annotation: MaterialNote.Annotation) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let ink = annotationColor(annotation.kind)
+        return VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Text("AI 批注").vosFont(WorkspaceText.caption.size, weight: .semibold)
-                        .foregroundStyle(palette.warning)
+                        .foregroundStyle(ink)
                     if let label = Self.annotationKindLabel(annotation.kind) {
                         Text(label).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     }
@@ -412,10 +427,10 @@ struct MaterialNoteReadingView: View {
         .padding(12)
         .padding(.leading, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.warning.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        .background(ink.opacity(0.09), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1)
-                .fill(palette.warning.opacity(0.45))
+                .fill(ink.opacity(0.60))
                 .frame(width: 2)
                 .padding(.vertical, 12)
                 .padding(.leading, 10)
@@ -423,6 +438,16 @@ struct MaterialNoteReadingView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("AI 批注" + (Self.annotationKindLabel(annotation.kind).map { "，" + $0 } ?? ""))
+    }
+
+    private func annotationColor(_ kind: String) -> Color {
+        switch kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "question", "analysis", "distinction", "research_frame": return palette.noteBlue
+        case "pattern", "theory", "insight", "reflection": return palette.noteViolet
+        case "extension", "advice", "coaching", "suggestion": return palette.noteGreen
+        case "assumption": return palette.noteRose
+        default: return palette.noteAmber
+        }
     }
 
     private static func annotationKindLabel(_ kind: String) -> String? {
@@ -608,7 +633,7 @@ struct MaterialNoteReadingView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(markToneColor(block.tone), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .background(markInk(block.tone).opacity(0.12), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
         }
     }
 
@@ -652,7 +677,7 @@ struct MaterialNoteReadingView: View {
     }
 
     private func apply(_ mark: MaterialNote.InlineMark, to attributed: inout AttributedString, range: Range<AttributedString.Index>) {
-        let color = markToneColor(mark.tone)
+        let ink = markInk(mark.tone)
         switch (mark.style ?? "marker").lowercased() {
         case "underline":
             attributed[range].underlineStyle = .single
@@ -661,15 +686,17 @@ struct MaterialNoteReadingView: View {
         case "italic":
             attributed[range].inlinePresentationIntent = .emphasized
         default:
-            attributed[range].backgroundColor = color
+            attributed[range].backgroundColor = ink.opacity(0.24)
         }
     }
 
-    private func markToneColor(_ tone: String?) -> Color {
-        switch (tone ?? "").lowercased() {
-        case "accent": return palette.accent.opacity(0.16)
-        case "muted": return palette.secondaryText.opacity(0.07)
-        default: return palette.warning.opacity(0.16)
+    private func markInk(_ tone: String?) -> Color {
+        switch tone?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "accent", "blue": return palette.noteBlue
+        case "muted", "violet", "purple": return palette.noteViolet
+        case "green", "mint": return palette.noteGreen
+        case "rose", "pink": return palette.noteRose
+        default: return palette.noteAmber
         }
     }
 
@@ -680,36 +707,29 @@ struct MaterialNoteReadingView: View {
                 .foregroundStyle(palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
-            Menu {
-                if historyPilot != nil {
-                    Button("回看相关历史", systemImage: "clock.arrow.circlepath") {
-                        historyRun = true
-                        historyNotice = nil
-                    }
-                    .disabled(historyRun || display?.isCurrent != true)
-                    .accessibilityIdentifier("note.history.request")
-                }
-                Button("编辑笔记…") { editing = display?.note }
-                Button(annotationsVisible ? "隐藏 AI 批注" : "显示 AI 批注") {
-                    annotationsVisible.toggle()
-                }
-                Button("重新整理笔记") {
-                    retry()
-                }
-                .disabled(noteState == .generating)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .vosFont(WorkspaceText.meta.size)
-                    .foregroundStyle(palette.secondaryText)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .help("笔记操作")
-            .accessibilityLabel("笔记操作")
+            noteActions
         }
+    }
+
+    private var noteActions: some View {
+        Menu {
+            Button("编辑笔记…") { editing = display?.note }
+            Button(annotationsVisible ? "隐藏 AI 批注" : "显示 AI 批注") {
+                annotationsVisible.toggle()
+            }
+            Button("重新整理笔记") { retry() }
+                .disabled(noteState == .generating || waitsForMaterialReview)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .vosFont(WorkspaceText.meta.size)
+                .foregroundStyle(palette.secondaryText)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .help("笔记操作")
+        .accessibilityLabel("笔记操作")
     }
 
     private var metaText: String {
@@ -800,7 +820,7 @@ struct MaterialNoteReadingView: View {
             case .generating:
                 HStack(spacing: 9) {
                     ProgressView().controlSize(.small).accessibilityHidden(true)
-                    Text(display == nil ? "正在整理成笔记…" : "正在重新整理…")
+                    Text(display == nil ? "正在整理笔记…" : "正在重新整理…")
                         .vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText)
                 }
@@ -918,26 +938,48 @@ struct MaterialNoteReadingView: View {
 
     private var historyInspector: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if orderedHistory.isEmpty {
-                ContentUnavailableView("暂无历史批注", systemImage: "text.bubble")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(Array(orderedHistory.enumerated()), id: \.element.id) { index, annotation in
-                            historyCard(annotation, number: index + 1)
-                                .id(annotation.id)
-                        }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                if historyRun { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("回看相关历史", systemImage: "clock.arrow.circlepath") {
+                    historyNotice = nil
+                    historyRun = true
                 }
-                .transformAnchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) { value, anchor in
+                .disabled(historyRun || display?.isCurrent != true)
+                .accessibilityIdentifier("note.history.request")
+            }
+            .padding(12)
+            if model.noteHistorySyncing {
+                noteText("正在同步历史记忆…").padding(.horizontal, 12)
+            }
+            if let notice = historyNotice ?? model.noteHistorySyncIssue {
+                noteText(notice).padding(.horizontal, 12)
+            }
+            if orderedHistory.isEmpty {
+                if !historyRun && historyNotice == nil {
+                    ContentUnavailableView("暂无历史批注", systemImage: "text.bubble")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                Spacer(minLength: 0)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(Array(orderedHistory.enumerated()), id: \.element.id) { index, annotation in
+                                historyCard(annotation, number: index + 1)
+                                    .id(annotation.id)
+                            }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .transformAnchorPreference(key: HistoryConnectorAnchors.self, value: .bounds) { value, anchor in
                         value[.listViewport] = anchor
                     }
-                .onChange(of: historySelection) { _, anchor in
-                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                    .onChange(of: historySelection) { _, anchor in
+                        if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -1056,9 +1098,7 @@ struct MaterialNoteReadingView: View {
     }
 
     private func loadHistory() async {
-        guard openHistoryNote != nil, let root = model.libraryRoot,
-              let pilot = NoteHistoryPilot.load(root: root), pilot.targetSourceIDs.contains(source.id) else { return }
-        historyPilot = pilot
+        guard openHistoryNote != nil, let root = model.libraryRoot else { return }
         guard let displayed = display, displayed.isCurrent, let store = model.store else { return }
         let key = historyReadKey
         let cached = NoteHistoryResult.read(root: root, sourceID: source.id)
@@ -1073,7 +1113,7 @@ struct MaterialNoteReadingView: View {
     }
 
     private func historyVersionsMatch(_ result: NoteHistoryResult, store: VoiceOSStore) async -> Bool {
-        guard let records = try? await store.sources() else { return false }
+        guard let records = try? await store.sourceRecords(ids: Array(result.recordVersions.keys)) else { return false }
         let indexed = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
         guard result.recordVersions.allSatisfy({ id, version in
             indexed[id].map(NoteHistoryResult.version) == version
@@ -1088,12 +1128,15 @@ struct MaterialNoteReadingView: View {
 
     private func generateHistory() async {
         defer { historyRun = false }
-        guard let pilot = historyPilot, let displayed = display, displayed.isCurrent,
-              let store = model.store, let root = model.libraryRoot, let port = model.materialNoteModel else {
+        guard let displayed = display, displayed.isCurrent,
+              let store = model.store, let root = model.libraryRoot, let port = model.textModels?.note else {
             historyNotice = "暂时无法回看历史，请检查资料库和文本模型。"
             return
         }
         do {
+            guard let memory = try NoteHistoryMemory.load(root: root) else {
+                throw VoiceOSError("此资料库尚未连接历史记忆")
+            }
             let indexed = Dictionary(uniqueKeysWithValues: try await store.sources().map { ($0.id, $0) })
             let baseIDs = memberIDs
             if let reason = MaterialNoteGating.unavailableReason(memberIDs: baseIDs, catalog: indexed) {
@@ -1105,22 +1148,25 @@ struct MaterialNoteReadingView: View {
                 currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: baseIDs, catalog: indexed))
             guard current else { throw VoiceOSError("原话已更新，请先更新笔记。") }
             try Task.checkCancellation()
-            let documents = try await pilot.recalledDocuments(query: articleTitle(displayed.note.note))
+            let query = [articleTitle(displayed.note.note), displayed.note.note.lead,
+                         String(NoteHistoryMemory.body(displayed.note.note).prefix(2000))]
+                .compactMap { $0 }.joined(separator: "\n")
+            let documents = try await memory.recalledDocuments(query: query)
+            let candidates = try await store.recentMaterialNotes(limit: nil).filter {
+                $0.id != displayed.note.id && NoteHistoryMemory.canIndex($0, catalog: indexed)
+            }
+            let byDocument = Dictionary(uniqueKeysWithValues: candidates.map { (NoteHistoryMemory.documentID($0), $0) })
             var evidence: [NoteHistoryEvidence] = []
-            for sourceEntry in pilot.sources where documents.contains(sourceEntry.documentID) && !baseIDs.contains(sourceEntry.sourceID) {
-                let ids = model.materialNoteMemberIDs(sourceID: sourceEntry.sourceID)
-                guard MaterialNoteGating.unavailableReason(memberIDs: ids, catalog: indexed) == nil,
-                      let prior = try await store.latestMaterialNote(memberSourceIDs: ids), prior.id == sourceEntry.noteID,
-                      await store.materialNoteIsCurrent(prior,
-                        currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: ids, catalog: indexed))
-                else { continue }
-                let body = NoteBoardAdapting.blocks(for: prior.note)
-                    .filter { $0.kind == "text" }.flatMap { $0.paragraphs ?? [] }.map(\.text)
+            for document in documents {
+                guard let prior = byDocument[document] else { continue }
+                let ids = NoteHistoryMemory.members(prior)
+                guard let sourceID = ids.first(where: { indexed[$0]?.speaker == "user" }) ?? ids.first,
+                      Set(baseIDs).isDisjoint(with: ids) else { continue }
+                let body = NoteHistoryMemory.body(prior.note)
                 guard !body.isEmpty else { continue }
                 let date = ids.compactMap { indexed[$0]?.expressedDate }.min()
                     .map { $0.formatted(date: .numeric, time: .omitted) } ?? ""
-                evidence.append(.init(sourceID: sourceEntry.sourceID, title: prior.note.title, date: date,
-                                      text: body.joined(separator: "\n\n")))
+                evidence.append(.init(sourceID: sourceID, title: prior.note.title, date: date, text: body))
                 revisions[prior.expressionKey] = prior.id
                 usedRecords.formUnion(ids)
             }
@@ -1142,8 +1188,7 @@ struct MaterialNoteReadingView: View {
                         NoteHistoryParagraph(id: blockParagraphAnchor(block, index), text: paragraph.text)
                     }
                 }
-            let annotations = try await port.historyAnnotations(
-                transcripts: baseIDs.compactMap { indexed[$0]?.transcript }, paragraphs: paragraphs, evidence: evidence)
+            let annotations = try await port.historyAnnotations(paragraphs: paragraphs, evidence: evidence)
             guard await historyVersionsMatch(snapshot, store: store),
                   display?.note.id == displayed.note.id, model.libraryRoot == root else {
                 throw VoiceOSError("笔记或材料已更新，请重新回看。")
@@ -1153,7 +1198,9 @@ struct MaterialNoteReadingView: View {
                                            recordVersions: versions, annotations: annotations)
             try result.save(root: root, sourceID: source.id)
             historyResult = result
-            historyNotice = annotations.isEmpty ? "没有找到值得补充的前情。" : nil
+            if annotations.isEmpty {
+                historyNotice = model.noteHistorySyncing ? "历史记忆正在同步，稍后可以再回看。" : "没有找到值得补充的前情。"
+            }
             if !annotations.contains(where: { $0.id == historySelection }) { historySelection = nil }
 
         } catch is CancellationError {
@@ -1197,6 +1244,7 @@ struct MaterialNoteReadingView: View {
 
     @MainActor
     private func requestNote() async {
+        guard !waitsForMaterialReview else { return }
         await model.requestMaterialNote(sourceID: source.id)
         guard !Task.isCancelled else { return }
         requested = true

@@ -11,6 +11,14 @@ public struct ModelConfiguration: Sendable {
     public init(provider: String, model: String, promptVersion: String, schemaVersion: String, destination: ModelDestination) {
         self.provider = provider; self.model = model; self.promptVersion = promptVersion; self.schemaVersion = schemaVersion; self.destination = destination
     }
+    /// A request may use this port only when it carries the same identity and
+    /// both sides target the cloud. Every port is built with a cloud destination,
+    /// so this is the one place the identity rule is expressed.
+    public func accepts(_ request: ModelConfiguration) -> Bool {
+        destination == .cloud && request.destination == .cloud
+            && provider == request.provider && model == request.model
+            && promptVersion == request.promptVersion && schemaVersion == request.schemaVersion
+    }
 }
 public struct ModelRequest: Sendable {
     public let attemptID: String

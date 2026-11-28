@@ -55,7 +55,7 @@ extension ControlCenter {
                 materialNotePresence[sourceID] = true
                 return
             }
-            guard let port = materialNoteModel else { materialNoteStates[sourceID] = .unavailable("文本模型未配置"); return }
+            guard let port = textModels?.note else { materialNoteStates[sourceID] = .unavailable("文本模型未配置"); return }
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             if let reason = MaterialNoteGating.unavailableReason(memberIDs: memberIDs, catalog: catalog) {
                 materialNoteStates[sourceID] = .unavailable(reason)
@@ -123,7 +123,7 @@ extension ControlCenter {
     /// 笔记首页的批量整理：每份先补做完整转写核对，再生成笔记；单份失败不阻断其余。
     func generateNotesSequentially(_ records: [SourceRecord]) async {
         guard !records.isEmpty else { return }
-        guard modelConfigured, materialNoteModel != nil else { status = "文本模型未配置，无法整理"; return }
+        guard modelConfigured else { status = "文本模型未配置，无法整理"; return }
         guard !fullRecordingBusy, organizingSourceID == nil else {
             status = "有整理任务正在进行，稍后再试"
             return
@@ -197,7 +197,8 @@ extension ControlCenter {
             }
             materialNotePresence[sourceID] = true
             materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] = stored
-            let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let catalog = Dictionary(try await store.sourceRecords(ids: memberIDs).map { ($0.id, $0) },
+                                     uniquingKeysWith: { first, _ in first })
             let current = await store.materialNoteIsCurrent(stored, currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog))
             return (stored, current)
         } catch { return nil }

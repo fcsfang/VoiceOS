@@ -1,8 +1,7 @@
 import Foundation
 
 public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let model: String
     private let transport: any ModelHTTPTransport
     private let retryDelay: @Sendable (Duration) async throws -> Void
@@ -10,8 +9,8 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
         try self.init(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport, retryDelay: { try await Task.sleep(for: $0) })
     }
     init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
-        _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.model = model; self.transport = transport
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        self.model = model; self.transport = transport
         self.retryDelay = retryDelay
     }
     public func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration {
@@ -117,24 +116,22 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
         let exactInstructions = instructions + "\n仅输出一个符合以下完整 JSON Schema 的 JSON 对象。字段名必须完全一致，所有 required 字段都必须存在，禁止替代字段、Markdown 和额外说明。\n" + schemaText
         let inputText = String(decoding: try JSONSerialization.data(withJSONObject: payloadInput, options: [.sortedKeys]), as: UTF8.self)
         var mismatch: StructuralMismatch?
-        for attempt in 1...3 {
+        for attempt in 1...ResponsesRetry.maximumAttempts {
             try Task.checkCancellation()
             var prompt = exactInstructions
             if let mismatch { prompt += "\n上次响应在 \(mismatch.path) 不符合结构：\(mismatch.diagnostic)。请根据相同完整输入重新生成完整对象。" }
             let body: [String: Any] = ["model": model, "store": false, "reasoning": ["effort": "high"], "max_output_tokens": 32768, "truncation": "disabled", "instructions": prompt,
                 "input": [["role": "user", "content": inputText]],
                 "text": ["format": ["type": "json_schema", "name": name, "strict": true, "schema": schema]]]
-            var request = URLRequest(url: endpoint, timeoutInterval: 600); request.httpMethod = "POST"
-            request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-            request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+            let request = endpoint.request(body: data, timeout: 600)
             let response: ModelHTTPReply
             do { response = try await transport.send(request) }
             catch { try Task.checkCancellation(); throw error }
             guard response.status == 200 else {
                 try Task.checkCancellation()
-                if attempt < 3, [429, 502, 503, 504].contains(response.status) {
-                    try Task.checkCancellation()
-                    try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
+                if let delay = ResponsesRetry.delay(forHTTPStatus: response.status, afterAttempt: attempt) {
+                    try await retryDelay(delay)
                     continue
                 }
                 if response.status == 429 || (500...599).contains(response.status) { throw RecordingFollowupTransientError(status: response.status) }
@@ -150,7 +147,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
                 evidence.rejected.append(.init(stage: stage, wireAttempt: attempt, responseID: responseID,
                     path: rejection.path, diagnostic: rejection.diagnostic, rawResponse: raw))
                 try Task.checkCancellation()
-                guard rejection.retryable, attempt < 3 else { throw rejection }
+                guard rejection.retryable, attempt < ResponsesRetry.maximumAttempts else { throw rejection }
                 mismatch = rejection
                 continue
             }

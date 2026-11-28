@@ -329,6 +329,7 @@ struct WorkspaceListRow<Trailing: View>: View {
     let title: String
     var subtitle: String = ""
     var icon: String? = nil
+    var materialIcon: MaterialRowIconKind? = nil
     @ViewBuilder var trailing: () -> Trailing
     var highlighted: Bool = false
     var action: (() -> Void)? = nil
@@ -349,7 +350,9 @@ struct WorkspaceListRow<Trailing: View>: View {
 
     private var row: some View {
         HStack(spacing: density == .comfortable ? 11 : 9) {
-            if let icon {
+            if let materialIcon {
+                MaterialRowIcon(kind: materialIcon, size: density == .compact ? 27 : 30)
+            } else if let icon {
                 Image(systemName: icon).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                     .foregroundStyle(action == nil ? palette.disabledText : palette.accent)
                     .frame(width: 34, height: 34)
@@ -396,8 +399,8 @@ struct WorkspaceListRow<Trailing: View>: View {
 
 extension WorkspaceListRow where Trailing == WorkspaceRowChevron {
     init(density: Density = .comfortable, title: String, subtitle: String = "", icon: String? = nil,
-         highlighted: Bool = false, action: (() -> Void)? = nil) {
-        self.init(density: density, title: title, subtitle: subtitle, icon: icon,
+         materialIcon: MaterialRowIconKind? = nil, highlighted: Bool = false, action: (() -> Void)? = nil) {
+        self.init(density: density, title: title, subtitle: subtitle, icon: icon, materialIcon: materialIcon,
                   trailing: { WorkspaceRowChevron() }, highlighted: highlighted, action: action)
     }
 }

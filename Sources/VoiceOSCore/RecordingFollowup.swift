@@ -409,8 +409,7 @@ extension VoiceOSStore {
         let digest = Self.relevanceHash(Data(try followupJSON(input).utf8))
         if let old = try recordingFollowups().last(where: { $0.sourceID == sourceID && $0.inputDigest == digest }),
            ["queued", "running"].contains(old.state) || (!retry && old.state == "completed") { return old }
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let receipt = RecordingFollowupReceipt(id: UUID().uuidString, inputDigest: digest, input: input, state: "queued", result: nil, responseIDs: [], error: nil, createdAt: formatter.string(from: Date()))
+        let receipt = RecordingFollowupReceipt(id: UUID().uuidString, inputDigest: digest, input: input, state: "queued", result: nil, responseIDs: [], error: nil, createdAt: TimestampFormatting.isoFractional.string(from: Date()))
         try saveRecordingFollowup(receipt)
         return receipt
     }
@@ -665,9 +664,8 @@ extension VoiceOSStore {
         if let old = try recordingFollowups().last(where: { $0.sourceID == sourceID && $0.inputDigest == digest && $0.state == "completed" }), !retry, queued == nil {
             return old
         }
-        let dateFormatter = ISO8601DateFormatter(); dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let matching = queued?.inputDigest == digest ? queued : nil
-        var receipt = RecordingFollowupReceipt(id: matching?.id ?? UUID().uuidString, inputDigest: digest, input: input, state: "running", result: nil, responseIDs: [], error: nil, createdAt: matching?.createdAt ?? dateFormatter.string(from: Date()), retryCount: matching?.retryCount, retryAt: nil, rejectedResponses: matching?.rejectedResponses)
+        var receipt = RecordingFollowupReceipt(id: matching?.id ?? UUID().uuidString, inputDigest: digest, input: input, state: "running", result: nil, responseIDs: [], error: nil, createdAt: matching?.createdAt ?? TimestampFormatting.isoFractional.string(from: Date()), retryCount: matching?.retryCount, retryAt: nil, rejectedResponses: matching?.rejectedResponses)
         try saveRecordingFollowup(receipt)
         do {
             let generated = try await port.generate(input)
@@ -715,11 +713,7 @@ extension VoiceOSStore {
         let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure
         if let error = error as? RecordingFollowupTransientError { return error.status == 429 || (500...599).contains(error.status) }
         guard let error = error as? URLError else { return false }
-        switch error.code {
-        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed, .secureConnectionFailed:
-            return true
-        default: return false
-        }
+        return ResponsesRetry.isTransientConnection(error.code)
     }
     public func activateGoalStep(receiptID: String, goalID: String, step: GoalStep) throws -> String {
         guard let receipt = try recordingFollowups().first(where: { $0.id == receiptID }), receipt.state == "completed",

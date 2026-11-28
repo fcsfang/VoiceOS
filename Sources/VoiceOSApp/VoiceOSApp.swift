@@ -164,20 +164,26 @@ final class ControlCenter: ObservableObject {
     /// Advances when a note revision is saved, so the home timeline picks up a
     /// title or preview that changed while it stayed open.
     @Published private(set) var materialNotesRevision = 0
-    func materialNoteDidSave() { materialNotesRevision &+= 1 }
+    func materialNoteDidSave() {
+        materialNotesRevision &+= 1
+        scheduleNoteHistorySync()
+    }
+    @Published var noteHistorySyncIssue: String?
+    @Published var noteHistorySyncing = false
+    var noteHistorySyncWorker: Task<Void, Never>?
+    var noteHistorySyncPending = false
     @Published var recordingTitleStatus = ""
     @Published var generatingRecordingTitles = false
-    private var recordingTitleModel: ResponsesRecordingTitlePort?
     private var recordingTitleWorker: Task<Void, Never>?
     private var recordingTitlesPending = false
     func queueRecordingTitles() {
-        guard initialized, recordingTitleModel != nil else { return }
+        guard initialized, textModels?.recordingTitles != nil else { return }
         if recordingTitleWorker != nil { recordingTitlesPending = true; return }
         recordingTitleWorker = Task {
             defer { recordingTitleWorker = nil; generatingRecordingTitles = false }
             repeat {
                 recordingTitlesPending = false
-                guard let store, let port = recordingTitleModel,
+                guard let store, let port = textModels?.recordingTitles,
                       (try? await store.sources())?.contains(where: { $0.needsContentTitle }) == true else { return }
                 generatingRecordingTitles = true; recordingTitleStatus = "正在根据完整转写生成内容标题…"
                 do {
@@ -256,9 +262,7 @@ final class ControlCenter: ObservableObject {
     @Published var discussionSending=false
     @Published var discussionExtracting=false
     private var outcomeWorker:Task<Void,Never>?
-    private var outcomeModel:ResponsesOutcomePort?
     @Published var discussionStatus="选择一份历史，明确进入讨论。"
-    private var discussionModel:ResponsesDiscussionPort?
     @Published var selected: String?
     /// Sheet-scoped views cannot navigate the workspace themselves; they ask
     /// for a source and the workspace consumes the request from its own state.
@@ -303,7 +307,6 @@ final class ControlCenter: ObservableObject {
     var monitorReloadForceItems = false
     var monitorObservers: [NSObjectProtocol] = []
     var monitorTimer: Timer?
-    var monitorAnalysisModel: ResponsesNotificationAnalysisPort?
     func recordMonitorSettingsSave(success: Bool) {
         monitorSettingsSaveFailed = !success
         if success { monitorSettingsDecodeFailed = false }
@@ -340,7 +343,6 @@ final class ControlCenter: ObservableObject {
     @Published var selectedAssociationAttempts: [ExpressionAssociationAttempt] = []
     @Published var associationStatuses: [String: String] = [:]
     @Published var quietAssociationSourceID: String?
-    private var associationModel: ResponsesExpressionAssociationPort?
     @Published var quietMode: CognitiveFeedbackMode = .normal
     @Published var quietStatus = ""
     private var quietVersion = 0
@@ -383,8 +385,8 @@ final class ControlCenter: ObservableObject {
             let local: any LocalRetrievalPort
             if let semanticRetrieval { local = semanticRetrieval } else { local = retrieval }
             let result: ExpressionAssociationProcessing
-            if let batchID=segmentedBatchID { result=try await store.processCommittedSegmentedAssociation(batchID:batchID,retrieval:local,semantic:semanticRetrieval != nil,model:associationModel) }
-            else { result=try await store.processExpressionAssociation(sourceID:id,retrieval:local,semantic:semanticRetrieval != nil,model:associationModel) }
+            if let batchID=segmentedBatchID { result=try await store.processCommittedSegmentedAssociation(batchID:batchID,retrieval:local,semantic:semanticRetrieval != nil,model:textModels?.association) }
+            else { result=try await store.processExpressionAssociation(sourceID:id,retrieval:local,semantic:semanticRetrieval != nil,model:textModels?.association) }
             switch result.state {
             case .paused: associationStatuses[id] = "静默关联已暂停；没有发送。"
             case .localOnly: associationStatuses[id] = "表达仅本机处理；没有发送关联判断。"
@@ -429,13 +431,12 @@ final class ControlCenter: ObservableObject {
             selected = hit.document.sourceID; await refresh(); return true
         } catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription; return false }
     }
-    private var relevanceModel: ResponsesRelevancePort?
     func prepareRelevance(query: String, candidates: [RetrievalHit]) async {
         guard let store else { return }
         await relevance.prepare(query:query,candidates:candidates,store:store)
     }
     func judgeRelevance() {
-        guard let store, let port = relevanceModel else { return }
+        guard let store, let port = textModels?.relevance else { return }
         relevance.run(store:store,port:port)
     }
     func cancelHistorySearch() {
@@ -516,28 +517,20 @@ final class ControlCenter: ObservableObject {
     private var textConfigurationFile: URL?
     @Published var changingPolicy = false
     @Published var understandingSource: String?
-    @Published var modelConfigured = false
+    /// 所有文本端口与整理脚本使用同一份已启用配置。
+    @Published private(set) var textModels: LocalTextModel.Suite?
+    var modelConfigured: Bool { textModels != nil }
     @Published var modelSummary = "尚未配置文本模型"
     /// 有配置但不可用时的具体原因；界面优先显示它，而不是笼统的「尚未配置」。
     @Published var modelConfigIssue: String?
     @Published var speechSummary = "Qwen 本地转写 · 尚未配置"
-    private var organizerModelSnapshot: [String: String]?
     private var speechPort: (any SpeechPort)?
     var speechConfigured: Bool { speechPort is LocalQwenSpeechPort }
-    /// 文本模型是否可用：内部配置与导入的配置文件都算就绪；文件不再是前置条件。
-    var textModelConfigured: Bool { modelConfigured }
-    var modelConfigurationName: String? { textConfigurationFile?.lastPathComponent }
     var modelConfigurationPath: String? { textConfigurationFile?.path }
-    /// 应用内配置（或导入的配置文件）转成 Python 子进程环境。地址、型号与核对强度
-    /// 都跟随设置页；密钥只存在于内存与子进程环境，不写盘、不打印。
-    var textModelOrganizerEnvironment: [String: String]? {
-        // 端口安装时的同一份地址/密钥/型号/强度快照：端口与整理脚本不会读到两份不同的配置。
-        guard modelConfigured else { return nil }
-        return organizerModelSnapshot
-    }
+    var textModelOrganizerEnvironment: [String: String]? { textModels?.organizerEnvironment }
     var recordingModelIssue: String? {
         if !speechConfigured { return "尚未配置本地 Qwen 转写模型。" }
-        if !textModelConfigured { return "尚未配置文本模型。" }
+        if !modelConfigured { return "尚未配置文本模型。" }
         if Bundle.main.url(forResource: "organize_podcast", withExtension: "py") == nil { return "应用缺少完整整理脚本，请更新应用。" }
         return nil
     }
@@ -590,17 +583,10 @@ final class ControlCenter: ObservableObject {
     @Published private(set) var pausedActionBatch: PausedActionBatchRun?
     private var pausedActionBatchWorker: Task<Void, Never>?
     private var sourceReidentifyWorker: Task<Void, Never>?
-    private var segmentExtractionModel: ResponsesSegmentExtractionPort?
-    private var segmentAggregationModel: ResponsesSegmentAggregationPort?
-    private var textModel: ResponsesModelPort?
-    private var englishModel: ResponsesEnglishPracticePort?
     @Published var englishSnapshot: EnglishPracticeSnapshot?
     @Published var englishAttempts: [EnglishFeedbackAttemptRecord] = []
     @Published var englishBusy = false
     @Published var englishStatus = "选择一份我的英文原话，再明确发送文本反馈。"
-    private var followupModel: ResponsesRecordingFollowupPort?
-    private var assistantModel: ResponsesAssistantPort?
-    private var knowledgeReviewModel: ResponsesKnowledgeReviewPort?
     private var knowledgeReviewWorker: Task<Void, Never>?
     @Published var knowledgeReviews: [KnowledgeReviewRecord] = []
     @Published var knowledgeReviewBusy = false
@@ -631,11 +617,10 @@ final class ControlCenter: ObservableObject {
     @Published var initiationBusy = false
     @Published var initiationText = ""
     @Published var initiationSourceID: String?
-    private var initiationModel: ResponsesTaskInitiationPort?
     func generateTaskInitiation(text: String, sourceID: String?, mode: TaskInitiationMode, allowCloud: Bool) async -> Bool {
         guard !initiationBusy else { return false }
         guard let store else { initiationStatus = "资料库尚未打开"; return false }
-        guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
+        guard let port = textModels?.initiation else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
         guard allowCloud else { initiationStatus = "请先允许这段原话用于云端，再继续"; return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { initiationStatus = "先写下或从材料带入一段原话"; return false }
@@ -678,7 +663,7 @@ final class ControlCenter: ObservableObject {
     func directAnswerTaskInitiation(_ record: TaskInitiationRecord, allowCloud: Bool) async -> String? {
         guard !initiationBusy else { return nil }
         guard allowCloud else { initiationStatus = "请先允许这段原话用于云端，再直接回答"; return nil }
-        guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return nil }
+        guard let port = textModels?.initiation else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return nil }
         initiationBusy = true
         defer { initiationBusy = false }
         initiationStatus = "正在直接回答…"
@@ -694,7 +679,7 @@ final class ControlCenter: ObservableObject {
     func answerTaskInitiation(_ record: TaskInitiationRecord, answer: String) async -> Bool {
         guard !initiationBusy else { return false }
         guard let store else { return false }
-        guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
+        guard let port = textModels?.initiation else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
         let clean = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { initiationStatus = "请先填写澄清回答"; return false }
         initiationBusy = true
@@ -742,7 +727,7 @@ final class ControlCenter: ObservableObject {
                                                       title: record.proposal.title, reason: "用户选择仅记录")
                 _ = try await store.replaceTaskInitiation(id: record.id, preferredRoute: .captureOnly, proposal: proposal)
             } else {
-                guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
+                guard let port = textModels?.initiation else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
                 let input = try await store.taskInitiationInput(sourceID: record.sourceID, mode: .direct,
                                                                 preferredRoute: route, answer: record.input.answer)
                 initiationStatus = "正在按新路线重新整理…"
@@ -819,7 +804,6 @@ final class ControlCenter: ObservableObject {
             return false
         }
     }
-    private var reminderFieldModel: ResponsesReminderFieldPort?
     private var reminderFieldWorker: Task<Void, Never>?
     private var reminderFieldFailure: String?
     var reminderFieldsPending: Bool { reminderFieldWorker != nil }
@@ -849,6 +833,7 @@ final class ControlCenter: ObservableObject {
     private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
     @Published var workspaceLoaded = false
+    @Published var startupNoteRows: [NoteLibraryRow]?
     private var lastFullReloadGeneration: Int64?
     private var lastBackgroundResumeGeneration: Int64?
     @Published var textSize: AppTextSize = AppTextSize(rawValue: UserDefaults.standard.string(forKey: "voiceos.textSize.v1") ?? "") ?? .standard
@@ -858,6 +843,7 @@ final class ControlCenter: ObservableObject {
     }
     @Published var startupIssue = ""
     @Published var player: AVPlayer?
+    private(set) var playbackSourceID: String?
     private var playbackBoundary: Any?
     private var playbackGeneration = 0
     @Published var history: [TranscriptVersion] = []
@@ -987,14 +973,18 @@ final class ControlCenter: ObservableObject {
         actionReviewLedgers.values.flatMap { $0.unresolvedPairs(for: action.id) }.sorted { $0.id < $1.id }
     }
     static weak var primary: ControlCenter?
-    private let rootOverride: URL?
+    private let configuredLibraryRoot: URL
     private(set) var libraryRoot: URL?
-    var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
+    let libraryTitle: String
     init(root: URL? = nil) {
-        rootOverride=root
+        let isolatedRoot = root ?? ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        }
+        configuredLibraryRoot = isolatedRoot ?? LibraryLayout.defaultRoot
+        libraryTitle = root.map { "独立资料库 · " + $0.lastPathComponent } ?? "VoiceOS"
         pendingReminderSyncs = ControlCenter.loadPendingReminderSyncs()
         deliveryReadAt = ControlCenter.loadDeliveryReadAt()
-        recordingInbox=RecordingInbox(libraryRoot:root ?? ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"].map { URL(fileURLWithPath:$0) })
+        recordingInbox = RecordingInbox(libraryRoot: isolatedRoot)
         // Only the app's main model (no root) backs the app-level menu action.
         if root == nil, ControlCenter.primary == nil { ControlCenter.primary = self }
     }
@@ -1006,8 +996,6 @@ final class ControlCenter: ObservableObject {
     @Published var organizingTopics = false
     @Published var topicOrganizationStatus = ""
     private let topicCooldown = TopicOrganizationCooldown()
-    private var topicModel: ResponsesTopicOrganizationPort?
-    var recordingExpressionModel: ResponsesRecordingExpressionPort?
     private var topicWorker: Task<Void, Never>?
     private var topicAttemptDigest: String?
     private var topicPending = false
@@ -1019,12 +1007,11 @@ final class ControlCenter: ObservableObject {
     /// 首页批量笔记读取的会话级缓存：视图重建时首帧就能用笔记标题与预览，
     /// 不再先按旧标题渲染再跳变。按表达键存放每条最新一版，只增不减。
     @Published var materialNoteRows: [String: StoredMaterialNote] = [:]
-    var materialNoteModel: ResponsesMaterialNotePort?
     private var topicDomainBackfillStarted = false
     /// 升级后旧主题还没有人生维度：启动时用一次低成本归类补齐，不重跑整套
     /// 主题整理。每个运行期只尝试一次；失败就等下次启动或下次整理。
     private func startTopicDomainBackfillIfNeeded() {
-        guard !topicDomainBackfillStarted, initialized, let store, let port = topicModel else { return }
+        guard !topicDomainBackfillStarted, initialized, let store, let port = textModels?.topics else { return }
         topicDomainBackfillStarted = true
         Task {
             do {
@@ -1037,7 +1024,7 @@ final class ControlCenter: ObservableObject {
         }
     }
     func queueTopicOrganization(retry: Bool = false, topUp: Bool = false) {
-        guard initialized, topicModel != nil else { return }
+        guard initialized, textModels?.topics != nil else { return }
         topicForcePending = topicForcePending || retry
         topicTopUpPending = topicTopUpPending || topUp
         if topicWorker != nil { topicPending = true; return }
@@ -1049,7 +1036,7 @@ final class ControlCenter: ObservableObject {
                 let force = topicForcePending, top = !force && topicTopUpPending
                 topicForcePending = false; topicTopUpPending = false
                 do {
-                    guard let store, let port = topicModel, let input = try await store.prepareTopicOrganization() else { return }
+                    guard let store, let port = textModels?.topics, let input = try await store.prepareTopicOrganization() else { return }
                     if !force && !top, try await !store.needsTopicOrganizationRefresh() { return }
                     if !force && !top, let waiting = topicCooldown.waitingMessage() { topicOrganizationStatus = waiting; return }
                     topicAttemptDigest = input.digest
@@ -1091,8 +1078,15 @@ final class ControlCenter: ObservableObject {
 
     @Published var dictationBusy = false
     @Published var dictationActive = false
+    @Published private(set) var dictationStarting = false
+    @Published private(set) var dictationPaused = false
+    @Published private(set) var dictationSealing = false
+    @Published private(set) var lastSavedDictation: SourceRecord?
+    @Published private(set) var lastInterruptedDictation: SourceRecord?
+    @Published private(set) var lastDictationOrganizationFailed = false
+    private var lastDictationRequestsOrganization = false
     private(set) var dictationStartedAt: Date?
-    private var dictationStatusBase = ""
+    private var dictationShowsReceipt = false
     private var dictationDiscarding = false
     var dictationHotKeyConflict: Bool { !GlobalHotKeyCenter.shared.isRegistered(.toggleDictation) }
     private var dictationSource: String?
@@ -1110,12 +1104,21 @@ final class ControlCenter: ObservableObject {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
     var dictationElapsedText: String {
-        guard let dictationStartedAt else { return "" }
-        return Self.clockText(Date().timeIntervalSince(dictationStartedAt))
+        guard dictationStartedAt != nil else { return "" }
+        return Self.clockText(dictation.elapsed)
     }
-    func noteDictationClock(_ text: String) {
-        guard dictationActive, !dictationBusy, !dictationStatusBase.isEmpty else { return }
-        status = dictationStatusBase + " · 已录 " + text
+    var dictationInputLevel: Double { dictation.inputLevel }
+    func toggleDictationPause() {
+        guard dictationActive, !dictationBusy else { return }
+        if dictationPaused {
+            guard dictation.resume() else {
+                stopDictation(interrupted: true)
+                return
+            }
+            dictationPaused = false
+        } else if dictation.pause() {
+            dictationPaused = true
+        }
     }
     func refreshMicrophoneAuthorization() { microphoneAuthorization = NativeDictation.authorizationStatus() }
     func requestMicrophoneAccess() async -> Bool {
@@ -1123,48 +1126,61 @@ final class ControlCenter: ObservableObject {
         microphoneAuthorization = NativeDictation.authorizationStatus()
         return granted
     }
-    func startDictation(processAfterTranscription: Bool = false) async {
+    func startDictation(processAfterTranscription: Bool = false, showsReceipt: Bool = false) async {
         guard let store, dictationBusyReason == nil, !dictationActive else { status = dictationBusyReason ?? "正在录音，停止后才能开始下一段"; return }
         if processAfterTranscription, let issue = recordingModelIssue {
             status = issue + "无法录制并完整整理"
             return
         }
-        dictationBusy = true; defer { dictationBusy = false }
+        dictationBusy = true
+        dictationStarting = true
+        defer { dictationStarting = false; dictationBusy = false }
         let duration: TimeInterval?
         if let raw = ProcessInfo.processInfo.environment["VOICEOS_TEST_CAPTURE_SECONDS"] {
             guard let seconds = Double(raw), seconds.isFinite, seconds > 0, seconds <= 60 else { status = "限时采集参数无效，未开启麦克风"; return }
             duration = seconds
         } else { duration = nil }
-        guard await dictation.requestPermission() else { status = "麦克风未获授权，未开始录制；仍可导入文件"; return }
+        guard await StartupTrace.measureAsync("capture.microphonePermission", { await dictation.requestPermission() }) else {
+            status = "麦克风未获授权，未开始录制；仍可导入文件"
+            return
+        }
         do {
-            let intent = try await store.beginDictation()
+            let intent = try await StartupTrace.measureAsync("capture.beginIntent") { try await store.beginDictation() }
             dictationFullOrganization = processAfterTranscription
+            dictationShowsReceipt = showsReceipt
             dictationSource = intent.sourceID; dictationInterrupted = false; dictationDiscarding = false
-            try dictation.start(at:intent.stagingURL,maximumDuration:duration) { [weak self] success in Task { await self?.finishDictation(success:success) } }
+            try StartupTrace.measure("capture.startMicrophone") {
+                try dictation.start(at: intent.stagingURL, maximumDuration: duration,
+                                    inputChanged: { [weak self] in self?.stopDictation(interrupted: true) }) { [weak self] success in
+                    Task { await self?.finishDictation(success: success) }
+                }
+            }
             dictationStartedAt = Date(); dictationActive = true; selected = intent.sourceID
+            if showsReceipt {
+                lastSavedDictation = nil
+                lastInterruptedDictation = nil
+                lastDictationOrganizationFailed = false
+                lastDictationRequestsOrganization = processAfterTranscription
+            }
             status = duration.map { "正在进行\($0)秒限时采集 · 到时自动停止 · 仅本地" } ?? "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
             if processAfterTranscription { status = "正在录制 · 停止后完整转写并整理所有意图；仅文字用于云端" }
-            dictationStatusBase = status
-            await refresh()
         } catch {
             if let id = dictationSource { try? await store.interruptDictation(sourceID:id) }
             dictationSource = nil; dictationActive = false; dictationFullOrganization = false
-            dictationStartedAt = nil; dictationStatusBase = ""; dictationDiscarding = false
+            dictationStartedAt = nil; dictationDiscarding = false
             status = error.localizedDescription; await refresh()
         }
     }
     func stopDictation(interrupted:Bool = false) {
         guard dictationActive, !dictationBusy else { return }
         dictationInterrupted = interrupted; dictationBusy = true
-        dictationStartedAt = nil; dictationStatusBase = ""
-        status = interrupted ? "录制因系统中断结束，保留片段待核对" : "正在停止录制并核对原件…"
+        status = interrupted ? "录音已中断，正在保留片段…" : "正在停止录制并核对原件…"
         dictation.stop()
     }
     func cancelAndDiscardDictation() {
         guard dictationActive, !dictationBusy, dictationSource != nil else { status = "没有可取消的录音"; return }
         dictationDiscarding = true
         dictationBusy = true
-        dictationStartedAt = nil; dictationStatusBase = ""
         status = "正在取消并丢弃这段口述…"
         dictation.stop()
     }
@@ -1176,18 +1192,21 @@ final class ControlCenter: ObservableObject {
         if dictationActive {
             stopDictation()
         } else {
-            Task { await startDictation(processAfterTranscription: recordingModelIssue == nil) }
+            Task { await startDictation(processAfterTranscription: recordingModelIssue == nil, showsReceipt: true) }
         }
     }
     private func finishDictation(success:Bool) async {
         guard let store, let id = dictationSource else { return }
+        dictationBusy = true
+        dictationSealing = true
         let organize = dictationFullOrganization
         let discard = dictationDiscarding
+        let showsReceipt = dictationShowsReceipt
         dictationFullOrganization = false
         dictationDiscarding = false
         dictationSource = nil; dictationActive = false
-        dictationStartedAt = nil; dictationStatusBase = ""
-        defer { dictationBusy = false }
+        dictationStartedAt = nil; dictationPaused = false
+        defer { dictationSealing = false; dictationBusy = false }
         if discard {
             await discardDictation(store: store, sourceID: id, recorded: success)
             await refresh()
@@ -1198,11 +1217,20 @@ final class ControlCenter: ObservableObject {
             return
         }
         if success && !dictationInterrupted {
-            do { try await store.sealDictation(sourceID:id); status = "口述原件已保存 · 本地转写随后处理" }
+            do {
+                try await store.sealDictation(sourceID:id)
+                if showsReceipt { lastSavedDictation = try? await store.sourceRecords(ids: [id]).first }
+                status = "口述原件已保存 · 本地转写随后处理"
+            }
             catch { try? await store.interruptDictation(sourceID:id); status = "录制封存未完成：" + error.localizedDescription + "；片段保留待核对，未报告保存成功" }
         } else {
             try? await store.interruptDictation(sourceID:id); status = "录制未正常结束，片段保留待核对；未报告保存成功"
         }
+        if showsReceipt, lastSavedDictation == nil,
+           let interrupted = try? await store.sourceRecords(ids: [id]).first, interrupted.state == "interrupted" {
+            lastInterruptedDictation = interrupted
+        }
+        dictationSealing = false
         await refresh()
         if discussionRecordingID == id {
             discussionStatus=records.first(where: { $0.id == id })?.state == "saved" ? "本轮口述原件已保存；等待本地转写与核对，尚未关联和发送。" : "本轮录制尚未正常保存，片段保留待核对；尚未关联和发送。"
@@ -1219,7 +1247,7 @@ final class ControlCenter: ObservableObject {
         }
         do {
             try await store.sealDictation(sourceID: sourceID)
-            let audio = records.first(where: { $0.id == sourceID }).flatMap { record in
+            let audio = try await store.sourceRecords(ids: [sourceID]).first.flatMap { record in
                 libraryRoot.map { $0.appendingPathComponent(record.relativePath) }
             }
             if let audio { try? FileManager.default.removeItem(at: audio) }
@@ -1243,8 +1271,35 @@ final class ControlCenter: ObservableObject {
     func recoverDictation(_ record:SourceRecord) async {
         guard let store, !dictationBusy, !dictationActive else { return }
         dictationBusy = true; defer { dictationBusy = false }
-        do { try await store.sealDictation(sourceID:record.id); status = "可解码片段已保存；它是中断片段，不代表完整表达"; await refresh(); scheduleProcessing() }
+        do {
+            try await store.sealDictation(sourceID: record.id)
+            if lastInterruptedDictation?.id == record.id {
+                lastSavedDictation = try? await store.sourceRecords(ids: [record.id]).first
+                lastInterruptedDictation = nil
+                lastDictationRequestsOrganization = false
+            }
+            status = "可解码片段已保存"
+            await refresh()
+            scheduleProcessing()
+        }
         catch { status = "片段尚不能完整解码，保留待核对"; await refresh() }
+    }
+
+    func dictationReceiptStatus(for source: SourceRecord) -> String? {
+        if source.jobState == "failed" { return "转写未完成" }
+        if fullRecordingCompletedSourceID == source.id { return "已完成整理" }
+        if lastDictationOrganizationFailed { return "整理未完成" }
+        if source.jobState == "running" || (organizingSourceID == source.id && source.transcriptVersionID == nil) {
+            return "正在本地转写"
+        }
+        if source.jobState == "queued" {
+            return speechConfigured ? "等待转写" : "配置本地转写后可处理"
+        }
+        if source.transcriptVersionID != nil {
+            if organizingSourceID == source.id { return "正在整理观点与任务" }
+            return lastDictationRequestsOrganization ? "等待整理" : "转写已完成"
+        }
+        return nil
     }
     func startFeedbackDictation() async -> String? {
         guard speechPort is LocalQwenSpeechPort, !dictationActive, !dictationBusy else {
@@ -1263,16 +1318,16 @@ final class ControlCenter: ObservableObject {
         StartupTrace.mark("start.begin")
         startupIssue = ""
         do {
-            let root: URL
-            if let override = rootOverride { root = override }
-            else if let path = ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"] { root = URL(fileURLWithPath: path, isDirectory: true) }
-            else { root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("VoiceOS", isDirectory: true) }
+            let root = configuredLibraryRoot
             libraryRoot = root
             outcomePreferenceKey = "voiceos.outcomeFollowup.skipped:" + root.standardizedFileURL.path
             skippedOutcomeKeys = Set(UserDefaults.standard.stringArray(forKey: outcomePreferenceKey) ?? [])
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             self.store = store
             StartupTrace.mark("start.storeInit")
+            startupNoteRows = try? await StartupTrace.measureAsync("start.noteRows") {
+                try await store.noteLibraryRows()
+            }
             try await store.recover()
             StartupTrace.mark("start.recoverDone")
             markdownMirror = MarkdownMirror(directory: root.appendingPathComponent("Mirror", isDirectory: true))
@@ -1282,17 +1337,17 @@ final class ControlCenter: ObservableObject {
             StartupTrace.mark("start.initialized")
             restoreSpeechSelection()
             let storedModelConfig = UserDefaults.standard.object(forKey: TextModelConfiguration.defaultsKey) != nil
-            if TextModelConfiguration.load() != nil {
+            if let config = TextModelConfiguration.load() {
                 // 应用内部配置是权威：存在但读不到密钥时明确报告，绝不回退去覆盖它。
-                if !restoreInternalTextModelConfiguration() {
-                    modelConfigured = false
+                if !restoreInternalTextModelConfiguration(config) {
+                    textModels = nil
                     modelConfigIssue = "模型配置存在，但钥匙串中的密钥或服务地址不可用；请在设置中重新保存"
                     modelSummary = "模型配置需要重新保存"
                     status = modelConfigIssue ?? ""
                 }
             } else if storedModelConfig {
                 // 有数据却解不出来是「损坏」，不是「未配置」；不能静默回退去覆盖用户配置。
-                modelConfigured = false
+                textModels = nil
                 modelConfigIssue = "模型配置已损坏；请在设置中重新保存"
                 modelSummary = "模型配置已损坏，需要重新保存"
                 status = modelConfigIssue ?? ""
@@ -1322,7 +1377,6 @@ final class ControlCenter: ObservableObject {
                 recordingInbox.start(canProcess: { [weak self] in
                     guard let self else { return false }
                     return self.initialized && self.modelConfigured && self.speechPort is LocalQwenSpeechPort && self.organizingSourceID == nil && !self.fullRecordingBusy && self.worker == nil && self.understandingWorker == nil && !self.dictationActive && !self.dictationBusy && !self.importing && self.pausedActionBatch?.isRunning != true
-                        && self.textModelOrganizerEnvironment != nil && self.recordingExpressionModel != nil
                         && Bundle.main.url(forResource: "organize_podcast", withExtension: "py") != nil
                 }, resumeSaved: { [weak self] in
                     await self?.resumeSavedRecordingExpressions()
@@ -1332,6 +1386,7 @@ final class ControlCenter: ObservableObject {
                 })
         } catch {
             store = nil; initialized = false; workspaceLoaded = false
+            startupNoteRows = nil
             startupIssue = error.localizedDescription
             status = "资料库尚未打开：" + error.localizedDescription
         }
@@ -1355,6 +1410,7 @@ final class ControlCenter: ObservableObject {
         }
         refreshWorker = work
         let didWork = await work.value
+        if didWork || scope == .full { scheduleNoteHistorySync() }
         guard didWork else { StartupTrace.mark("refresh.idleSkip"); return }
         StartupTrace.mark("refresh.reloaded")
         if monitorPageVisible { await reloadMonitorState() }
@@ -1477,7 +1533,7 @@ final class ControlCenter: ObservableObject {
     private func backupLibrary(at root: URL, manual: Bool = false) {
         guard !backupRunning else { return }
         backupRunning = true
-        let database = root.appendingPathComponent("voiceos.sqlite")
+        let database = LibraryLayout.database(in: root)
         let directory = root.appendingPathComponent("Backups", isDirectory: true)
         let retain = backupRetentionPreference
         Task.detached(priority: .utility) { [weak self] in
@@ -1522,7 +1578,7 @@ final class ControlCenter: ObservableObject {
         checkingLibraryHealth = true
         libraryHealthProblem = false
         libraryHealthText = "正在检查资料库…"
-        let database = root.appendingPathComponent("voiceos.sqlite")
+        let database = LibraryLayout.database(in: root)
         let backupDirectory = root.appendingPathComponent("Backups", isDirectory: true)
         Task {
             defer { checkingLibraryHealth = false }
@@ -1603,7 +1659,7 @@ final class ControlCenter: ObservableObject {
         homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords,
                                                        overrides: [], reviewRequiredActionIDs: reviewed)
     }
-    private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot, reminderAnomalies: ReminderSyncAnomalySummary = .empty) {
+    private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot) {
         records = snapshot.sources
         recordsRevision &+= 1
         claims = snapshot.claims
@@ -1627,7 +1683,7 @@ final class ControlCenter: ObservableObject {
         compensationGrants = snapshot.compensationGrants
         compensationOperations = snapshot.compensationOperations
         reminderLinks = snapshot.reminderLinks
-        reminderSyncAnomalies = reminderAnomalies
+        reminderSyncAnomalies = snapshot.reminderSyncAnomalies
         reminderAccess = snapshot.reminderAccess
         reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
         if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
@@ -1655,11 +1711,20 @@ final class ControlCenter: ObservableObject {
         StartupTrace.mark("secondary.followups=\(recordingFollowups.count)")
         secondaryRevision &+= 1
     }
-    private func applyAssistantSnapshot(_ snapshot: WorkspaceSnapshot) {
+    private func refreshAssistantSnapshot(from store: VoiceOSStore) async throws -> WorkspaceSnapshot {
+        let snapshot = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
         assistantExecutions = snapshot.assistantExecutions
         assistantAssessmentIssues = snapshot.assistantAssessmentIssues
         StartupTrace.mark("secondary.assistant=\(assistantExecutions.count) issues=\(assistantAssessmentIssues.count)")
         secondaryRevision &+= 1
+        StartupTrace.mark("reload.assistantPublished")
+        return snapshot
+    }
+
+    private func refreshKnowledgeSnapshot(from store: VoiceOSStore) async throws {
+        let snapshot = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
+        knowledgeReviews = snapshot.knowledgeReviews
+        StartupTrace.mark("reload.knowledgePublished")
     }
     @discardableResult
     private func reloadWorkspace(_ plan: RefreshPlan) async -> Bool {
@@ -1687,7 +1752,7 @@ final class ControlCenter: ObservableObject {
             if workspaceLastErrorRetry == .reload { clearWorkspaceError() }
             latestClaimsBySource = snapshot.currentClaimsBySource
             // Publish the core lists together, without awaits between related data sets.
-            applyCoreSnapshot(snapshot, reminderAnomalies: try await store.reminderSyncAnomalies())
+            applyCoreSnapshot(snapshot)
             coreSnapshotApplied = true
             StartupTrace.mark("reload.published")
             await validateCoreSelection(store: store)
@@ -1701,11 +1766,9 @@ final class ControlCenter: ObservableObject {
             contextsFroze = light.contextValidityChanged
             StartupTrace.mark("reload.secondaryPublished")
             try? await Task.yield()
-            let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
-            applyAssistantSnapshot(assistant)
+            let assistant = try await refreshAssistantSnapshot(from: store)
             assistantSnapshot = assistant
             contextsFroze = contextsFroze || assistant.contextValidityChanged
-            StartupTrace.mark("reload.assistantPublished")
             try? await Task.yield()
             followupValidity = try await StartupTrace.measureAsync("reload.followupValidity") {
                 try await store.recordingFollowupValidities(recordingFollowups,
@@ -1715,16 +1778,14 @@ final class ControlCenter: ObservableObject {
                     latest: coreSnapshotApplied && !contextsFroze ? latestClaimsBySource : nil)
             }
             StartupTrace.mark("reload.validityPublished")
-            let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
-            knowledgeReviews = knowledge.knowledgeReviews
-            StartupTrace.mark("reload.knowledgePublished")
+            try await refreshKnowledgeSnapshot(from: store)
             stalledOutcomes = try await StartupTrace.measureAsync("reload.stalledOutcomes") { (try? await store.stalledOutcomes()) ?? [] }
             englishAttempts = try await StartupTrace.measureAsync("reload.englishAttempts") { try await store.englishFeedbackAttempts() }
             await StartupTrace.measureAsync("reload.relevanceValidate") { await relevance.validate(store:store) }
             await StartupTrace.measureAsync("reload.quietFeedback") { await refreshQuietFeedback() }
             await StartupTrace.measureAsync("reload.sourceDiscussions") { await refreshSourceDiscussions() }
             if contextsFroze {
-                applyCoreSnapshot(try await store.workspaceSnapshot(.core), reminderAnomalies: try await store.reminderSyncAnomalies())
+                applyCoreSnapshot(try await store.workspaceSnapshot(.core))
                 StartupTrace.mark("reload.coreRepublished")
             }
         }
@@ -1741,7 +1802,7 @@ final class ControlCenter: ObservableObject {
         if plan.coreSecondary {
             do {
                 let snapshot = try await StartupTrace.measureAsync("reload.coreSecondarySnapshot") { try await store.workspaceSnapshot(.coreSecondary) }
-                applyCoreSnapshot(snapshot, reminderAnomalies: try await store.reminderSyncAnomalies())
+                applyCoreSnapshot(snapshot)
                 workspaceLoaded = true
                 StartupTrace.mark("reload.firstScreen")
                 await validateCoreSelection(store: store)
@@ -1752,18 +1813,14 @@ final class ControlCenter: ObservableObject {
         }
         if plan.assistant {
             do {
-                let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
-                applyAssistantSnapshot(assistant)
+                let assistant = try await refreshAssistantSnapshot(from: store)
                 contextsFroze = contextsFroze || assistant.contextValidityChanged
-                StartupTrace.mark("reload.assistantPublished")
                 resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistant)
             } catch { status = error.localizedDescription }
         }
         if plan.knowledge {
             do {
-                let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
-                knowledgeReviews = knowledge.knowledgeReviews
-                StartupTrace.mark("reload.knowledgePublished")
+                try await refreshKnowledgeSnapshot(from: store)
                 resumeKnowledgeReviews()
             } catch { status = error.localizedDescription }
         }
@@ -1794,8 +1851,8 @@ final class ControlCenter: ObservableObject {
         do {
             // 文件只作为导入入口：读取后把地址、密钥、模型与强度迁移进应用内部
             // 配置（密钥进钥匙串），之后不再依赖这个文件。
-            let suite = try LocalTextModel.loadSuite(from: file, segmentRequestTimeout: 600, segmentStreaming: true)
             let settings = try LocalTextModel.inspect(file)
+            let suite = try LocalTextModel.loadSuite(settings: settings, segmentRequestTimeout: 600, segmentStreaming: true)
             do {
                 try TextModelKeychain.save(settings.key)
             } catch {
@@ -1807,21 +1864,14 @@ final class ControlCenter: ObservableObject {
                                    noteEffort: settings.noteEffort, topicEffort: settings.topicEffort,
                                    reviewEffort: settings.reviewEffort).save()
             UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
-            installTextModelSuite(suite, configurationName: file.lastPathComponent, resume: resume,
-                                  organizerEnvironment: Self.organizerEnvironment(address: settings.address.absoluteString, key: settings.key,
-                                                                                    model: settings.model, effort: settings.reviewEffort))
+            installTextModelSuite(suite, configurationName: file.lastPathComponent, resume: resume, importedFrom: file)
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
-            textConfigurationFile = file
         } catch {
             // 历史路径指向的文件已经不可用：一次性移除，避免每次启动都重试同一个坏路径。
             UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
             status = "模型配置不可用（" + error.localizedDescription + "）；请在设置中重新填写或导入"
             reportWorkspaceError(status,retry:.textModel)
         }
-    }
-    private static func organizerEnvironment(address: String, key: String, model: String, effort: String) -> [String: String] {
-        ["VOICEOS_TEXT_BASE_URL": address, "VOICEOS_TEXT_API_KEY": key,
-         "VOICEOS_TEXT_MODEL": model, "VOICEOS_TEXT_EFFORT": effort]
     }
     /// 设置页保存内部配置：先让端口策略接受这份地址与密钥，再落盘；校验失败不留半保存状态。
     func applyTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> Bool {
@@ -1844,10 +1894,7 @@ final class ControlCenter: ObservableObject {
             config.save()
             UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
-            textConfigurationFile = nil
-            installTextModelSuite(suite, configurationName: config.model, resume: true,
-                                  organizerEnvironment: Self.organizerEnvironment(address: url.absoluteString, key: apiKey,
-                                                                                    model: config.model, effort: config.reviewEffort))
+            installTextModelSuite(suite, configurationName: config.model, resume: true)
             return true
         } catch {
             status = "配置未保存：" + error.localizedDescription + "；可先点「测试连接」确认服务"
@@ -1857,7 +1904,7 @@ final class ControlCenter: ObservableObject {
     /// 探针结果里带上规范化的候选地址，便于诊断 /v1 重复拼接这类问题。
     func textModelEndpointHint(_ baseURL: String) -> String {
         guard let url = URL(string: baseURL) else { return "服务地址无效" }
-        return url.appendingPathComponent("responses").absoluteString
+        return ResponsesEndpoint.url(for: url).absoluteString
     }
     /// 用给定配置发一次极小请求，验证地址、密钥与模型可用；返回面向用户的结果与延迟。
     func testTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> String {
@@ -1866,18 +1913,16 @@ final class ControlCenter: ObservableObject {
         guard TextModelHostPolicy.isAllowed(base) else {
             return "服务地址须为 https://api.openai.com/v1 或 https://api.chiyi.cc/v1（不带端口、查询或子路径）"
         }
-        let url = base.appendingPathComponent("responses")
+        let url = ResponsesEndpoint.url(for: base)
         guard !apiKey.isEmpty else { return "没有可用的密钥：请填写后点「保存并启用」（若已在弹窗中拒绝钥匙串访问，请允许后重试）" }
         let payload: [String: Any] = ["model": config.model, "store": false,
             "reasoning": ["effort": "minimal"], "max_output_tokens": 32, "truncation": "disabled",
             "instructions": "你是连通性探针。只回复两个字符：ok",
             "input": [["role": "user", "content": "ping"]]]
         do {
-            var request = URLRequest(url: url, timeoutInterval: 30)
-            request.httpMethod = "POST"
-            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-            request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let endpoint = try ResponsesEndpoint(baseURL: base, apiKey: apiKey, model: config.model)
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let request = endpoint.request(body: data, timeout: 30)
             let started = Date()
             let reply = try await DirectModelHTTPTransport().send(request)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
@@ -1893,43 +1938,27 @@ final class ControlCenter: ObservableObject {
         }
     }
     /// 启动时优先使用应用内部配置；没有时才回退到开发用的配置文件路径。
-    private func restoreInternalTextModelConfiguration() -> Bool {
-        guard let config = TextModelConfiguration.load(),
-              let key = TextModelKeychain.apiKey(),
+    private func restoreInternalTextModelConfiguration(_ config: TextModelConfiguration) -> Bool {
+        guard let key = TextModelKeychain.apiKey(),
               let url = URL(string: config.baseURL),
               let suite = try? LocalTextModel.loadSuite(
                 settings: LocalTextModel.Settings(address: url, key: key, model: config.model,
                                                   noteEffort: config.noteEffort, topicEffort: config.topicEffort,
                                                   reviewEffort: config.reviewEffort),
                 segmentRequestTimeout: 600, segmentStreaming: true) else { return false }
-        installTextModelSuite(suite, configurationName: config.model, resume: false,
-                              organizerEnvironment: Self.organizerEnvironment(address: url.absoluteString, key: key,
-                                                                                model: config.model, effort: config.reviewEffort))
+        installTextModelSuite(suite, configurationName: config.model, resume: false)
         return true
     }
     private func installTextModelSuite(_ suite: LocalTextModel.Suite, configurationName: String, resume: Bool,
-                                       organizerEnvironment: [String: String]? = nil) {
-        organizerModelSnapshot = organizerEnvironment
-        modelConfigIssue = nil
-        // Long segmented cognition uses the explicitly validated SSE
-        // transport and 600-second window. Its versioned identity prevents
-        // queued non-streaming attempts from being silently replayed.
-        let port = suite.cognition
-        discussionModel=suite.discussion;outcomeModel=suite.outcome
-        recordingTitleModel=suite.recordingTitles
-        topicModel=suite.topics; topicAttemptDigest=nil; materialNoteModel=suite.note
+                                       importedFrom file: URL? = nil) {
+        relevance.cancel()
+        topicAttemptDigest = nil
         topicDomainBackfillStarted = false
+        textConfigurationFile = file
+        modelConfigIssue = nil
+        textModels = suite
         startTopicDomainBackfillIfNeeded()
-        recordingExpressionModel=suite.recordingExpressions
-        assistantModel=suite.assistant
-        initiationModel=suite.initiation
-        followupModel=suite.followup;englishModel=suite.english;associationModel=suite.association;reminderFieldModel=suite.reminderFields
-        knowledgeReviewModel=suite.knowledgeReview
-        relevance.cancel();relevanceModel=suite.relevance
-        segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
-        monitorAnalysisModel=suite.notificationAnalysis
-        textModel = port; modelConfigured = true
-        modelSummary = configurationName + " · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
+        modelSummary = configurationName + " · " + suite.cognition.configuration.provider.replacingOccurrences(of: "responses:", with: "")
         status = "文本模型已就绪 · 只处理你选择并授权的文字"
         // 之前因配置未就绪而暂缓的录音，现在立刻续上，不等暂缓间隔到期。
         recordingInbox.resumeDeferred()
@@ -1951,26 +1980,11 @@ final class ControlCenter: ObservableObject {
     /// Clears every model port so AI entries read as unconfigured, and remembers
     /// the choice so the bundle's development .env is not reloaded on launch.
     func clearTextModel() {
-        discussionModel = nil
-        outcomeModel = nil
-        recordingTitleModel = nil
-        topicModel = nil; topicAttemptDigest = nil
-        materialNoteModel = nil
-        recordingExpressionModel = nil
-        assistantModel = nil
-        initiationModel = nil
-        followupModel = nil
-        englishModel = nil
-        associationModel = nil
-        reminderFieldModel = nil
-        knowledgeReviewModel = nil
-        relevance.cancel(); relevanceModel = nil
-        segmentExtractionModel = nil
-        segmentAggregationModel = nil
-        monitorAnalysisModel = nil
-        textModel = nil
+        relevance.cancel()
+        topicAttemptDigest = nil
+        textModels = nil
         textConfigurationFile = nil
-        modelConfigured = false
+        modelConfigIssue = nil
         modelSummary = "尚未配置文本模型"
         UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
         TextModelConfiguration.clear()
@@ -2063,13 +2077,11 @@ final class ControlCenter: ObservableObject {
         let blocker: String? = {
             if !initialized || !modelConfigured { return "文本模型尚未就绪；请先在设置中连接" }
             if !(speechPort is LocalQwenSpeechPort) { return "本地 Qwen 转写尚未配置" }
-            if recordingExpressionModel == nil { return "文本模型端口尚未就绪" }
-            if textModelOrganizerEnvironment == nil { return "文本模型配置不完整；请在设置中重新保存" }
             if Bundle.main.url(forResource:"organize_podcast",withExtension:"py") == nil { return "应用缺少完整整理脚本" }
             if organizingSourceID != nil || fullRecordingBusy { return "另一段录音正在整理；空闲后自动重试" }
             return nil
         }()
-        guard blocker == nil,let store,var speech=speechPort as? LocalQwenSpeechPort,let grouping=recordingExpressionModel,
+        guard blocker == nil,let store,var speech=speechPort as? LocalQwenSpeechPort,let grouping=textModels?.recordingExpressions,
               let configuration=textModelOrganizerEnvironment,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),organizingSourceID == nil,!fullRecordingBusy else {
             finished(Dictionary(uniqueKeysWithValues:batch.map { ($0.digest,.deferred(blocker ?? "前置条件尚未就绪，稍后自动继续")) }));return
         }
@@ -2185,7 +2197,7 @@ final class ControlCenter: ObservableObject {
     @discardableResult
     private func resumeSavedRecordingExpressions() async -> Task<Void, Never>? {
         guard !resumedSavedRecordingExpressions,organizingSourceID == nil,worker == nil,understandingWorker == nil,!dictationActive,!dictationBusy,let store,
-              let speech=speechPort as? LocalQwenSpeechPort,let grouping=recordingExpressionModel,
+              let speech=speechPort as? LocalQwenSpeechPort,let grouping=textModels?.recordingExpressions,
               let configuration=textModelOrganizerEnvironment,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),
               !fullRecordingBusy else { return nil }
         resumedSavedRecordingExpressions=true
@@ -2477,7 +2489,7 @@ final class ControlCenter: ObservableObject {
         backgroundOrganizationWorker = Task {
             defer { backgroundOrganizationWorker = nil }
             while !backgroundOrganizationQueue.isEmpty, !Task.isCancelled {
-                while worker != nil || fullRecordingBusy || understandingWorker != nil || transcriptReviewSourceID != nil {
+                while dictationActive || worker != nil || fullRecordingBusy || understandingWorker != nil || transcriptReviewSourceID != nil {
                     try? await Task.sleep(for: .milliseconds(400))
                     if Task.isCancelled { return }
                 }
@@ -2495,9 +2507,11 @@ final class ControlCenter: ObservableObject {
                     LocalNotice.post(title: "口述整理完成", body: "「" + title + "」的观点与任务已保存。", sourceID: sourceID)
                 } catch is CancellationError {
                     refreshTask.cancel()
+                    if lastSavedDictation?.id == sourceID { lastDictationOrganizationFailed = true }
                     setFullRecordingStatus("后台整理已停止；录音、逐字稿与已完成结果保留")
                 } catch {
                     refreshTask.cancel()
+                    if lastSavedDictation?.id == sourceID { lastDictationOrganizationFailed = true }
                     let reason = error.localizedDescription
                     setFullRecordingStatus("上一段口述整理未完成：" + reason)
                     LocalNotice.post(title: "口述整理未完成", body: "「" + title + "」：" + reason, sourceID: sourceID)
@@ -2627,7 +2641,7 @@ final class ControlCenter: ObservableObject {
             catch { followupStatus = error.localizedDescription }
             return
         }
-        guard let store, let port = followupModel else { return }
+        guard let store, let port = textModels?.followup else { return }
         followupBusy = true; followupStatus = "正在关联旧思想、调整目标下一步并延续英语反馈…"
         defer { followupBusy = false; scheduleProcessing(); resumeRecordingFollowups() }
         do {
@@ -2643,7 +2657,7 @@ final class ControlCenter: ObservableObject {
         resumeRecordingFollowups()
     }
     private func resumeRecordingFollowups() {
-        guard initialized, followupModel != nil, followupWorker == nil, !fullRecordingBusy, !dictationActive else { return }
+        guard initialized, textModels?.followup != nil, followupWorker == nil, !fullRecordingBusy, !dictationActive else { return }
         followupWorker = Task {
             defer { followupWorker = nil }
             var attempted = Set<String>()
@@ -2682,7 +2696,7 @@ final class ControlCenter: ObservableObject {
         } catch { englishSnapshot = nil; englishStatus = error.localizedDescription }
     }
     func performEnglishPractice() async {
-        guard let store, let port = englishModel, let snapshot = englishSnapshot, !englishBusy else { return }
+        guard let store, let port = textModels?.english, let snapshot = englishSnapshot, !englishBusy else { return }
         englishBusy = true; englishStatus = "正在发送选定文字；不上传原始音频，不自动重试。"
         do {
             let record = try await store.performEnglishFeedback(snapshot, using: port)
@@ -2725,7 +2739,7 @@ final class ControlCenter: ObservableObject {
         }
     }
     func understand(_ record: SourceRecord) {
-        guard let store, let port = textModel, understandingWorker == nil, !discussionExtracting, !record.localOnly,
+        guard let store, let port = textModels?.cognition, understandingWorker == nil, !discussionExtracting, !record.localOnly,
               !(record.transcript ?? "").isEmpty else { return }
         understandingSource = record.id
         status = "正在理解所选文字 · 原始音视频仍在本机"
@@ -2734,7 +2748,7 @@ final class ControlCenter: ObservableObject {
             do {
                 try await ensureTranscriptReviewed(sourceID: record.id)
                 if record.origin == "user", record.speaker == "user", ["user_text", "audio"].contains(record.kind) {
-                    guard let association = associationModel else { throw VoiceOSError("关联模型尚未配置；个人表达尚未排队") }
+                    guard let association = textModels?.association else { throw VoiceOSError("关联模型尚未配置；个人表达尚未排队") }
                     let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: record.id, cognition: port.configuration, association: association.configuration)
                     let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "understand:" + record.id + ":" + snapshot.contentDigest, cognition: port.configuration, association: association.configuration)
                     status = intent.state == .queued ? "个人表达已排队 · 原始录音仍在本机" : "已有处理回执：\(workspaceStateLabel(intent.state.rawValue))；未重复排队"
@@ -2750,7 +2764,7 @@ final class ControlCenter: ObservableObject {
     }
     @discardableResult
     func understandSegmented(_ record: SourceRecord) -> Task<Void, Never>? {
-        guard let store,let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel,
+        guard let store,let extraction=textModels?.segmentExtraction,let aggregation=textModels?.segmentAggregation,
               understandingWorker == nil,!discussionExtracting,!record.localOnly,
               record.origin == "user",record.speaker == "user",["audio","user_text"].contains(record.kind),
               (record.transcript ?? "").unicodeScalars.count>4000 else { return nil }
@@ -2788,7 +2802,7 @@ final class ControlCenter: ObservableObject {
     /// and enqueues a fresh batch under a new command; this only drives it.
     @discardableResult
     func retrySegmentedBatch(_ batch: SegmentedProcessingBatch) -> Task<Void, Never>? {
-        guard let store,let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel,
+        guard let store,let extraction=textModels?.segmentExtraction,let aggregation=textModels?.segmentAggregation,
               understandingWorker == nil,!discussionExtracting else { return nil }
         let sourceID=batch.scope.plan.source.sourceID
         understandingSource=sourceID;status="正在整批重试长录音的分段理解 · 原文与旧记录保留"
@@ -2846,7 +2860,7 @@ final class ControlCenter: ObservableObject {
 
     var pausedActionBatchUnavailableReason: String? {
         if pausedActionBatch?.isRunning == true || isPausedActionBatchConfirming { return "另一批重新识别正在进行" }
-        if !modelConfigured || textModel == nil { return "需要先配置文本模型" }
+        if !modelConfigured { return "需要先配置文本模型" }
         if sourceReidentifyWorker != nil || understandingWorker != nil || fullRecordingBusy || transcriptReviewSourceID != nil ||
             processingActivity != nil || worker != nil || importing || dictationActive || dictationBusy || discussionExtracting {
             return "另一项处理正在进行，完成后再继续"
@@ -2958,7 +2972,7 @@ final class ControlCenter: ObservableObject {
     private func reidentifySource(_ sourceID: String) async -> SourceReidentifyReceipt {
         guard let store else { return .failed("资料库尚未打开") }
         guard let source = try? await store.sources().first(where: { $0.id == sourceID }) else { return .failed("材料已不存在") }
-        guard let textModel else { return .failed("需要先配置文本模型") }
+        guard let cognition = textModels?.cognition else { return .failed("需要先配置文本模型") }
         let localRetrieval: any LocalRetrievalPort
         if let semanticRetrieval { localRetrieval = semanticRetrieval } else { localRetrieval = retrieval }
         do {
@@ -2967,10 +2981,10 @@ final class ControlCenter: ObservableObject {
                 try await ensureTranscriptReviewed(sourceID: sourceID)
                 let result = try await store.reidentifySource(
                     SourceReidentificationRequest(sourceID: sourceID, pausedActionIDs: pausedActionIDs(for: sourceID),
-                                                  cognition: textModel.configuration,
-                                                  association: associationModel?.configuration,
+                                                  cognition: cognition.configuration,
+                                                  association: textModels?.association.configuration,
                                                   semantic: semanticRetrieval != nil),
-                    cognitionPort: textModel, associationPort: associationModel, retrieval: localRetrieval)
+                    cognitionPort: cognition, associationPort: textModels?.association, retrieval: localRetrieval)
                 applyReidentificationResult(result)
                 if case .completed = result, !isPersonal(source) {
                     await associateUnderstoodExpression(sourceID)
@@ -3388,7 +3402,7 @@ final class ControlCenter: ObservableObject {
                 // loop; configureTextModel() wakes it after a real identity is
                 // available.
                 let pendingIntent: Bool
-                if textModel != nil {
+                if textModels?.cognition != nil {
                     pendingIntent = (try? await store.processingIntents())?.contains(where: { $0.state == .queued }) == true
                 } else {
                     pendingIntent = false
@@ -3410,7 +3424,7 @@ final class ControlCenter: ObservableObject {
             }
             processingActivity = nil
         }
-        if textModel != nil {
+        if textModels?.cognition != nil {
             // Only durable record-and-process requests need this automatic review.
             // Explicit source understanding and full recording organization review
             // their own source; opening the app must not reprocess the old library.
@@ -3420,21 +3434,21 @@ final class ControlCenter: ObservableObject {
                 catch { transcriptReviewStatus = error.localizedDescription }
             }
         }
-        if let cognition = textModel, let association = associationModel {
-            do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,segmentExtraction:segmentExtractionModel?.configuration,segmentAggregation:segmentAggregationModel?.configuration) }
+        if let cognition = textModels?.cognition, let association = textModels?.association {
+            do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,segmentExtraction:textModels?.segmentExtraction.configuration,segmentAggregation:textModels?.segmentAggregation.configuration) }
             catch { status = error.localizedDescription }
             do { try await store.enqueueActionFeedbackUnderstanding(cognition: cognition.configuration, association: association.configuration) }
             catch { status = "结果原话已保留，知识整理尚未排入：" + error.localizedDescription }
         }
         await processExpressionQueue(store)
-        if let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel {
+        if let extraction=textModels?.segmentExtraction,let aggregation=textModels?.segmentAggregation {
             do {
                 let requests=try await store.recordingProcessingRequests().filter { $0.state == "enqueued" && $0.segmentedBatchID != nil && $0.segmentedAssociationState == nil }
                 for request in requests {
                     guard let batchID=request.segmentedBatchID,try await store.segmentedProcessingBatch(id:batchID).state == .queued else { continue }
                     processingActivity = .init(sourceID: request.sourceID, label: "正在分段理解与核对关联")
                     await refresh() // Publish the durable batch before the first model await.
-                    try await store.processRecordingSegmentPlan(requestID:request.id,extraction:extraction,aggregation:aggregation,retrieval:semanticRetrieval ?? retrieval,semantic:semanticRetrieval != nil,association:associationModel)
+                    try await store.processRecordingSegmentPlan(requestID:request.id,extraction:extraction,aggregation:aggregation,retrieval:semanticRetrieval ?? retrieval,semantic:semanticRetrieval != nil,association:textModels?.association)
                     requestReminderRefresh()
                 }
             } catch { status=error.localizedDescription }
@@ -3445,9 +3459,9 @@ final class ControlCenter: ObservableObject {
         resumeKnowledgeReviews()
     }
     private func processExpressionQueue(_ store: VoiceOSStore) async {
-        guard let cognition = textModel else { return }
+        guard let cognition = textModels?.cognition else { return }
         defer { processingActivity = nil }
-        let association = associationModel
+        let association = textModels?.association
         let local: any LocalRetrievalPort = semanticRetrieval ?? retrieval
         while let intent = try? await store.processingIntents().first(where: { $0.state == .queued }) {
             processingActivity = .init(sourceID: intent.sourceID, label: "正在理解与关联")
@@ -3491,13 +3505,13 @@ final class ControlCenter: ObservableObject {
         catch { status = error.localizedDescription }
     }
     func retryRecordingRequest(_ request: RecordingProcessingRequest) async {
-        guard let store, let cognition = textModel, let association = associationModel else {
+        guard let store, let cognition = textModels?.cognition, let association = textModels?.association else {
             status = "请先配置理解与关联模型，再重新核对录音处理"; return
         }
         do {
             try await store.retryRecordingProcessingRequest(id: request.id)
             try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,
-                segmentExtraction: segmentExtractionModel?.configuration, segmentAggregation: segmentAggregationModel?.configuration)
+                segmentExtraction: textModels?.segmentExtraction.configuration, segmentAggregation: textModels?.segmentAggregation.configuration)
             if let latest = try await store.recordingProcessingRequests().first(where: { $0.id == request.id }), latest.state == "blocked" {
                 status = "重新核对后仍受当前条件限制" + (latest.error.map { "：" + $0 } ?? "")
             } else { status = "已按当前条件重新核对录音处理请求" }
@@ -3515,10 +3529,10 @@ final class ControlCenter: ObservableObject {
     }
     func reprocessProcessingIntent(_ intent: ExpressionProcessingIntentRecord) async {
         guard let store else { return }
-        guard let cognition = textModel else { status = "请先配置文字模型，再重新理解"; return }
+        guard let cognition = textModels?.cognition else { status = "请先配置文字模型，再重新理解"; return }
         do {
             let created = try await store.reprocessExpressionProcessingIntent(id: intent.id, cognition: cognition.configuration,
-                association: associationModel?.configuration)
+                association: textModels?.association.configuration)
             status = created.state == .queued ? "已用新的处理命令重新理解 · 旧结果保留为历史" : "已重新排队理解"
             await refresh()
             scheduleProcessing()
@@ -3537,6 +3551,7 @@ final class ControlCenter: ObservableObject {
         guard let player else { return }
         player.pause()
         if let playbackBoundary { player.removeTimeObserver(playbackBoundary); self.playbackBoundary = nil }
+        playbackSourceID = nil
         self.player = nil
     }
     @discardableResult
@@ -3546,6 +3561,7 @@ final class ControlCenter: ObservableObject {
             stopPlayback()
             let generation = playbackGeneration
             let playback = AVPlayer(url: url)
+            playbackSourceID = record.id
             player = playback
             await playback.seek(to: CMTime(value: Int64(milliseconds), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
             guard playbackGeneration == generation, player === playback else { return false }
@@ -3595,7 +3611,7 @@ final class ControlCenter: ObservableObject {
                 await refresh()
                 await resumeSavedRecordingExpressions()
             } else if current.origin == "user",current.speaker == "user",(current.transcript?.unicodeScalars.count ?? 0) <= 4000,
-                      let cognition=textModel?.configuration,let association=associationModel?.configuration {
+                      let cognition=textModels?.cognition.configuration,let association=textModels?.association.configuration {
                 _ = try await store.enqueueCorrectedSourceUnderstanding(sourceID:current.id,cognition:cognition,association:association)
                 status="更正已保存，正在自动更新理解。";scheduleProcessing()
             } else if !current.localOnly,modelConfigured {
@@ -3910,14 +3926,14 @@ final class ControlCenter: ObservableObject {
         do { try await store.syncRecordingExpressionReminders(using:reminders) }
         catch { stageFailures.append("提醒补录：" + error.localizedDescription) }
         // Field inference must not hold up completion readback or recording intake.
-        if reminderFieldWorker == nil, let reminderFieldModel {
+        if reminderFieldWorker == nil, let reminderFields = textModels?.reminderFields {
             do {
                 if !(try await store.prepareReminderFields()).tasks.isEmpty {
                     reminderFieldFailure = nil
                     reminderFieldWorker = Task {
                         defer { reminderFieldWorker = nil }
                         do {
-                            try await store.extractReminderFields(using: reminderFieldModel)
+                            try await store.extractReminderFields(using: reminderFields)
                             reminderFieldFailure = nil
                             if remindersBusy { reminderFieldsReady = true }
                             else { requestReminderRefresh() }
@@ -3951,7 +3967,7 @@ final class ControlCenter: ObservableObject {
         guard let store, let access = reminderAccess, access.enabled, !remindersBusy, !reminderCalendarID.isEmpty else { return }
         remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
         do {
-            if let reminderFieldModel { try await store.extractReminderFields(using: reminderFieldModel) }
+            if let reminderFields = textModels?.reminderFields { try await store.extractReminderFields(using: reminderFields) }
             try await store.sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: reminderCalendarID, using: reminders, expectedAccessVersion: access.version)
             status = "提醒事项尝试已记录 · 以回读状态为准"
         } catch { status = error.localizedDescription }
@@ -4121,7 +4137,7 @@ final class ControlCenter: ObservableObject {
                 if policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: false) }
             }
             if allowCloud {
-                if let cognition = textModel, let association = associationModel {
+                if let cognition = textModels?.cognition, let association = textModels?.association {
                     do { try await store.enqueueActionFeedbackUnderstanding(cognition: cognition.configuration, association: association.configuration) }
                     catch { followupStatus = "结果已保存，知识整理尚未排入：" + error.localizedDescription }
                 }
@@ -4550,16 +4566,16 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     @objc private func dictationClockTick() {
-        guard let model = ControlCenter.primary, let start = model.dictationStartedAt else {
+        guard let model = ControlCenter.primary, model.dictationStartedAt != nil else {
             if let model = ControlCenter.primary, model.dictationActive { dictationMenuItem?.title = "正在封存录音…" }
             stopDictationClock()
             return
         }
-        let elapsed = ControlCenter.clockText(Date().timeIntervalSince(start))
-        model.noteDictationClock(elapsed)
+        let elapsed = model.dictationElapsedText
+        let state = model.dictationBusy ? "正在封存录音" : model.dictationPaused ? "录音已暂停" : "正在录音"
         statusItem?.button?.title = " " + elapsed
-        statusItem?.button?.toolTip = "VoiceOS · 正在录音 " + elapsed
-        dictationMenuItem?.title = "正在录音 " + elapsed + " · 停止并整理" + Self.dictationHotKeySuffix(model.dictationHotKeyConflict)
+        statusItem?.button?.toolTip = "VoiceOS · " + state + " " + elapsed
+        dictationMenuItem?.title = state + " " + elapsed + " · 停止" + Self.dictationHotKeySuffix(model.dictationHotKeyConflict)
     }
 
     private static func dictationHotKeySuffix(_ conflict: Bool) -> String {
@@ -5365,14 +5381,14 @@ extension ControlCenter {
         return ids.allSatisfy { id in records.contains(where: { $0.id == id && !$0.localOnly }) }
     }
     var discussionCanExtract:Bool {
-        guard let session=discussionSession,session.state == "ended",session.validity == "current",outcomeModel != nil,
+        guard let session=discussionSession,session.state == "ended",session.validity == "current",textModels?.outcome != nil,
               discussionOutcomes.isEmpty,!discussionTurns.isEmpty,understandingWorker == nil,!discussionSending,!discussionSaving,!discussionExtracting,!dictationActive,
               !discussionReplies.contains(where: { $0.state == "reserved" }) else { return false }
         let inputs=discussionHistory.map { ($0.sourceID,$0.transcriptVersionID) }+discussionTurns.map { ($0.sourceID,$0.transcriptVersionID) }
         return inputs.allSatisfy { id,version in records.contains { $0.id == id && $0.transcriptVersionID == version && !$0.localOnly } }
     }
     func extractDiscussionOutcome() {
-        guard let store,let session=discussionSession,let port=outcomeModel,discussionCanExtract,outcomeWorker == nil else { return }
+        guard let store,let session=discussionSession,let port=textModels?.outcome,discussionCanExtract,outcomeWorker == nil else { return }
         discussionExtracting=true;discussionStatus="正在整理整段已授权文字；已有成果沿用，未登记结果不会自动重发。"
         outcomeWorker=Task {
             do {
@@ -5516,7 +5532,7 @@ extension ControlCenter {
         await refresh()
     }
     func enqueueAssistant(_ action: ActionRecord, instruction: String, questionID: String?, allowCloud: Bool) async -> Bool {
-        guard let store, assistantModel != nil, allowCloud else {
+        guard let store, textModels?.assistant != nil, allowCloud else {
             assistantStatus = "请配置模型，并允许本次交付要求用于云端代办"; return false
         }
         do {
@@ -5532,7 +5548,7 @@ extension ControlCenter {
         } catch { assistantStatus = error.localizedDescription; await refresh(.assistant); return false }
     }
     func analyzeThought(_ action: ActionRecord, fresh: Bool = false) async -> Bool {
-        guard let store, assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
+        guard let store, textModels?.assistant != nil else { assistantStatus = "请先配置文本模型"; return false }
         do {
             _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis, fresh: fresh)
             assistantStatus = "已开始分析；结果会保存在这条内容下"
@@ -5541,7 +5557,7 @@ extension ControlCenter {
     }
     /// A follow-up is its own analysis execution anchored to the same action.
     func askFollowup(_ action: ActionRecord, instruction: String) async -> Bool {
-        guard let store, assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
+        guard let store, textModels?.assistant != nil else { assistantStatus = "请先配置文本模型"; return false }
         let text = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { assistantStatus = "请写下要追问的内容"; return false }
         do {
@@ -5554,7 +5570,7 @@ extension ControlCenter {
     /// the clarify queue can advance to the next item right away.
     func enqueueTrialAnswer(_ action: ActionRecord) async -> Bool {
         guard let store else { assistantStatus = "资料库尚未打开"; return false }
-        guard assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
+        guard textModels?.assistant != nil else { assistantStatus = "请先配置文本模型"; return false }
         do {
             _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis, fresh: true)
             assistantStatus = "已让 VoiceOS 先回答这条问题；结果会保存在问题下"
@@ -5568,7 +5584,7 @@ extension ControlCenter {
         catch { assistantStatus = error.localizedDescription; return false }
     }
     func retryAssistantAssessment(_ issue: AssistantAssessmentIssue) async {
-        guard let store, let port = assistantModel, !assistantBusy else { return }
+        guard let store, let port = textModels?.assistant, !assistantBusy else { return }
         assistantBusy = true
         defer { assistantBusy = false }
         do {
@@ -5614,7 +5630,7 @@ extension ControlCenter {
         } catch { assistantStatus = error.localizedDescription; return false }
     }
     private func resumeAssistantExecutions(snapshot: WorkspaceSnapshot? = nil) {
-        guard initialized, let store, let port = assistantModel, assistantWorker == nil, !dictationActive, !fullRecordingBusy else { return }
+        guard initialized, let store, let port = textModels?.assistant, assistantWorker == nil, !dictationActive, !fullRecordingBusy else { return }
         assistantWorker = Task {
             assistantBusy = true
             defer { assistantBusy = false; assistantWorker = nil }
@@ -5702,7 +5718,7 @@ extension ControlCenter {
         } catch { discussionStatus=error.localizedDescription;await refresh(); await refreshDiscussion(); return false }
     }
     func sendDiscussion() async {
-        guard let store,let session=discussionSession,let port=discussionModel,discussionCanSend,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return }
+        guard let store,let session=discussionSession,let port=textModels?.discussion,discussionCanSend,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return }
         discussionSending=true;defer { discussionSending=false }
         discussionStatus="正在回复本轮文字；可结束讨论，未登记结果不会自动重发。"
         do {
@@ -5735,7 +5751,7 @@ extension ControlCenter {
         modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !discussionExtracting && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" })
     }
     func understandDiscussionTurn(_ turn:ConversationUserTurn) {
-        guard let store,let session=discussionSession,let port=textModel,canUnderstandDiscussionTurn(turn) else { return }
+        guard let store,let session=discussionSession,let port=textModels?.cognition,canUnderstandDiscussionTurn(turn) else { return }
         selected=turn.sourceID;understandingSource=turn.sourceID
         status="正在整理所选个人发言的观点与明确行动…"
         understandingWorker=Task {
@@ -5831,7 +5847,7 @@ extension ControlCenter {
         await refresh()
     }
     func reviewKnowledge(sourceID: String, retry: Bool = false) async {
-        guard let store, knowledgeReviewModel != nil else { return }
+        guard let store, textModels?.knowledgeReview != nil else { return }
         do {
             try await ensureTranscriptReviewed(sourceID: sourceID)
             _ = try await store.enqueueKnowledgeReview(sourceID: sourceID, retry: retry)
@@ -5839,7 +5855,7 @@ extension ControlCenter {
         } catch { knowledgeReviewStatus = error.localizedDescription }
     }
     func retryAllFailedKnowledgeReviews() async {
-        guard let store, knowledgeReviewModel != nil else { return }
+        guard let store, textModels?.knowledgeReview != nil else { return }
         for review in workspaceFailedKnowledgeReviews {
             do {
                 try await ensureTranscriptReviewed(sourceID: review.sourceID)
@@ -5856,7 +5872,7 @@ extension ControlCenter {
         } catch { knowledgeReviewStatus = error.localizedDescription }
     }
     private func resumeKnowledgeReviews() {
-        guard initialized, let store, let port = knowledgeReviewModel, knowledgeReviewWorker == nil,
+        guard initialized, let store, let port = textModels?.knowledgeReview, knowledgeReviewWorker == nil,
               !fullRecordingBusy, !dictationActive else { return }
         knowledgeReviewWorker = Task {
             defer { knowledgeReviewWorker = nil }

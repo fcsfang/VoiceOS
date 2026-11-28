@@ -56,8 +56,9 @@ public actor VoiceOSStore {
         for folder in ["assets", "staging"] {
             try FileManager.default.createDirectory(at: self.root.appendingPathComponent(folder), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
-        db = try Database(self.root.appendingPathComponent("voiceos.sqlite"))
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: self.root.appendingPathComponent("voiceos.sqlite").path)
+        let databaseFile = LibraryLayout.database(in: self.root)
+        db = try Database(databaseFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databaseFile.path)
     }
     public func recover() async throws {
         guard !ready, activeImports.isEmpty else { return }
@@ -238,7 +239,7 @@ public actor VoiceOSStore {
     private static let sourceSelect = """
         SELECT s.id,s.asset_id,s.name,s.state,s.kind,s.created_at,s.expected_bytes,s.duration,s.error,s.relative_path,
                s.local_only,s.policy_version,s.origin,s.speaker,s.feedback_json,s.timezone,s.presentation_json,
-               j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json
+               j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json,v.reason AS transcript_version_reason
         FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
         LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id
         """
@@ -257,7 +258,7 @@ public actor VoiceOSStore {
     }
     private static func sourceRecord(_ row: [String: String]) throws -> SourceRecord {
         let feedback = try feedbackIntent(row["feedback_json"])
-        return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], transcriptionBackend: row["transcription_backend"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue, feedbackRelation: feedback?.relation, timeZone: row["timezone"]!, presentation: try row["presentation_json"].map { try JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8)) })
+        return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], transcriptionBackend: row["transcription_backend"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue, feedbackRelation: feedback?.relation, timeZone: row["timezone"]!, presentation: try row["presentation_json"].map { try JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8)) }, transcriptVersionReason: row["transcript_version_reason"])
     }
     public func playableURL(sourceID: String) throws -> URL {
         guard let row = try db.query("SELECT * FROM sources WHERE id=? AND state='saved'", [sourceID]).first else { throw VoiceOSError("此原件尚未可靠保存") }
@@ -460,5 +461,5 @@ public actor VoiceOSStore {
         guard relativePath.hasPrefix("assets/"), path.deletingLastPathComponent() == root.appendingPathComponent("assets") else { throw VoiceOSError("非法资产路径") }
         return path
     }
-    static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
+    static func now() -> String { TimestampFormatting.iso.string(from: Date()) }
 }

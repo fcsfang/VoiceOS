@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a local development app; no permissions request, install or daemon."""
 from pathlib import Path
-import argparse, hashlib, json, os, platform, plistlib, shutil, subprocess, tempfile
+import argparse, hashlib, json, os, platform, plistlib, shutil, subprocess, sys, tempfile
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser()
 parser.add_argument('--configuration', choices=['release', 'debug'], default='release', help='daily use defaults to optimized release; debug is opt-in')
@@ -9,6 +9,7 @@ parser.add_argument('--semantic-model', type=Path, help='explicit reviewed local
 parser.add_argument('--signing-identity', help='explicit existing codesigning identity (name or SHA1); no certificate creation')
 parser.add_argument('--adhoc', action='store_true', help='explicit disposable build; privacy grants may not survive rebuilds')
 args = parser.parse_args()
+subprocess.run([sys.executable, str(ROOT / 'scripts/tests/check_architecture.py')], check=True)
 if args.adhoc and args.signing_identity:
     parser.error('--adhoc and --signing-identity are mutually exclusive')
 # A cdhash-only ad hoc requirement changes with every executable. Prefer an

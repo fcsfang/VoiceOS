@@ -383,8 +383,9 @@ extension VoiceOSStore {
         } catch { try? FileManager.default.removeItem(at: temporary); throw error }
     }
     private static func populateRestore(_ directory: URL, rows: [String: [[String: String]]], omittedSources: Set<String>, tables: [String], packageVersion:Int) throws {
-        let database = try Database(directory.appendingPathComponent("voiceos.sqlite"))
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: directory.appendingPathComponent("voiceos.sqlite").path)
+        let databaseFile = LibraryLayout.database(in: directory)
+        let database = try Database(databaseFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databaseFile.path)
         try database.transaction {
             for table in tables {
                 let columns = Set(try database.query("PRAGMA table_info(\(table))").compactMap { $0["name"] })

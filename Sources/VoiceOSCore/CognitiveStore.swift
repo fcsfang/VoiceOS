@@ -456,5 +456,5 @@ extension VoiceOSStore {
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
     private func hash<T: Encodable>(_ value: T) throws -> String { SHA256.hash(data: Data(try json(value).utf8)).map { String(format: "%02x", $0) }.joined() }
-    private func timestamp() -> String { ISO8601DateFormatter().string(from: Date()) }
+    private func timestamp() -> String { TimestampFormatting.iso.string(from: Date()) }
 }

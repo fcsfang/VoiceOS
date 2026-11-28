@@ -44,6 +44,7 @@ public struct SourceRecord: Identifiable, Sendable {
     public let feedbackRelation: String?
     public let timeZone: String
     public let presentation: RecordingPresentation?
+    public var transcriptVersionReason: String? = nil
 }
 public extension SourceRecord {
     static let emptyTranscriptJobError = "转写为空，未生成文字；可重新转写或移入回收站"

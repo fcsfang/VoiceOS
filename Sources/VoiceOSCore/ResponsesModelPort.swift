@@ -27,8 +27,7 @@ private final class NoModelRedirect: NSObject, URLSessionTaskDelegate, @unchecke
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 public struct DirectModelHTTPTransport: ModelHTTPTransport {
-    private let diagnostics: ModelHTTPDiagnostics?
-    public init(diagnostics: ModelHTTPDiagnostics? = nil) { self.diagnostics=diagnostics }
+    public init() {}
     public func send(_ request: URLRequest) async throws -> ModelHTTPReply {
         let settings = URLSessionConfiguration.ephemeral
         // Honor a bounded driver deadline; a session-wide 60s cap otherwise
@@ -39,25 +38,14 @@ public struct DirectModelHTTPTransport: ModelHTTPTransport {
         settings.httpCookieStorage = nil; settings.urlCredentialStorage = nil; settings.urlCache = nil
         let session = URLSession(configuration: settings, delegate: NoModelRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        let start=Date()
-        var headersSeconds: Double?,firstByteSeconds: Double?,status: Int?
         var body = Data()
-        do {
-            let (bytes, response) = try await session.bytes(for: request)
-            headersSeconds=Date().timeIntervalSince(start)
-            guard let http = response as? HTTPURLResponse else { throw VoiceOSError("模型传输未返回 HTTP 状态") }
-            status=http.statusCode
-            for try await byte in bytes {
-                if firstByteSeconds == nil { firstByteSeconds=Date().timeIntervalSince(start) }
-                guard body.count < 16_777_216 else { throw ModelPortFailure.rejected("响应超过 16 MiB 限制") }
-                body.append(byte)
-            }
-            await diagnostics?.append(.init(deadlineSeconds:deadline,requestBytes:request.httpBody?.count ?? 0,headersSeconds:headersSeconds,firstBodyByteSeconds:firstByteSeconds,totalSeconds:Date().timeIntervalSince(start),responseBytes:body.count,httpStatus:status,result:"completed",urlErrorCode:nil))
-            return ModelHTTPReply(status: http.statusCode, body: body)
-        } catch {
-            await diagnostics?.append(.init(deadlineSeconds:deadline,requestBytes:request.httpBody?.count ?? 0,headersSeconds:headersSeconds,firstBodyByteSeconds:firstByteSeconds,totalSeconds:Date().timeIntervalSince(start),responseBytes:body.count,httpStatus:status,result:Task.isCancelled ? "cancelled":"failed",urlErrorCode:(error as? URLError)?.code.rawValue))
-            throw error
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw VoiceOSError("模型传输未返回 HTTP 状态") }
+        for try await byte in bytes {
+            guard body.count < 16_777_216 else { throw ModelPortFailure.rejected("响应超过 16 MiB 限制") }
+            body.append(byte)
         }
+        return ModelHTTPReply(status: http.statusCode, body: body)
     }
 }
 
@@ -199,31 +187,15 @@ private final class ModelDeadlineRace<T: Sendable>: @unchecked Sendable {
     }
 }
 
-/// 文本服务地址的唯一授权口径：HTTPS、指定主机、精确 `/v1`，不带用户信息、端口、查询或片段。
-/// 端口构造与设置页「测试连接」共用这一处，避免两条路径对同一地址给出不同结论。
-public enum TextModelHostPolicy {
-    public static let allowedHosts: Set<String> = ["api.openai.com", "api.chiyi.cc"]
-    public static func isAllowed(_ baseURL: URL) -> Bool {
-        let host = baseURL.host ?? ""
-        return baseURL.scheme == "https" && allowedHosts.contains(host)
-            && baseURL.absoluteString == "https://" + host + "/v1"
-            && baseURL.path == "/v1" && baseURL.query == nil && baseURL.fragment == nil
-            && baseURL.user == nil && baseURL.password == nil && baseURL.port == nil
-    }
-}
-
 /// Text-only Responses-compatible driver. One POST, no fallback, polling, tools or retry.
 public struct ResponsesModelPort: ModelPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
-        guard TextModelHostPolicy.isAllowed(baseURL),
-              !apiKey.isEmpty, apiKey.unicodeScalars.allSatisfy({ $0.value >= 33 && $0.value <= 126 }),
-              !model.isEmpty else { throw VoiceOSError("模型配置须使用已授权的 HTTPS 服务和有效本地凭据") }
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.transport = transport
-        configuration = ModelConfiguration(provider: "responses:" + baseURL.host!, model: model, promptVersion: "expression-comprehensive-v6", schemaVersion: "claims-actions-v3", destination: .cloud)
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        self.transport = transport
+        configuration = ModelConfiguration(provider: endpoint.provider, model: model, promptVersion: "expression-comprehensive-v6", schemaVersion: "claims-actions-v3", destination: .cloud)
     }
     public func generate(_ request: ModelRequest) async throws -> ModelResponse {
         let http = try makeRequest(request)
@@ -232,9 +204,7 @@ public struct ResponsesModelPort: ModelPort {
         return try Self.parse(reply.body, requireContentKind: true)
     }
     func makeRequest(_ request: ModelRequest) throws -> URLRequest {
-        guard request.configuration.provider == configuration.provider, request.configuration.model == configuration.model,
-              request.configuration.promptVersion == configuration.promptVersion, request.configuration.schemaVersion == configuration.schemaVersion,
-              request.configuration.destination == .cloud, !request.context.sources.isEmpty,
+        guard configuration.accepts(request.configuration), !request.context.sources.isEmpty,
               request.context.sources.allSatisfy({ !$0.localOnly }),
               request.context.scalarBudget > 0,
               request.context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= request.context.scalarBudget else {
@@ -253,11 +223,7 @@ public struct ResponsesModelPort: ModelPort {
             "input": String(decoding: input, as: UTF8.self),
             "text": ["format": ["type": "json_schema", "name": "voiceos_claims", "strict": true, "schema": Self.schema]]]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        var result = URLRequest(url: endpoint, timeoutInterval: 300)
-        result.httpMethod = "POST"; result.httpBody = data
-        result.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-        result.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return result
+        return endpoint.request(body: data, timeout: 300)
     }
     private static func object(_ properties: [String: Any]) -> [String: Any] {
         ["type": "object", "properties": properties, "required": properties.keys.sorted(), "additionalProperties": false]

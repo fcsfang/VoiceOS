@@ -10,11 +10,7 @@ struct ReflectionEventListView: View {
     var openSource: ((String)->Void)? = nil
     @State private var query = ""
 
-    private func date(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-    }
+    private func date(_ value: String) -> Date? { TimestampFormatting.parse(value) }
     private func knowledge(_ source: SourceRecord) -> [CandidateClaim] {
         let taskClaims = Set(model.actionRecords.filter { $0.kind == "task" }.map(\.claimID))
         return (model.currentClaimsBySource[source.id] ?? []).filter {

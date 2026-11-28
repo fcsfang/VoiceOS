@@ -80,13 +80,11 @@ public enum MonitorSourceConfigParser {
         return formatter.string(from: date)
     }
 
-    public static func timestampString(_ date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
-    }
+    public static func timestampString(_ date: Date) -> String { TimestampFormatting.iso.string(from: date) }
 
     public static func parseStart(_ text: String?, calendar: Calendar = .current) -> Date? {
         guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
-        if let date = ISO8601DateFormatter().date(from: text) { return date }
+        if let date = TimestampFormatting.iso.date(from: text) { return date }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = calendar.timeZone

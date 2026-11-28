@@ -3,13 +3,12 @@ import Foundation
 /// Reconstructs application-visible discussion history. No hosted session or implicit retry.
 public struct ResponsesDiscussionPort: DiscussionModelPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     public init(baseURL:URL,apiKey:String,model:String,transport:any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
-        let validated=try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
-        configuration=ModelConfiguration(provider:validated.configuration.provider,model:model,promptVersion:"discussion-single-v1",schemaVersion:"discussion-parts-v1",destination:.cloud)
-        endpoint=baseURL.appendingPathComponent("responses");self.apiKey=apiKey;self.transport=transport
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        configuration=ModelConfiguration(provider:endpoint.provider,model:model,promptVersion:"discussion-single-v1",schemaVersion:"discussion-parts-v1",destination:.cloud)
+        self.transport = transport
     }
     public func reply(_ request:DiscussionModelRequest) async throws -> DiscussionModelResponse {
         try Task.checkCancellation()
@@ -19,8 +18,7 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
     }
     func makeRequest(_ request:DiscussionModelRequest) throws -> URLRequest {
         let s=request.snapshot,c=request.configuration
-        guard c.provider == configuration.provider,c.model == configuration.model,c.promptVersion == configuration.promptVersion,c.schemaVersion == configuration.schemaVersion,
-              c.destination == .cloud,s.input.destination == .cloud,UUID(uuidString:request.attemptID) != nil,
+        guard configuration.accepts(c),s.input.destination == .cloud,UUID(uuidString:request.attemptID) != nil,
               !s.input.userTurns.isEmpty,s.input.conversationVersion == s.input.userTurns.count+1,
               s.context.scalarBudget > 0,!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
               Set(s.context.sources.map(\.sourceID)).count == s.context.sources.count else { throw ModelPortFailure.rejected("讨论请求身份、授权或预算不符") }
@@ -88,9 +86,7 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
             "instructions":instructions,"input":messages,"text":["format":["type":"json_schema","name":"voiceos_discussion","strict":true,"schema":schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
         guard data.count <= 4000000 else { throw ModelPortFailure.rejected("完整讨论请求超过字节预算") }
-        var http=URLRequest(url:endpoint,timeoutInterval:600);http.httpMethod="POST";http.httpBody=data
-        http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");http.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        return http
+        return endpoint.request(body: data, timeout: 600)
     }
     static let reflectionInstructions = """
     根据 reviewPurpose 和 reviewPeriod 回应这次回顾。all_history 涵盖整个主题；其他周期按 timeZoneID 和 [start,end) 界定。周期外的表达可作背景。围绕用户关心的问题，自行选择有解释力的联系、变化或值得验证的想法。

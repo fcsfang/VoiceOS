@@ -73,8 +73,7 @@ private func defaultRoot() -> URL {
     if let raw = ProcessInfo.processInfo.environment["VOICEOS_ROOT"], !raw.isEmpty {
         return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
     }
-    return FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/VoiceOS")
+    return LibraryLayout.defaultRoot
 }
 
 private func parse(_ arguments: [String]) throws -> ParsedOptions {

@@ -135,12 +135,17 @@ struct BilingualView: View {
 }
 
 struct BilingualClient {
-    private let endpoint: URL
-    private let model: String
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
 
     init(transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
+        endpoint = try Self.configuredEndpoint()
+        self.transport = transport
+    }
+
+    static var configuredModelName: String? { (try? configuredEndpoint())?.model }
+
+    private static func configuredEndpoint() throws -> ResponsesEndpoint {
         guard let config = TextModelConfiguration.load(),
               let address = URL(string: config.baseURL) else {
             throw VoiceOSError("先在设置中选择文本模型")
@@ -151,32 +156,19 @@ struct BilingualClient {
         guard let key = TextModelKeychain.apiKey(), !key.isEmpty else {
             throw VoiceOSError("钥匙串中的模型密钥不可用；请在设置中重新保存模型配置")
         }
-        endpoint = address.appendingPathComponent("responses")
-        apiKey = key
-        model = config.model
-        self.transport = transport
-    }
-
-    static var configuredModelName: String? {
-        guard let config = TextModelConfiguration.load(),
-              let address = URL(string: config.baseURL), TextModelHostPolicy.isAllowed(address),
-              let key = TextModelKeychain.apiKey(), !key.isEmpty else { return nil }
-        return config.model
+        return try ResponsesEndpoint(baseURL: address, apiKey: key, model: config.model)
     }
 
     func translate(_ paragraphs: [BilingualParagraph]) async throws -> [String?] {
         let prompt = Bilingual.requestPrompt(paragraphs: paragraphs, target: Bilingual.target)
         let payload: [String: Any] = [
-            "model": model,
+            "model": endpoint.model,
             "store": false,
             "max_output_tokens": 16384,
             "input": [["role": "user", "content": prompt]]
         ]
-        var request = URLRequest(url: endpoint, timeoutInterval: 180)
-        request.httpMethod = "POST"
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let request = endpoint.request(body: data, timeout: 180)
         let reply = try await transport.send(request)
         guard reply.status == 200 else { throw VoiceOSError("文本模型返回 HTTP \(reply.status)") }
         let text = try Bilingual.translationText(from: reply.body)

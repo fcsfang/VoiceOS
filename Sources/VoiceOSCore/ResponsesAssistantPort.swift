@@ -7,8 +7,7 @@ import Foundation
 /// the rejection diagnostic.
 public struct ResponsesAssistantPort: AssistantModelPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     private let retryDelay: @Sendable (Duration) async throws -> Void
     private struct StructuralMismatch: LocalizedError {
@@ -19,9 +18,9 @@ public struct ResponsesAssistantPort: AssistantModelPort {
         try self.init(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport, retryDelay: { try await Task.sleep(for: $0) })
     }
     init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
-        let validated = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport)
-        configuration = .init(provider: validated.configuration.provider, model: model, promptVersion: "assistant-delivery-v2", schemaVersion: "assistant-report-v1", destination: .cloud)
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.transport = transport; self.retryDelay = retryDelay
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        configuration = .init(provider: endpoint.provider, model: model, promptVersion: "assistant-delivery-v2", schemaVersion: "assistant-report-v1", destination: .cloud)
+        self.transport = transport; self.retryDelay = retryDelay
     }
     public func assess(_ input: AssistantTaskInput) async throws -> AssistantAssessment {
         let properties: [String: Any] = ["intent":["type":"string","enum":["analysis","execution","reminder","none"]],"supported":["type":"boolean"],"kind":["type":"string","enum":["research","draft","comparison"]],"reason":["type":"string"]]
@@ -92,33 +91,12 @@ public struct ResponsesAssistantPort: AssistantModelPort {
     }
     private func send(_ payload: [String: Any]) async throws -> Data {
         try Task.checkCancellation()
-        var request = URLRequest(url: endpoint,timeoutInterval: 300)
-        request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: payload,options: [.sortedKeys])
-        request.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");request.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        for attempt in 1...3 {
-            let reply: ModelHTTPReply
-            do { reply = try await transport.send(request) }
-            catch let error as URLError {
-                try Task.checkCancellation()
-                guard Self.isTransientURLError(error.code), attempt < 3 else { throw error }
-                try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
-                continue
-            }
-            if reply.status == 200 {
-                try Task.checkCancellation()
-                return reply.body
-            }
-            if attempt < 3, [429, 502, 503, 504].contains(reply.status) {
-                try Task.checkCancellation()
-                try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
-                continue
-            }
-            throw VoiceOSError("助理服务返回 HTTP \(reply.status)；调研需服务支持 web_search，可手动重试")
-        }
-        throw VoiceOSError("助理服务未返回结果")
-    }
-    private static func isTransientURLError(_ code: URLError.Code) -> Bool {
-        [.timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed, .secureConnectionFailed].contains(code)
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let request = endpoint.request(body: data, timeout: 300)
+        let reply = try await ResponsesRetry.send(request, using: transport,
+                                                  scope: .httpStatusAndConnection, wait: retryDelay)
+        guard reply.status == 200 else { throw VoiceOSError("助理服务返回 HTTP \(reply.status)；调研需服务支持 web_search，可手动重试") }
+        return reply.body
     }
     private static func parseAssessment(_ data: Data) throws -> AssistantAssessment {
         let envelope = try ResponsesEnvelope.parse(data)

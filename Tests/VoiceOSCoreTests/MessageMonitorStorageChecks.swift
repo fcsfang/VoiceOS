@@ -20,7 +20,7 @@ final class MessageMonitorStorageChecks: XCTestCase {
     func testMigrationAddsMonitorTablesAndSourceCRUD() async throws {
         let store = try await openStore()
         let db = await store.db
-        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion,
+        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion),
                        "迁移后资料库版本应为 74")
         for table in ["monitor_sources", "monitor_messages", "monitor_cursors", "monitor_reports", "monitor_items"] {
             XCTAssertEqual(try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1,

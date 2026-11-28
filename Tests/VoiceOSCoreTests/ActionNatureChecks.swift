@@ -84,7 +84,7 @@ final class ActionNatureChecks: XCTestCase {
         try db.execute("PRAGMA foreign_keys=ON")
 
         let migrated = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         for entry in seeded {
             XCTAssertEqual(try migrated.query("SELECT nature FROM actions WHERE id=?", [entry.id]).first?["nature"], entry.nature, entry.title)
         }

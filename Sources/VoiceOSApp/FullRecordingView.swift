@@ -40,7 +40,7 @@ struct FullRecordingView: View {
                 WorkspaceNoticeText(message: issue + "仍可先「只保存原件」，配置后再完整整理。")
                 HStack {
                     if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() } }
-                    if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+                    if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
                 }
             }
             if model.fullRecordingBusy { ProgressView().controlSize(.small) }

@@ -1,44 +1,44 @@
 import Foundation
-import CSQLite
 
 // Confined to the Store actor. No SQLite transaction spans an await.
 final class Database {
-    private var handle: OpaquePointer?
+    static let schemaVersion = 78
+    private let connection: SQLiteConnection
     /// Counts rows changed on this connection, so a statement that matches no
     /// rows leaves context validation cached. Every write passes through `execute`.
     private(set) var writeGeneration: Int64 = 0
     init(_ url: URL) throws {
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
-            throw VoiceOSError("无法打开资料库")
-        }
-        do { try configure() }
-        catch { sqlite3_close(handle); handle = nil; throw error }
+        connection = try SQLiteConnection(url, access: .readWriteCreate, openError: VoiceOSError("无法打开资料库"))
+        try configure()
     }
     private func configure() throws {
-        sqlite3_busy_timeout(handle, 5000)
+        var version = try connection.schemaVersion
+        guard (0...Self.schemaVersion).contains(version) else {
+            throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本")
+        }
         try execute("PRAGMA foreign_keys=ON")
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
-        let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...78).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
-        if version == "1" {
-            // Add reference-only state without silently rewriting a newer schema.
-            guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
-            let revised = original.replacingOccurrences(of: "CREATE TABLE sources", with: "CREATE TABLE sources_next").replacingOccurrences(of: "'quarantined'))", with: "'quarantined','reference_only'))")
-            try execute("PRAGMA foreign_keys=OFF")
-            do {
-                try transaction {
-                    try execute(revised)
-                    try execute("INSERT INTO sources_next SELECT * FROM sources")
-                    try execute("DROP TABLE sources")
-                    try execute("ALTER TABLE sources_next RENAME TO sources")
-                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("资料库升级引用校验失败") }
-                    try execute("PRAGMA user_version=2")
-                }
-            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
-            try execute("PRAGMA foreign_keys=ON")
+        while version < Self.schemaVersion {
+            try migrate(from: version)
+            let migratedVersion = try connection.schemaVersion
+            guard migratedVersion > version, migratedVersion <= Self.schemaVersion else {
+                throw VoiceOSError("资料库升级未达到预期格式")
+            }
+            version = migratedVersion
         }
-        if version == "0" {
+        // Indexes only: older development libraries keep the same data schema.
+        try execute("CREATE INDEX IF NOT EXISTS context_inputs_source_context ON context_inputs(source_id,context_id)")
+        try execute("CREATE INDEX IF NOT EXISTS model_attempts_context_state ON model_attempts(context_id,state,producer_sequence)")
+        try execute("CREATE INDEX IF NOT EXISTS claims_attempt ON claims(attempt_id)")
+        try ensureSearchTriggers()
+    }
+
+    /// Each historical step owns its transaction and records its destination
+    /// version with its data changes.
+    private func migrate(from version: Int) throws {
+        switch version {
+        case 0:
             try transaction {
                 try execute("""
                 CREATE TABLE sources (
@@ -76,8 +76,23 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=2")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "2" {
+        case 1:
+            // Add reference-only state without silently rewriting a newer schema.
+            guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
+            let revised = original.replacingOccurrences(of: "CREATE TABLE sources", with: "CREATE TABLE sources_next").replacingOccurrences(of: "'quarantined'))", with: "'quarantined','reference_only'))")
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    try execute(revised)
+                    try execute("INSERT INTO sources_next SELECT * FROM sources")
+                    try execute("DROP TABLE sources")
+                    try execute("ALTER TABLE sources_next RENAME TO sources")
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("资料库升级引用校验失败") }
+                    try execute("PRAGMA user_version=2")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
+        case 2:
             try transaction {
                 try execute("ALTER TABLE transcripts ADD COLUMN current_version_id TEXT")
                 try execute("ALTER TABLE transcripts ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
@@ -101,8 +116,7 @@ final class Database {
                 try backfillTranscriptVersions()
                 try execute("PRAGMA user_version=3")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "3" {
+        case 3:
             try transaction {
                 try execute("""
                 CREATE TABLE contexts (
@@ -135,8 +149,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=4")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "4" {
+        case 4:
             try transaction {
                 try execute("ALTER TABLE sources ADD COLUMN policy_version INTEGER NOT NULL DEFAULT 1")
                 try execute("ALTER TABLE context_inputs ADD COLUMN policy_version INTEGER NOT NULL DEFAULT 1")
@@ -175,8 +188,7 @@ final class Database {
                 try execute("DROP TABLE old_model_attempts")
                 try execute("PRAGMA user_version=5")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "5" {
+        case 5:
             try transaction {
                 try execute("ALTER TABLE claims ADD COLUMN review_version INTEGER NOT NULL DEFAULT 0 CHECK(review_version>=0)")
                 try execute("""
@@ -191,8 +203,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=6")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "6" {
+        case 6:
             try transaction {
                 try execute("""
                 CREATE TABLE actions (
@@ -214,8 +225,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=7")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "7" {
+        case 7:
             try transaction {
                 try execute("ALTER TABLE action_revisions RENAME TO old_action_revisions")
                 try execute("""
@@ -244,8 +254,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=8")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "8" {
+        case 8:
             try transaction {
                 try execute("ALTER TABLE reminder_links ADD COLUMN last_checked_at TEXT")
                 // Device-local authorization history. Deliberately not in portable packages.
@@ -257,8 +266,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=9")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "9" {
+        case 9:
             try execute("PRAGMA foreign_keys=OFF")
             do {
                 try transaction {
@@ -277,8 +285,7 @@ final class Database {
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "10" {
+        case 10:
             try transaction {
                 try execute("ALTER TABLE sources ADD COLUMN feedback_json TEXT")
                 try execute("""
@@ -289,8 +296,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=11")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "11" {
+        case 11:
             try transaction {
                 try execute("""
                 CREATE TABLE relevance_attempts (
@@ -312,8 +318,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=12")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "12" {
+        case 12:
             try transaction {
                 try execute("""
                 CREATE TABLE cognitive_feedback_ignores (
@@ -331,10 +336,10 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=13")
             }
-        }
         // Same columns, new microphone reservation/source semantics require a newer reader.
-        if try query("PRAGMA user_version").first?["user_version"] == "13" { try execute("PRAGMA user_version=14") }
-        if try query("PRAGMA user_version").first?["user_version"] == "14" {
+        case 13:
+            try execute("PRAGMA user_version=14")
+        case 14:
             try transaction {
                 try execute("""
                 CREATE TABLE conversations (
@@ -356,8 +361,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=15")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "15" {
+        case 15:
             try transaction {
                 try execute("""
                 CREATE TABLE discussion_attempts (
@@ -372,8 +376,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=16")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "16" {
+        case 16:
             try transaction {
                 try execute("ALTER TABLE model_attempts ADD COLUMN execution_kind TEXT NOT NULL DEFAULT 'model_request' CHECK(execution_kind IN ('model_request','discussion_derivation'))")
                 try execute("""
@@ -389,8 +392,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=17")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "17" {
+        case 17:
             try transaction {
                 try execute("""
                 CREATE TABLE conversation_outcome_attempts (
@@ -403,16 +405,14 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=18")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "18" {
+        case 18:
             try transaction {
                 try execute("ALTER TABLE model_attempts ADD COLUMN producer_sequence INTEGER CHECK(producer_sequence IS NULL OR (typeof(producer_sequence)='integer' AND producer_sequence>0))")
                 try backfillModelProducerSequence()
                 try execute("CREATE UNIQUE INDEX model_producer_sequence ON model_attempts(producer_sequence)")
                 try execute("PRAGMA user_version=19")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "19" {
+        case 19:
             try transaction {
                 try execute("""
                 CREATE TABLE english_feedback_attempts (
@@ -431,8 +431,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=20")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "20" {
+        case 20:
             try transaction {
                 try execute("""
                 CREATE TABLE expression_association_attempts (
@@ -452,8 +451,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=21")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "21" {
+        case 21:
             try transaction {
                 try execute("""
                 CREATE TABLE expression_association_ignores (
@@ -468,21 +466,18 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=22")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "22" {
+        case 22:
             try transaction {
                 try execute("ALTER TABLE claims ADD COLUMN content_kind TEXT CHECK(content_kind IS NULL OR content_kind IN ('statement','question','hypothesis','reflection','unclassified'))")
                 try execute("PRAGMA user_version=23")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "23" {
+        case 23:
             try transaction {
                 try execute("CREATE TABLE questions(id TEXT PRIMARY KEY,claim_id TEXT NOT NULL UNIQUE REFERENCES claims(id),seed_json TEXT NOT NULL,seed_digest TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),status TEXT NOT NULL CHECK(status IN ('open','exploring','resolved','closed')),validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),created_at TEXT NOT NULL)")
                 try execute("CREATE TABLE question_revisions(id TEXT PRIMARY KEY,question_id TEXT NOT NULL REFERENCES questions(id),command_id TEXT NOT NULL UNIQUE,from_version INTEGER NOT NULL,to_version INTEGER NOT NULL,from_status TEXT NOT NULL,to_status TEXT NOT NULL,input_json TEXT NOT NULL,input_digest TEXT NOT NULL,actor TEXT NOT NULL CHECK(actor='user'),created_at TEXT NOT NULL,UNIQUE(question_id,to_version),CHECK(to_version=from_version+1))")
                 try execute("PRAGMA user_version=24")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "24" {
+        case 24:
             try transaction {
                 try execute("""
                 CREATE TABLE IF NOT EXISTS processing_intents (
@@ -519,8 +514,7 @@ final class Database {
                 try execute("CREATE INDEX IF NOT EXISTS processing_intents_state ON processing_intents(state,created_at,id)")
                 try execute("PRAGMA user_version=25")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "25" {
+        case 25:
             try transaction {
                 try execute("""
                 CREATE TABLE IF NOT EXISTS recording_processing_requests (
@@ -534,8 +528,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=26")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "26" {
+        case 26:
             try transaction {
                 try execute("""
                 CREATE TABLE IF NOT EXISTS segmented_processing_batches (
@@ -550,8 +543,7 @@ final class Database {
                 try execute("CREATE INDEX IF NOT EXISTS segmented_batches_source ON segmented_processing_batches(source_id,created_at,id)")
                 try execute("PRAGMA user_version=27")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "27" {
+        case 27:
             try transaction {
                 guard let original = try query("SELECT sql FROM sqlite_master WHERE name='segmented_processing_batches'").first?["sql"] else { throw VoiceOSError("缺少分段批次表") }
                 let revised = original.replacingOccurrences(of:"segmented_processing_batches",with:"segmented_batches_next")
@@ -574,8 +566,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=28")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "28" {
+        case 28:
             try transaction {
                 try execute("""
                 CREATE TABLE IF NOT EXISTS segmented_aggregation_attempts (
@@ -590,9 +581,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=29")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "29" {
+        case 29:
             guard let original=try query("SELECT sql FROM sqlite_master WHERE name='model_attempts'").first?["sql"] else { throw VoiceOSError("缺少模型记录表") }
             let revised=original.replacingOccurrences(of:"^CREATE TABLE (?:\"model_attempts\"|model_attempts)",with:"CREATE TABLE model_attempts_next",options:.regularExpression)
                 .replacingOccurrences(of:"'model_request','discussion_derivation')",with:"'model_request','discussion_derivation','segmented_derivation')")
@@ -618,9 +608,8 @@ final class Database {
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "30" {
+        case 30:
             try transaction {
                 try execute("""
                 CREATE TABLE IF NOT EXISTS recording_segment_plans (
@@ -631,9 +620,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=31")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "31" {
+        case 31:
             try transaction {
                 try execute("""
                 CREATE TABLE reminder_status_resolutions (
@@ -649,9 +637,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=32")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "32" {
+        case 32:
             try transaction {
                 try execute("""
                 CREATE TABLE reminder_time_observations (
@@ -660,8 +647,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=33")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "33" {
+        case 33:
             try transaction {
                 try execute("""
                 CREATE TABLE action_schedule_intents (
@@ -679,8 +665,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=34")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "34" {
+        case 34:
             try transaction {
                 try execute("""
                 CREATE TABLE reminder_schedule_operations (
@@ -697,8 +682,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=35")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "35" {
+        case 35:
             try transaction {
                 try execute("""
                 CREATE TABLE reminder_schedule_grants (
@@ -719,8 +703,7 @@ final class Database {
                 try execute("ALTER TABLE reminder_schedule_operations ADD COLUMN grant_id TEXT REFERENCES reminder_schedule_grants(id)")
                 try execute("PRAGMA user_version=36")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "36" {
+        case 36:
             try transaction {
                 try execute("""
                 CREATE TABLE reminder_schedule_bases (
@@ -731,8 +714,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=37")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "37" {
+        case 37:
             try transaction {
                 try execute("""
                 CREATE TABLE reminder_compensation_plans (
@@ -773,27 +755,23 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=38")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "38" {
+        case 38:
             try transaction {
                 try execute("ALTER TABLE actions ADD COLUMN intent_json TEXT")
                 try execute("PRAGMA user_version=39")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "39" {
+        case 39:
             try transaction {
                 // Three product follow-ups share one recording-owned JSON history.
                 try execute("ALTER TABLE sources ADD COLUMN followup_json TEXT")
                 try execute("PRAGMA user_version=40")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "40" {
+        case 40:
             try transaction {
                 try execute("ALTER TABLE sources ADD COLUMN presentation_json TEXT")
                 try execute("PRAGMA user_version=41")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "41" {
+        case 41:
             try transaction {
                 try execute("""
                 CREATE TABLE IF NOT EXISTS reflection_questions(
@@ -816,8 +794,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=42")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "42" {
+        case 42:
             try transaction {
                 try execute("""
                 CREATE TABLE assistant_executions (
@@ -835,8 +812,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=43")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "43" {
+        case 43:
             try transaction {
                 try execute("""
                 CREATE TABLE reflection_topic_feedback(
@@ -846,8 +822,7 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=44")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "44" {
+        case 44:
             try transaction {
                 try execute("""
                 CREATE TABLE knowledge_reviews(
@@ -857,16 +832,14 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=45")
             }
-        }
-            if try query("PRAGMA user_version").first?["user_version"] == "45" {
+        case 45:
             try transaction {
                 try execute("ALTER TABLE reflection_questions ADD COLUMN organization_json TEXT")
                 try execute("ALTER TABLE reflection_questions ADD COLUMN ai_named INTEGER NOT NULL DEFAULT 0")
                 try execute("CREATE TABLE workspace_briefing(id TEXT PRIMARY KEY,context_id TEXT NOT NULL REFERENCES contexts(id),result_json TEXT NOT NULL)")
                 try execute("PRAGMA user_version=46")
             }
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "46" {
+        case 46:
             guard var revised = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"], revised.contains("'reference_only'"),
                   let nameRange = revised.range(of: #"(?i)^CREATE TABLE\s+"?sources"?"#,options:.regularExpression) else { throw VoiceOSError("来源表无法升级回收站") }
             revised.replaceSubrange(nameRange,with:"CREATE TABLE sources_next")
@@ -883,8 +856,7 @@ final class Database {
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
-        }
-        if try query("PRAGMA user_version").first?["user_version"] == "47" {
+        case 47:
             try transaction {
                 try execute("""
                 CREATE TABLE panorama_attempts (
@@ -895,13 +867,8 @@ final class Database {
                 try execute("CREATE INDEX panorama_digest ON panorama_attempts(digest)")
                 try execute("PRAGMA user_version=48")
             }
-        }
-        // Indexes only: older development libraries keep the same data schema.
-        try execute("CREATE INDEX IF NOT EXISTS context_inputs_source_context ON context_inputs(source_id,context_id)")
-        try execute("CREATE INDEX IF NOT EXISTS model_attempts_context_state ON model_attempts(context_id,state,producer_sequence)")
-        try execute("CREATE INDEX IF NOT EXISTS claims_attempt ON claims(attempt_id)")
 
-        if try query("PRAGMA user_version").first?["user_version"] == "48" {
+        case 48:
             try transaction {
                 try execute("""
                 CREATE TABLE panorama_steps (
@@ -915,9 +882,8 @@ final class Database {
                 try execute("CREATE INDEX panorama_step_reuse ON panorama_steps(attempt_id,stage,scope_id,input_digest,state)")
                 try execute("PRAGMA user_version=49")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "49" {
+        case 49:
             try transaction {
                 try execute("""
                 CREATE TABLE panorama_theme_replies (
@@ -929,9 +895,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=50")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "50" {
+        case 50:
             try transaction {
                 try execute("""
                 CREATE TABLE panorama_themes (
@@ -960,9 +925,8 @@ final class Database {
                 try execute("CREATE INDEX panorama_theme_appearance_theme ON panorama_theme_appearances(theme_id,created_at)")
                 try execute("PRAGMA user_version=51")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "51" {
+        case 51:
             try transaction {
                 try execute("""
                 CREATE TABLE task_initiations (
@@ -984,16 +948,14 @@ final class Database {
                 try execute("CREATE INDEX task_initiation_created ON task_initiations(created_at, id)")
                 try execute("PRAGMA user_version=52")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "52" {
+        case 52:
             try transaction {
                 for statement in ActionReviewSchema.migration53 { try execute(statement) }
                 try execute("PRAGMA user_version=53")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "53" {
+        case 53:
             try transaction {
                 try execute("""
                 CREATE TABLE action_clarifications (
@@ -1005,9 +967,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=54")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "54" {
+        case 54:
             try transaction {
                 try execute("""
                 CREATE TABLE action_focus (
@@ -1048,9 +1009,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=55")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "55" {
+        case 55:
             try transaction {
                 try execute("""
                 CREATE TABLE source_attachments (
@@ -1063,16 +1023,14 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=56")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "56" {
+        case 56:
             try transaction {
                 try execute("ALTER TABLE source_capture_metadata ADD COLUMN context TEXT")
                 try execute("PRAGMA user_version=57")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "57" {
+        case 57:
             try transaction {
                 try execute("""
                 CREATE TABLE action_subtasks (
@@ -1112,9 +1070,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=58")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "58" {
+        case 58:
             try transaction {
                 do { try execute("CREATE VIRTUAL TABLE search_index USING fts5(kind UNINDEXED, ref_id UNINDEXED, title, body, tokenize='trigram')") }
                 catch {
@@ -1127,9 +1084,8 @@ final class Database {
                 }
                 try execute("PRAGMA user_version=59")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "59" {
+        case 59:
             try transaction {
                 try execute("""
                 CREATE TABLE action_recurrence (
@@ -1152,9 +1108,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=60")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "60" {
+        case 60:
             try transaction {
                 try execute("""
                 CREATE TABLE incremental_reading (
@@ -1167,9 +1122,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=61")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "61" {
+        case 61:
             // A CHECK constraint cannot be altered in place, so rebuild `actions`
             // to let an opportunity complete. Foreign keys stay off during the
             // swap so the child tables keep their references to the name.
@@ -1202,9 +1156,8 @@ final class Database {
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "62" {
+        case 62:
             // Adds `someday` to both the action and its revision ledger. Foreign
             // keys stay off during the swap so child tables keep their references.
             try execute("PRAGMA foreign_keys=OFF")
@@ -1246,9 +1199,8 @@ final class Database {
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "63" {
+        case 63:
             try transaction {
                 try execute("ALTER TABLE actions ADD COLUMN nature TEXT NOT NULL DEFAULT 'unknown' CHECK(nature IN ('question','goal','narration','unknown'))")
                 // Backfill follows the extraction precedence: narration first, then
@@ -1262,9 +1214,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=64")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "64" {
+        case 64:
             try transaction {
                 let columns = try query("PRAGMA table_info(sources)").compactMap { $0["name"] }
                 if !columns.contains("followup_digest") {
@@ -1282,9 +1233,8 @@ final class Database {
                 }
                 try execute("PRAGMA user_version=65")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "65" {
+        case 65:
             try transaction {
                 // A retried migration can find the table already created; the
                 // version bump stays the single completion marker.
@@ -1303,9 +1253,8 @@ final class Database {
                 }
                 try execute("PRAGMA user_version=66")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "66" {
+        case 66:
             try transaction {
                 let columns = try query("PRAGMA table_info(sources)").compactMap { $0["name"] }
                 if !columns.contains("followup_receipt_digest") {
@@ -1322,9 +1271,8 @@ final class Database {
                 }
                 try execute("PRAGMA user_version=67")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "67" {
+        case 67:
             try transaction {
                 // A retried migration can find the table already created; the
                 // version bump stays the single completion marker.
@@ -1338,9 +1286,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=68")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "68" {
+        case 68:
             try transaction {
                 // Stage records make the skeleton and each body batch replayable
                 // by digest; the primary key is the single idempotency marker.
@@ -1358,9 +1305,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=69")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "69" {
+        case 69:
             try transaction {
                 // A retried migration can find the table already created; the
                 // version bump stays the single completion marker.
@@ -1373,9 +1319,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=70")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "70" {
+        case 70:
             try transaction {
                 // The batched skeleton adds a merge stage. SQLite cannot widen a
                 // CHECK constraint in place, so rebuild the stage table; the
@@ -1397,9 +1342,8 @@ final class Database {
                 try execute("ALTER TABLE topic_organization_stages_next RENAME TO topic_organization_stages")
                 try execute("PRAGMA user_version=71")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "71" {
+        case 71:
             try transaction {
                 // The direct-answer route widens the route CHECK; SQLite cannot
                 // alter it in place, so rebuild the table. The table and the
@@ -1427,9 +1371,8 @@ final class Database {
                 try execute("CREATE INDEX IF NOT EXISTS task_initiation_created ON task_initiations(created_at, id)")
                 try execute("PRAGMA user_version=72")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "72" {
+        case 72:
             try transaction {
                 // Explicit exits from terminal intent states. Ignoring keeps the row
                 // queryable; superseding points at the replacement understanding.
@@ -1447,11 +1390,10 @@ final class Database {
                 }
                 try execute("PRAGMA user_version=73")
             }
-        }
 
         // Monitoring tables land after the failure-exit migration so a fresh
         // database and an upgraded one both pass through 73 before 74.
-        if try query("PRAGMA user_version").first?["user_version"] == "73" {
+        case 73:
             try transaction {
                 // Daily message monitoring is its own domain: sources, collected
                 // messages, per-source cursors, daily reports and follow-up items.
@@ -1534,9 +1476,8 @@ final class Database {
                 try execute("CREATE INDEX IF NOT EXISTS monitor_item_status ON monitor_items(status)")
                 try execute("PRAGMA user_version=74")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "74" {
+        case 74:
             try transaction {
                 // Per-task reminder sync failures live here so one bad reminder
                 // never freezes the batch. A later success, a confirmed link, or
@@ -1552,9 +1493,8 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=75")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "75" {
+        case 75:
             try transaction {
                 // NULL marks a message no stored analysis has consumed yet, so a
                 // failed or unauthorized run keeps its text retryable. A retried
@@ -1567,9 +1507,8 @@ final class Database {
                 try execute("CREATE INDEX IF NOT EXISTS monitor_message_pending ON monitor_messages(source_id, analyzed_report_id)")
                 try execute("PRAGMA user_version=76")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "76" {
+        case 76:
             try transaction {
                 // A note is the article-shaped rendering of one expression's member
                 // sources. Saves are append-only so history survives; the expression
@@ -1587,9 +1526,8 @@ final class Database {
                 try execute("CREATE INDEX IF NOT EXISTS material_notes_expression ON material_notes(expression_key, created_at)")
                 try execute("PRAGMA user_version=77")
             }
-        }
 
-        if try query("PRAGMA user_version").first?["user_version"] == "77" {
+        case 77:
             try transaction {
                 let columns = Set(try query("PRAGMA table_info(actions)").compactMap { $0["name"] })
                 for (name, definition) in [("edited_title", "TEXT"), ("edited_note", "TEXT"), ("removed", "INTEGER NOT NULL DEFAULT 0")] where !columns.contains(name) {
@@ -1597,8 +1535,9 @@ final class Database {
                 }
                 try execute("PRAGMA user_version=78")
             }
+        default:
+            throw VoiceOSError("资料库缺少版本 \(version) 的迁移步骤")
         }
-        try ensureSearchTriggers()
     }
 
     // Writes that leave searchable text alone (follow-up receipts, policy
@@ -1635,40 +1574,14 @@ final class Database {
         guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM (SELECT producer_sequence FROM model_attempts UNION ALL SELECT producer_sequence FROM segmented_extraction_attempts UNION ALL SELECT producer_sequence FROM segmented_aggregation_attempts)").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
         return String(value+1)
     }
-    deinit { sqlite3_close(handle) }
     func execute(_ sql: String, _ arguments: [String?] = []) throws {
-        _ = try query(sql, arguments)
-        writeGeneration = sqlite3_total_changes64(handle)
+        try connection.query(sql, arguments)
+        writeGeneration = connection.totalChanges
     }
     /// Rows touched by the last statement; distinguishes an ignored duplicate insert.
-    func lastChangeCount() -> Int { Int(sqlite3_changes(handle)) }
+    func lastChangeCount() -> Int { connection.lastChangeCount }
     func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error(sql) }
-        defer { sqlite3_finalize(stmt) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        for (i, value) in arguments.enumerated() {
-            let code: Int32
-            if let value {
-                guard value.utf8.count < Int(Int32.max) else { throw VoiceOSError("资料字段过大") }
-                code = value.utf8CString.withUnsafeBufferPointer { bytes in
-                    sqlite3_bind_text(stmt, Int32(i + 1), bytes.baseAddress, Int32(bytes.count - 1), transient)
-                }
-            } else { code = sqlite3_bind_null(stmt, Int32(i + 1)) }
-            guard code == SQLITE_OK else { throw error() }
-        }
-        var rows: [[String: String]] = []
-        while true {
-            let result = sqlite3_step(stmt)
-            if result == SQLITE_DONE { return rows }
-            guard result == SQLITE_ROW else { throw error(sql) }
-            var row: [String: String] = [:]
-            for i in 0..<sqlite3_column_count(stmt) where sqlite3_column_type(stmt, i) != SQLITE_NULL {
-                let key = String(cString: sqlite3_column_name(stmt, i))
-                if let value = sqlite3_column_text(stmt, i) { row[key] = String(decoding: UnsafeBufferPointer(start: value, count: Int(sqlite3_column_bytes(stmt, i))), as: UTF8.self) }
-            }
-            rows.append(row)
-        }
+        try connection.query(sql, arguments)
     }
     func transaction<T>(_ body: () throws -> T) throws -> T {
         try execute("BEGIN IMMEDIATE")
@@ -1683,11 +1596,5 @@ final class Database {
             try execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,row["id"],row["text"],spans,row["created_at"]])
             try execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,row["id"]])
         }
-    }
-    private func error(_ sql: String? = nil) -> VoiceOSError {
-        let message=String(cString: sqlite3_errmsg(handle))
-        guard let sql else { return VoiceOSError("资料库错误：\(message)") }
-        let statement=sql.split(whereSeparator: \.isWhitespace).prefix(14).joined(separator: " ")
-        return VoiceOSError("资料库错误：\(message)｜\(statement)")
     }
 }

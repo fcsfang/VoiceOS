@@ -65,6 +65,13 @@ final class ReminderSyncAnomalyChecks: XCTestCase {
         XCTAssertEqual(item.desiredTitle, "整理桌面")
         XCTAssertEqual(item.marker, "voiceos-action:" + missingID)
         XCTAssertFalse(summary.items.contains { $0.actionTitle == "回复邮件" })
+
+        for scope in [WorkspaceSnapshotScope.core, .coreSecondary] {
+            let snapshot = try await store.workspaceSnapshot(scope)
+            XCTAssertEqual(snapshot.reminderSyncAnomalies, summary)
+            XCTAssertTrue(snapshot.actions.contains { $0.id == missing.id })
+            XCTAssertTrue(snapshot.reminderLinks.contains { $0.id == missingID && $0.state == "missing" })
+        }
     }
 
     func testWithoutAnomaliesSummaryIsEmpty() async throws {

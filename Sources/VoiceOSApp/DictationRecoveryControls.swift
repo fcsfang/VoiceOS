@@ -43,6 +43,7 @@ struct DictationRecoveryControls: View {
                     .buttonStyle(.workspacePrimary)
                     .disabled(unavailable)
                     .accessibilityLabel("保存可解码片段：" + source.displayTitle)
+                    .accessibilityIdentifier("capture.record.recover")
                 Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash = true }
                     .buttonStyle(.workspaceDestructive)
                     .disabled(unavailable)

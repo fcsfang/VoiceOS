@@ -210,8 +210,7 @@ public enum ActionRowLayout {
             guard parts.count == 3 else { return nil }
             return zoneCalendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
         case let .instant(utc, _):
-            if let date = ActionTimeFormatting.isoFractional.date(from: utc) { return date }
-            return ActionTimeFormatting.iso.date(from: utc)
+            return TimestampFormatting.parse(utc)
         }
     }
 }

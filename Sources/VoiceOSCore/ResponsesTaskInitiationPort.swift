@@ -4,14 +4,13 @@ import Foundation
 /// state: the input carries everything the proposal may rely on.
 public struct ResponsesTaskInitiationPort: TaskInitiationModelPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
-        let validated = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport)
-        configuration = .init(provider: validated.configuration.provider, model: model,
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        configuration = .init(provider: endpoint.provider, model: model,
                               promptVersion: "task-initiation-v2", schemaVersion: "task-initiation-v2", destination: .cloud)
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.transport = transport
+        self.transport = transport
     }
     public func initiate(_ input: TaskInitiationInput) async throws -> TaskInitiationProposal {
         guard !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -74,11 +73,8 @@ public struct ResponsesTaskInitiationPort: TaskInitiationModelPort {
     }
     private func send(_ payload: [String: Any]) async throws -> Data {
         try Task.checkCancellation()
-        var request = URLRequest(url: endpoint, timeoutInterval: 300)
-        request.httpMethod = "POST"
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let request = endpoint.request(body: data, timeout: 300)
         let reply = try await transport.send(request)
         guard reply.status == 200 else { throw VoiceOSError("模型服务返回 HTTP \(reply.status)；可手动重试") }
         return reply.body

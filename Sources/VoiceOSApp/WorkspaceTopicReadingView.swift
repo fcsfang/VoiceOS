@@ -591,7 +591,7 @@ struct WorkspaceTopicReadingView: View {
     }
 
     private func deliveryButton(_ result:AssistantExecutionRecord) -> some View {
-        WorkspaceRow(title:result.title,subtitle:"AI 交付",icon:"doc.text",trailing:"阅读") { openDelivery(result.id) }
+        WorkspaceRow(title:result.title,subtitle:"AI 交付",materialIcon:.delivery,trailing:"阅读") { openDelivery(result.id) }
     }
     private func sectionClaimCount(_ section:TopicReadingSection) -> Int {
         reading.sectionClaims[section.id]?.count ?? 0
@@ -676,47 +676,3 @@ struct TopicStaleBanner: View {
 }
 
 private typealias TopicReadingKeySelection = WorkspaceKeyboardSelection
-
-struct WorkspaceTopicTile: View {
-    @Environment(\.workspacePalette) private var palette
-    @Environment(\.vosTextScale) private var scale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hovered = false
-    let topic: ReflectionQuestion
-    let sourceCount: Int
-    var highlighted: Bool = false
-    let open: () -> Void
-    var body: some View {
-        Button(action:open) {
-            VStack(alignment:.leading,spacing:12) {
-                HStack {
-                    Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action).accessibilityHidden(true)
-                    Spacer()
-                    WorkspaceRowChevron()
-                }
-                HStack(alignment:.firstTextBaseline,spacing:8) {
-                    Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                    Spacer(minLength:4)
-                    if topic.organizationStale == true { WorkspaceBadge(text:"待重新整理",tone:.accent).help("材料已更新，待重新整理") }
-                    if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
-                }
-                if let summary=topic.organization?.summary, !summary.isEmpty {
-                    Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
-                        .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
-                        .lineLimit(scale >= 1.3 ? 3 : 2)
-                }
-                Spacer(minLength:0)
-                HStack(spacing:16) {
-                    Label("\(sourceCount) 份材料",systemImage:"doc.text")
-                    if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
-                }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
-            }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-                .padding(20)
-                .background(highlighted ? palette.selection : hovered ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-                .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(highlighted ? palette.focusRing : palette.border,lineWidth:1) }
-                .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-        }.buttonStyle(.plain).onHover { hovered = $0 }
-            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
-            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: highlighted)
-    }
-}

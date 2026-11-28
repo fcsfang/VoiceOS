@@ -616,12 +616,12 @@ struct RecordingInboxView: View {
                         Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }.buttonStyle(.workspaceSecondary)
                     }
                     .padding(.horizontal, 20).padding(.vertical, 12)
-                    if !inbox.folders.isEmpty && (!model.speechConfigured || !model.textModelConfigured) {
+                    if !inbox.folders.isEmpty && (!model.speechConfigured || !model.modelConfigured) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("已连接；配置模型后开始处理新录音").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             HStack {
                                 if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact) }
-                                if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact) }
+                                if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact) }
                             }
                         }
                         .padding(.horizontal, 20).padding(.bottom, 12)
