@@ -170,7 +170,7 @@ extension VoiceOSStore {
         }
         let config = port.configuration
         let identity = ["understand-v1", sourceID, context.contentDigest, String(policy.version), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]
-        let digest = SHA256.hash(data: try JSONSerialization.data(withJSONObject: identity)).map { String(format: "%02x", $0) }.joined()
+        let digest = Digest.sha256(try JSONSerialization.data(withJSONObject: identity))
         let commandID = retryKey.map { "understand-retry:" + $0 + ":" + digest } ?? "understand:" + digest
         let contextID = try persistLocalContext(context, commandID: commandID, destination: config.destination)
         guard try db.query("SELECT id FROM model_attempts WHERE context_id=?", [contextID]).isEmpty else {

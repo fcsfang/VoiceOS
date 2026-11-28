@@ -12,7 +12,7 @@ extension VoiceOSStore {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         let data = Data(text.utf8)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("请填写表达原文") }
-        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let hash = Digest.sha256(data)
         let fingerprint = try Self.expressionFingerprint(text, feedback: feedback)
         if let old = try db.query("SELECT * FROM sources WHERE command_id=?", [commandID]).first {
             guard old["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一表达命令不能更换内容") }
@@ -51,16 +51,16 @@ extension VoiceOSStore {
         for row in try db.query("SELECT s.*,t.text AS original_text,t.backend,j.config FROM sources s JOIN transcripts t ON t.source_id=s.id JOIN jobs j ON j.id=t.job_id WHERE s.kind='user_text'") {
             guard row["origin"] == "user", row["speaker"] == "user", row["backend"] == "user-authored-text", row["config"] == "user-text-v1",
                   let text = row["original_text"], !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("表达原文与来源身份不一致") }
-            let hash = SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+            let hash = Digest.sha256(Data(text.utf8))
             guard row["expected_hash"] == hash, row["expected_bytes"] == String(Data(text.utf8).count), row["input_fingerprint"] == (try expressionFingerprint(text, feedback: feedbackIntent(row["feedback_json"]))) else { throw VoiceOSError("表达原文与原件摘要不一致") }
         }
         guard try db.query("SELECT s.id FROM sources s WHERE s.kind='user_text' AND s.state IN ('saved','reference_only') AND NOT EXISTS(SELECT 1 FROM transcripts t WHERE t.source_id=s.id)").isEmpty else { throw VoiceOSError("表达缺少原文记录") }
     }
     static func expressionFingerprint(_ text: String, feedback: FeedbackIntent?) throws -> String {
-        guard let feedback else { return "user-text-v1:" + SHA256.hash(data:Data(text.utf8)).map { String(format:"%02x",$0) }.joined() }
+        guard let feedback else { return "user-text-v1:" + Digest.sha256(Data(text.utf8)) }
         var values = [text,feedback.actionID,String(feedback.actionVersion),feedback.kind.rawValue]
         if let claimID = feedback.organizedClaimID { values += [claimID,feedback.relation ?? "",feedback.recordingSourceID ?? ""] }
-        return "user-text-feedback-v1:" + SHA256.hash(data:try JSONSerialization.data(withJSONObject:values)).map { String(format:"%02x",$0) }.joined()
+        return "user-text-feedback-v1:" + Digest.sha256(try JSONSerialization.data(withJSONObject:values))
     }
     static func inspectUserText(_ file: URL) throws -> MediaInfo {
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0

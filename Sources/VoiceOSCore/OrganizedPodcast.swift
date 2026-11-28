@@ -68,7 +68,7 @@ private struct OrganizedTasks: Decodable {
 }
 
 private func transcriptInputDigest(_ text: String) -> String {
-    SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    Digest.sha256(Data(text.utf8))
 }
 extension VoiceOSStore {
 public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool = false, requireAPIReview: Bool = true) async throws -> Int {
@@ -169,7 +169,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     let expandedIDs = try recordingContextSourceIDs(sourceIDs: personalIDs, catalog: catalog)
     let budget = max(1, expandedIDs.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
     let context = try prepareLocalTranscriptContext(sourceIDs:expandedIDs,scalarBudget:budget)
-    let listDigest = SHA256.hash(data: taskData).map { String(format: "%02x", $0) }.joined()
+    let listDigest = Digest.sha256(taskData)
     let command = "podcast-comprehensive:" + context.contentDigest + ":" + listDigest
     guard try db.query("SELECT state FROM contexts WHERE command_id=?", [command]).first?["state"] != "frozen" else { throw VoiceOSError("这份整理的原话或授权已变化，旧结果继续暂停；没有重新激活任务") }
     let alreadyImported = !(try db.query("SELECT c.id FROM claims c JOIN model_attempts m ON m.id=c.attempt_id JOIN contexts x ON x.id=m.context_id WHERE x.command_id=? AND m.state='completed'", [command])).isEmpty

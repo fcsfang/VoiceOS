@@ -36,9 +36,7 @@ extension VoiceOSStore {
     }
     static func sourcePolicyFingerprint(sourceID: String, version: Int, localOnly: Bool) throws -> String {
         let fields = [sourceID, String(version), String(localOnly)]
-        return SHA256.hash(data: try JSONSerialization.data(withJSONObject: fields)).map {
-            String(format: "%02x", $0)
-        }.joined()
+        return Digest.sha256(try JSONSerialization.data(withJSONObject: fields))
     }
 
     /// Used inside the caller's transaction so the policy and its revision commit together.

@@ -410,7 +410,7 @@ extension VoiceOSStore {
         for row in try db.query("SELECT * FROM contexts") {
             let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let digest = SHA256.hash(data: try encoder.encode(context.sources)).map { String(format: "%02x", $0) }.joined()
+            let digest = Digest.sha256(try encoder.encode(context.sources))
             guard context.scalarBudget > 0, !context.sources.isEmpty,
                   context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= context.scalarBudget,
                   digest == context.contentDigest, digest == row["digest"],
@@ -448,7 +448,7 @@ extension VoiceOSStore {
                 proposals.append(ClaimProposal(statement: claim["statement"]!, ownership: owner, references: try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8)), action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) }, contentKind: claim["content_kind"].flatMap(CognitiveContentKind.init(rawValue:))))
             }
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let digest = SHA256.hash(data: try encoder.encode(proposals)).map { String(format: "%02x", $0) }.joined()
+            let digest = Digest.sha256(try encoder.encode(proposals))
             guard digest == attempt["result_digest"] else { throw VoiceOSError("迁移调用结果摘要不一致") }
         }
         try validateStoredUserExpressions(db)
@@ -506,6 +506,6 @@ extension VoiceOSStore {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
-    private func hash<T: Encodable>(_ value: T) throws -> String { SHA256.hash(data: Data(try json(value).utf8)).map { String(format: "%02x", $0) }.joined() }
+    private func hash<T: Encodable>(_ value: T) throws -> String { Digest.sha256(Data(try json(value).utf8)) }
     private func timestamp() -> String { TimestampFormatting.iso.string(from: Date()) }
 }

@@ -74,7 +74,7 @@ final class RecordingInbox: ObservableObject {
     }
     convenience init(libraryRoot:URL?) {
         if let libraryRoot {
-            let identity=SHA256.hash(data:Data(libraryRoot.standardizedFileURL.path.utf8)).map { String(format:"%02x",$0) }.joined()
+            let identity=Digest.sha256(Data(libraryRoot.standardizedFileURL.path.utf8))
             self.init(defaults:UserDefaults(suiteName:"voiceos.recordingInbox.library."+identity) ?? .standard)
         } else { self.init() }
     }
@@ -305,7 +305,7 @@ final class RecordingInbox: ObservableObject {
                     let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
                     var hash = SHA256()
                     while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
-                    return hash.finalize().map { String(format: "%02x", $0) }.joined()
+                    return Digest.hex(of: hash.finalize())
                 } catch { return nil }
             }.value
             guard let digest, digest != id, receipts.contains(digest),
@@ -449,7 +449,7 @@ final class RecordingInbox: ObservableObject {
                         let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
                         var hash = SHA256()
                         while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
-                        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+                        return Digest.hex(of: hash.finalize())
                     }.value
                         contentDigests[path] = (stamp, digest)
                     }

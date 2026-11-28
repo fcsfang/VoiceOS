@@ -295,7 +295,7 @@ extension VoiceOSStore {
         try db.transaction {
             for draft in drafts {
                 let id = UUID().uuidString
-                let hash = SHA256.hash(data: Data(draft.content.utf8)).map { String(format: "%02x", $0) }.joined()
+                let hash = Digest.sha256(Data(draft.content.utf8))
                 try db.execute("""
                     INSERT OR IGNORE INTO monitor_messages(id,source_id,external_id,kind,sender_name,sent_at,collected_at,content,content_sha256,meta_json)
                     VALUES(?,?,?,?,?,?,?,?,?,?)

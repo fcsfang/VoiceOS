@@ -520,7 +520,7 @@ extension VoiceOSStore {
         }
     }
     static func actionHash(_ fields: [String]) throws -> String {
-        SHA256.hash(data: try JSONSerialization.data(withJSONObject: fields)).map { String(format: "%02x", $0) }.joined()
+        Digest.sha256(try JSONSerialization.data(withJSONObject: fields))
     }
     static func validateStoredActions(_ db: Database) throws {
         for action in try db.query("SELECT a.*,c.review_version AS latest_review,c.validity AS claim_validity,c.ownership AS original_owner FROM actions a JOIN claims c ON c.id=a.claim_id") {

@@ -116,7 +116,7 @@ extension VoiceOSStore {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
-    static func relevanceHash(_ value: Data) -> String { SHA256.hash(data: value).map { String(format: "%02x", $0) }.joined() }
+    static func relevanceHash(_ value: Data) -> String { Digest.sha256(value) }
     static func relevanceFingerprint(_ digest: String, _ config: ModelConfiguration) throws -> String {
         relevanceHash(Data(try relevanceJSON(["relevance-attempt-v1",digest,config.provider,config.model,config.promptVersion,config.schemaVersion,config.destination.rawValue]).utf8))
     }

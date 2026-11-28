@@ -64,7 +64,7 @@ extension VoiceOSStore {
     }
     private static func reviewFingerprint(_ claimID: String, _ expected: Int, _ action: ClaimReviewAction, _ statement: String?, _ ownership: String?, _ note: String) throws -> String {
         let payload: [String: Any] = ["claimID": claimID, "expected": expected, "action": action.rawValue, "statement": statement as Any? ?? NSNull(), "ownership": ownership as Any? ?? NSNull(), "note": note]
-        return SHA256.hash(data: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])).map { String(format: "%02x", $0) }.joined()
+        return Digest.sha256(try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]))
     }
     static func validateStoredClaimReviews(_ db: Database) throws {
         for claim in try db.query("SELECT * FROM claims") {

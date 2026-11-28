@@ -477,7 +477,7 @@ extension VoiceOSStore {
             guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND destination='local'",[id]).first else { throw VoiceOSError("讨论缺少本地上下文") }
             let snapshot = try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(row["snapshot_json"]!.utf8))
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let digest = SHA256.hash(data:try encoder.encode(snapshot.sources)).map { String(format:"%02x",$0) }.joined()
+            let digest = Digest.sha256(try encoder.encode(snapshot.sources))
             let inputs = try db.query("SELECT * FROM context_inputs WHERE context_id=?",[id])
             guard snapshot.scalarBudget > 0, !snapshot.sources.isEmpty, inputs.count == snapshot.sources.count,
                   Set(snapshot.sources.map(\.sourceID)).count == snapshot.sources.count,

@@ -41,7 +41,7 @@ public struct LocalQwenSpeechPort: SpeechPort {
         guard ["zh_CN","en_US"].contains(locale) else { throw VoiceOSError("本地 Qwen 候选尚未启用该语言") }
         // Keep chunk checkpoints beside the library, including on failure/cancel.
         // A retry of this asset and configuration resumes the same output.
-        let key = SHA256.hash(data: Data((backendIdentity + "\n" + locale + "\n" + model.path + "\n" + runner.path).utf8)).map { String(format: "%02x", $0) }.joined()
+        let key = Digest.sha256(Data((backendIdentity + "\n" + locale + "\n" + model.path + "\n" + runner.path).utf8))
         let directory = url.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("转写进度/" + url.deletingPathExtension().lastPathComponent + "/" + key)
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])

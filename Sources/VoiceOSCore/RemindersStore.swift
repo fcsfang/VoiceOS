@@ -316,7 +316,7 @@ extension VoiceOSStore {
                     let next = action.version + 1
                     let note = "Apple 提醒事项唯一关联项回读为已完成；不代表观点已验证"
                     let fields = [action.id,String(action.version),"completed",note]
-                    let hash = SHA256.hash(data: try JSONSerialization.data(withJSONObject: fields)).map { String(format: "%02x", $0) }.joined()
+                    let hash = Digest.sha256(try JSONSerialization.data(withJSONObject: fields))
                     try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'external',?,?,?)", [revisionID,action.id,String(next),String(action.version),"completed",note,"reminder-feedback:"+observationID,hash,ISO8601DateFormatter().string(from: Date())])
                     try db.execute("UPDATE actions SET state='completed',version=? WHERE id=?", [String(next),action.id])
                     feedbackID = revisionID

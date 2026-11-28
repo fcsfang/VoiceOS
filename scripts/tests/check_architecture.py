@@ -34,6 +34,11 @@ RULES = (
         "ISO 8601 formatOptions belong in",
     ),
     (
+        (Path("Sources/VoiceOSCore/Digest.swift"),),
+        re.compile(r'"%02x"'),
+        "Hex-encoded SHA-256 belongs in",
+    ),
+    (
         (Path("Sources/VoiceOSCore/SourcePolicy.swift"),),
         re.compile(
             r"\b(?:INSERT\s+INTO\s+source_policy_revisions|"

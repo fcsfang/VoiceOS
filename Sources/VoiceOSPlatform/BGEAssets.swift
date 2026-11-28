@@ -56,5 +56,5 @@ struct BGEAssets {
         }
         guard actual == Set(manifest.files.filter { $0.path.hasPrefix("Encoder.mlmodelc/") }.map(\.path)) else { throw VoiceOSError("本地模型清单与目录不一致") }
     }
-    static func hash(_ data: Data) -> String { SHA256.hash(data:data).map { String(format:"%02x",$0) }.joined() }
+    static func hash(_ data: Data) -> String { Digest.sha256(data) }
 }

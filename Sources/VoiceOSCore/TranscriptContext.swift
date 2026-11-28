@@ -73,6 +73,6 @@ extension VoiceOSStore {
     }
     private func contextDigest(_ sources: [ContextTranscript]) throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        return SHA256.hash(data: try encoder.encode(sources)).map { String(format: "%02x", $0) }.joined()
+        return Digest.sha256(try encoder.encode(sources))
     }
 }

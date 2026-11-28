@@ -46,7 +46,7 @@ extension VoiceOSStore {
 
     static func processingSnapshotDigest(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        return SHA256.hash(data: try encoder.encode(snapshot)).map { String(format: "%02x", $0) }.joined()
+        return Digest.sha256(try encoder.encode(snapshot))
     }
 
     // The command describes a scope, not the randomly generated preparation ID.

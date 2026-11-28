@@ -90,7 +90,7 @@ extension VoiceOSStore {
     @discardableResult
     public func correctTranscript(sourceID: String, expectedVersionID: String, text: String, commandID: String = UUID().uuidString) throws -> String {
         let input = try JSONSerialization.data(withJSONObject: [sourceID,expectedVersionID,text])
-        let fingerprint = SHA256.hash(data: input).map { String(format: "%02x", $0) }.joined()
+        let fingerprint = Digest.sha256(input)
         if let existing = try db.query("SELECT * FROM transcript_revisions WHERE command_id=?", [commandID]).first {
             guard existing["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一更正命令不能更换内容") }
             return existing["to_version_id"]!
