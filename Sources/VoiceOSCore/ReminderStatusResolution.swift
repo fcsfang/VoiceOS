@@ -66,7 +66,7 @@ extension VoiceOSStore {
     private func reminderResolutionInput(link: [String: String], actionVersion: Int, observationID: String) throws -> (action: ActionRecord, observation: [String: String]) {
         guard let currentLink = try db.query("SELECT * FROM reminder_links WHERE id=?", [link["id"]]).first,
               currentLink["state"] == "conflict",
-              let action = try actions(includeHistory: true).first(where: { $0.id == link["action_id"] }),
+              let action = try link["action_id"].flatMap { try self.action(id: $0, includeHistory: true) },
               action.isCurrentTask, action.version == actionVersion,
               let observation = try db.query("SELECT * FROM reminder_observations WHERE link_id=? ORDER BY sequence DESC LIMIT 1", [link["id"]]).first,
               observation["id"] == observationID, observation["marker_valid"] == "1",

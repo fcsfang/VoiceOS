@@ -238,7 +238,7 @@ extension VoiceOSStore {
         try beginFocusedConversation(claimID: claimID, actionID: nil, commandID: commandID)
     }
     public func beginConversationForAction(actionID: String, commandID: String = UUID().uuidString) throws -> String {
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let action = try self.action(id: actionID, includeHistory: true),
               action.validity == "current", action.state != "dismissed", action.intentActor == "user" else { throw VoiceOSError("行动已变化，请从当前任务或目标重新进入") }
         return try beginFocusedConversation(claimID: action.claimID, actionID: actionID, commandID: commandID)
     }

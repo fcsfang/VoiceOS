@@ -85,7 +85,7 @@ final class ReminderObservationStats: @unchecked Sendable {
 }
 extension VoiceOSStore {
     public func reminderContext(actionID: String) throws -> String {
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let action = try self.action(id: actionID, includeHistory: true),
               action.validity == "current", let claim = try candidateClaim(id: action.claimID) else { throw VoiceOSError("任务出处不可用或已变化") }
         var lines: [String] = []
         for sourceID in Set(claim.references.map(\.sourceID)).sorted() {
@@ -169,7 +169,7 @@ extension VoiceOSStore {
             try await readReminder(linkID: existing["id"]!, calendarID: calendarID, using: port, expectedAccessVersion: expectedAccessVersion); return
         }
         guard !calendarID.isEmpty, calendarID.utf8.count <= 4096,
-              let action = try actions().first(where: { $0.id == actionID }), action.version == expectedVersion, action.kind == "task", action.intentActor == "user" else {
+              let action = try self.action(id: actionID), action.version == expectedVersion, action.kind == "task", action.intentActor == "user" else {
             throw VoiceOSError("只能把有效的明确任务发送到所选清单")
         }
         guard try reminderSourceAllowed(action) else { throw VoiceOSError("行动依据仅限本机或连续表达仍待核对，不能写入提醒事项") }
@@ -186,7 +186,7 @@ extension VoiceOSStore {
             try Task.checkCancellation()
             try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             guard found.isEmpty else { throw VoiceOSError("操作标记已有匹配，停止新建并请回读") }
-            guard let current = try actions().first(where: { $0.id == actionID }), current.version == expectedVersion, try reminderSourceAllowed(current) else { throw VoiceOSError("发送前行动或依据已变化") }
+            guard let current = try self.action(id: actionID), current.version == expectedVersion, try reminderSourceAllowed(current) else { throw VoiceOSError("发送前行动或依据已变化") }
             if expectedAccessVersion != nil {
                 guard try reminderCognitionIsLatest(current) else { throw VoiceOSError("发送前认知批次已更新，停止历史任务外写") }
             }
@@ -288,7 +288,7 @@ extension VoiceOSStore {
             }
             action = observationRound.action(id: link["action_id"]!)
         } else {
-            action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
+            action = try link["action_id"].flatMap { try self.action(id: $0, includeHistory: true) }
         }
         let validMarker = remote.marker == link["marker"]
         // Once identified, a copied marker on a replacement is a conflict,

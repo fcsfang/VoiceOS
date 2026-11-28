@@ -183,7 +183,7 @@ extension VoiceOSStore {
         var saved: [(String, ActionIntentMetadata)] = []
         for proposal in proposals {
             let entry = input.tasks.first { $0.id == proposal.taskID }!
-            guard let action = try actions().first(where: { $0.id == entry.id }), action.version == entry.version,
+            guard let action = try self.action(id: entry.id), action.version == entry.version,
                   action.title == entry.title, try reminderSourceAllowed(action), try reminderCognitionIsLatest(action) else { throw VoiceOSError("提醒字段处理期间任务已变化") }
             // An explicit user edit while inference was in flight takes precedence.
             if action.intent?.reminderFields?.desired != nil { continue }
@@ -256,7 +256,7 @@ extension VoiceOSStore {
     }
     public func saveReminderFields(actionID: String, expectedVersion: Int, fields: ReminderFields) throws {
         try fields.validate()
-        guard let action = try actions().first(where: { $0.id == actionID }), action.version == expectedVersion, action.kind == "task" else { throw VoiceOSError("任务已变化") }
+        guard let action = try self.action(id: actionID), action.version == expectedVersion, action.kind == "task" else { throw VoiceOSError("任务已变化") }
         var metadata = action.intent ?? .init(intentType: "task", followupState: "pending", uncertain: false)
         metadata.reminderFields = .init(desired: fields, observed: metadata.reminderFields?.observed)
         try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(metadata), as: UTF8.self), actionID])
@@ -290,7 +290,7 @@ extension VoiceOSStore {
     }
     private func checkReminderFieldWrite(actionID: String, expectedVersion: Int, calendarID: String, accessVersion: Int) throws {
         try checkReminderAccess(calendarID: calendarID, expectedVersion: accessVersion)
-        guard let action = try actions().first(where: { $0.id == actionID }), action.version == expectedVersion,
+        guard let action = try self.action(id: actionID), action.version == expectedVersion,
               try reminderSourceAllowed(action) else { throw VoiceOSError("设置期间任务或授权已变化") }
     }
 }

@@ -46,7 +46,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一排期命令不能更换内容") }
             return receipt["id"]!
         }
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let action = try self.action(id: actionID, includeHistory: true),
               action.version == expectedActionVersion, action.isCurrentOpenTask else {
             throw VoiceOSError("只有当前有效且未完成任务可以记录排期提案")
         }
@@ -113,7 +113,7 @@ extension VoiceOSStore {
         guard let intent = try actionScheduleIntents().first(where: { $0.id == intentID }),
               let link = try reminderLinks().first(where: { $0.actionID == intent.actionID }) else { throw VoiceOSError("没有当前排期或提醒事项关联") }
         try checkReminderAccess(calendarID: link.calendarID, expectedVersion: expectedAccessVersion)
-        let action = try actions(includeHistory: true).first { $0.id == intent.actionID }
+        let action = try self.action(id: intent.actionID, includeHistory: true)
         let sourcesAllowed = try action.map { try reminderSourceAllowed($0) && reminderCognitionIsLatest($0) } ?? false
         let proposal = try ReminderScheduleProposal(due: intent.due, authority: intent.authority,
                                                     rawExpression: intent.rawExpression, anchorEventTime: intent.anchorEventTime)

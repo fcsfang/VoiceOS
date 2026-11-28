@@ -288,7 +288,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         for (index, task) in tasks.items.enumerated() where proposals[index].action != nil {
             guard let actionID = actionIDs[index] else { throw VoiceOSError("整理事项缺少对应任务") }
             var metadata = ActionIntentMetadata(intentType: task.intent_type, followupState: task.followup_state, uncertain: task.uncertain)
-            metadata.reminderFields = try self.actions(includeHistory: true).first(where: { $0.id == actionID })?.intent?.reminderFields
+            metadata.reminderFields = try self.action(id: actionID, includeHistory: true)?.intent?.reminderFields
             try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try encoder.encode(metadata), as: UTF8.self), actionID])
         }
     }

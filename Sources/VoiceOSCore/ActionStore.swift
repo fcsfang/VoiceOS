@@ -95,10 +95,24 @@ extension VoiceOSStore {
     /// The newest revision that entered completed supplies the 已完成 order and the row date.
     private static let completedAtColumn = "(SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at"
     public func actions(includeHistory: Bool = false) throws -> [ActionRecord] {
-        _ = try candidateClaims(includeFrozen: true) // Dynamic source/hash/policy barrier also freezes actions.
-        let clause = includeHistory ? "WHERE a.removed=0" : "WHERE a.removed=0 AND a.validity='current' AND a.state='open'"
-        return try db.query("SELECT a.*,\(Self.completedAtColumn) FROM actions a \(clause) ORDER BY a.created_at,a.id").map(Self.actionRecord)
+        try readActions(includeHistory: includeHistory)
     }
+
+    public func action(id: String, includeHistory: Bool = false) throws -> ActionRecord? {
+        try readActions(includeHistory: includeHistory, id: id).first
+    }
+
+    private func readActions(includeHistory: Bool, id: String? = nil) throws -> [ActionRecord] {
+        // A conversation or earlier outcome can invalidate actions in another
+        // context. Refresh the complete claim-context verdict before applying the
+        // row scope, without decoding claims that the caller will not use.
+        try validateClaimContexts()
+        let visibility = includeHistory ? "" : " AND a.validity='current' AND a.state='open'"
+        let identity = id == nil ? "" : " AND a.id=?"
+        let bindings = id.map { [$0] } ?? []
+        return try db.query("SELECT a.*,\(Self.completedAtColumn) FROM actions a WHERE a.removed=0\(visibility)\(identity) ORDER BY a.created_at,a.id", bindings).map(Self.actionRecord)
+    }
+
     private static func actionRecord(_ row: [String: String]) throws -> ActionRecord {
         var row = row
         if let title = row["edited_title"] { row["title"] = title }
@@ -187,7 +201,7 @@ extension VoiceOSStore {
             return receipt["id"]!
         }
         guard !title.isEmpty, title.unicodeScalars.count <= 2000,
-              let original = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+              let original = try self.action(id: actionID, includeHistory: true),
               original.validity == "current", original.state == "open", original.kind == "opportunity", original.intentActor == "user", original.version == expectedVersion,
               let claim = try candidateClaim(id: original.claimID), claim.reviewVersion == original.claimReviewVersion else { throw VoiceOSError("事项或原话已变化，请重新核对") }
         let id = UUID().uuidString, now = ISO8601DateFormatter().string(from: Date())
@@ -211,7 +225,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一行动状态命令不能更换内容") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }), current.validity == "current",
+        guard let current = try self.action(id: actionID, includeHistory: true), current.validity == "current",
               current.version == expectedVersion else { throw VoiceOSError("行动版本或依据已变化，请重新核对") }
         guard state.rawValue != current.state, note.unicodeScalars.count <= 2000 else { throw VoiceOSError("行动状态没有变化或备注过长") }
         guard state != .completed || current.kind == "task" else { throw VoiceOSError("探索意图与 AI 建议不能标成任务完成；问题与目标的完成请使用 completeOutcome") }
@@ -237,7 +251,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一次撤销外部完成不能更换任务或版本") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let current = try self.action(id: actionID, includeHistory: true),
               current.kind == "task", current.validity == "frozen",
               current.state == LocalActionState.completed.rawValue, current.version == expectedVersion,
               let latest = try db.query("SELECT state,command_id FROM action_revisions WHERE action_id=? ORDER BY version DESC LIMIT 1", [actionID]).first,
@@ -265,7 +279,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash, receipt["action_id"] == id, receipt["from_version"] == String(expectedVersion) else { throw VoiceOSError("同一次归类不能更换行动或归类") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == id }) else { throw VoiceOSError("行动不存在") }
+        guard let current = try self.action(id: id, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard current.validity == "current" else { throw VoiceOSError("已失效的行动不能归类") }
         guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
         guard current.nature != nature.rawValue else { throw VoiceOSError("行动归类没有变化") }
@@ -288,7 +302,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一完成目标命令不能更换内容") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let current = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard current.kind == "opportunity" else { throw VoiceOSError("只有问题与目标可以达成") }
         guard current.state == "open" else { throw VoiceOSError("只有未完成的问题与目标可以达成") }
         guard current.validity == "current" else { throw VoiceOSError("已失效的问题与目标不能达成") }
@@ -313,10 +327,10 @@ extension VoiceOSStore {
             guard receipt["action_id"] == actionID, receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一添加下一步命令不能更换目标或行动") }
             return Int(receipt["version"]!)!
         }
-        guard let outcome = try actions(includeHistory: true).first(where: { $0.id == outcomeID }) else { throw VoiceOSError("目标不存在") }
+        guard let outcome = try self.action(id: outcomeID, includeHistory: true) else { throw VoiceOSError("目标不存在") }
         guard outcome.kind == "opportunity" else { throw VoiceOSError("下一步只能挂在问题与目标下") }
         guard outcome.state == "open", outcome.validity == "current" else { throw VoiceOSError("只有未完成且有效的问题与目标可以添加下一步") }
-        guard let child = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let child = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard child.kind == "task" else { throw VoiceOSError("只有待办可以作为下一步") }
         guard child.state == "open", child.validity == "current" else { throw VoiceOSError("只有未完成且有效的待办可以作为下一步") }
         guard child.parentID == nil else { throw VoiceOSError("这条待办已经挂在目标下") }
@@ -339,7 +353,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一摘除下一步命令不能更换行动") }
             return Int(receipt["version"]!)!
         }
-        guard let child = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let child = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard child.kind == "task" else { throw VoiceOSError("只有待办可以作为目标下一步") }
         guard child.parentID != nil else { throw VoiceOSError("这条待办没有挂在目标下") }
         guard child.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
@@ -390,7 +404,7 @@ extension VoiceOSStore {
             guard receipt["action_id"] == actionID, receipt["decision"] == decision.rawValue else { throw VoiceOSError("同一澄清命令不能更换行动或判断") }
             return try db.query("SELECT version FROM actions WHERE id=?", [actionID]).first?["version"].flatMap(Int.init) ?? expectedVersion
         }
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let action = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         try Self.rejectNextActionKindChange(db, action: action)
         guard action.isExtracted, action.state == "open", action.validity == "current", action.version == expectedVersion else {
             throw VoiceOSError("只有抽取得到且仍有效的未完成行动可以澄清")
@@ -431,7 +445,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一提升命令不能更换行动或内容") }
             return Int(receipt["version"]!)!
         }
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let action = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         try Self.rejectNextActionKindChange(db, action: action)
         guard action.kind == "opportunity" else { throw VoiceOSError("只有问题与目标可以转为待办") }
         guard action.state == "open" else { throw VoiceOSError("只有未完成的问题与目标可以转为待办") }
@@ -462,7 +476,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一次回看命令不能更换行动") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let current = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard current.state == LocalActionState.someday.rawValue, current.validity == "current" else { throw VoiceOSError("只有留到以后的行动可以回看") }
         guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
         let next = expectedVersion + 1

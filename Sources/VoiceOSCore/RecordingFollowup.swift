@@ -740,13 +740,13 @@ extension VoiceOSStore {
         let command = "goal-step:" + goalID + ":" + receipt.id + ":" + Self.relevanceHash(Data((step.title + "\n" + step.condition).utf8))
         if step.existingTaskID.isEmpty, validity.sourceCurrent,
            let id = try db.query("SELECT id FROM actions WHERE command_id=?", [command]).first?["id"],
-           let existing = try actions(includeHistory: true).first(where: { $0.id == id }),
+           let existing = try self.action(id: id, includeHistory: true),
            existing.validity == "current", existing.state == "open", existing.intent?.goalID == goalID {
             return id
         }
         guard validity.goalIsCurrent(goalID) else { throw VoiceOSError("这个目标或阶段任务已变化，请更新建议") }
         if !step.existingTaskID.isEmpty {
-            guard let task = try actions(includeHistory: true).first(where: { $0.id == step.existingTaskID }), task.validity == "current", task.state == "open" else { throw VoiceOSError("这个步骤已完成或发生变化，请刷新目标建议") }
+            guard let task = try self.action(id: step.existingTaskID, includeHistory: true), task.validity == "current", task.state == "open" else { throw VoiceOSError("这个步骤已完成或发生变化，请刷新目标建议") }
             return step.existingTaskID
         }
         let id = try createAction(claimID: goal.thought.id, expectedClaimReviewVersion: goal.thought.reviewVersion, title: step.title, kind: .task, note: step.condition, commandID: command)

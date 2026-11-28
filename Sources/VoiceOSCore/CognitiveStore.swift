@@ -247,16 +247,18 @@ extension VoiceOSStore {
     private func candidateClaimRows(includeFrozen: Bool, attemptID: String? = nil, claimID: String? = nil) throws -> [[String: String]] {
         let selection = (attemptID == nil ? "" : " AND a.id=?") + (claimID == nil ? "" : " AND c.id=?")
         let arguments = [attemptID, claimID].compactMap { $0 }
-        // Dynamic read checks are a second barrier in addition to atomic invalidation.
-        // A detail read checks its own producers; it must not decode and validate
-        // the whole library for each claim or recording.
-        if !contextValidationSuspended {
-        for row in try db.query("SELECT DISTINCT x.id,x.digest FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
-            do { try validateContextRow(id: row["id"]!, digest: row["digest"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
-        }
-        }
+        try validateClaimContexts(matching: selection, arguments: arguments)
         let whereClause = includeFrozen ? "WHERE 1=1" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
         return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause)\(selection) ORDER BY c.created_at,c.id", arguments)
+    }
+
+    func validateClaimContexts(matching selection: String = "", arguments: [String] = []) throws {
+        guard !contextValidationSuspended else { return }
+        // Dynamic read checks also catch an original that changed outside the app.
+        for row in try db.query("SELECT DISTINCT x.id,x.digest FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
+            do { try validateContextRow(id: row["id"]!, digest: row["digest"]!) }
+            catch { try db.transaction { try freezeContext(row["id"]!) } }
+        }
     }
 
     private func decodeCandidateClaim(_ row: [String: String]) throws -> CandidateClaim {

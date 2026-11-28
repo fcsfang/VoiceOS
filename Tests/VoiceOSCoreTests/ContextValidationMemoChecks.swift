@@ -61,5 +61,15 @@ final class ContextValidationMemoChecks: XCTestCase {
         _ = try await store.workspaceSnapshot(.full)
         let afterWritePasses = await store.contextValidationPasses
         XCTAssertGreaterThan(afterWritePasses - beforeWritePasses, 0, "写入后必须重新校验上下文")
+
+        let task = try XCTUnwrap(first.actions.first { $0.title == "整理一" })
+        let source = try XCTUnwrap(first.sources.first { $0.transcript == "第一份整理材料。" })
+        let original = try await store.playableURL(sourceID: source.id)
+        try Data("外部写入改变了文件".utf8).write(to: original)
+
+        let historical = try await store.action(id: task.id, includeHistory: true)
+        let current = try await store.action(id: task.id)
+        XCTAssertEqual(historical?.validity, "frozen")
+        XCTAssertNil(current)
     }
 }

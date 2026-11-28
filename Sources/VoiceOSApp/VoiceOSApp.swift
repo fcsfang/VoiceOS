@@ -3780,7 +3780,7 @@ final class ControlCenter: ObservableObject {
         }
         savingAction = true; defer { savingAction = false }
         do {
-            guard let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }),
+            guard let current = try await store.action(id: action.id, includeHistory: true),
                   current.state == LocalActionState.open.rawValue, current.validity == "current" else {
                 throw VoiceOSError("任务已变化，请重新核对")
             }
@@ -3807,7 +3807,7 @@ final class ControlCenter: ObservableObject {
             }
             do {
                 guard let link = reminderLinks.first(where: { $0.id == entry.linkID }),
-                      let current = try await store.actions(includeHistory: true).first(where: { $0.id == entry.actionID }) else {
+                      let current = try await store.action(id: entry.actionID, includeHistory: true) else {
                     removePendingReminderSync(actionID: entry.actionID)
                     continue
                 }
@@ -3825,7 +3825,7 @@ final class ControlCenter: ObservableObject {
                 try await reminders.setCompletion(calendarID: entry.calendarID, externalID: entry.externalID, marker: entry.marker,
                                                   completed: entry.desiredState == LocalActionState.completed.rawValue) {
                     guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
-                          let latest = try await store.actions(includeHistory: true).first(where: { $0.id == entry.actionID }),
+                          let latest = try await store.action(id: entry.actionID, includeHistory: true),
                           latest.state == entry.desiredState else { throw VoiceOSError("任务或连接已变化，请重新核对") }
                 }
                 try await store.readReminder(linkID: entry.linkID, calendarID: entry.calendarID, using: reminders, expectedAccessVersion: access.version)
@@ -4164,7 +4164,7 @@ final class ControlCenter: ObservableObject {
                     remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
                     try await reminders.setCompletion(calendarID: link.calendarID, externalID: id, marker: "voiceos-action:" + link.id, completed: state == .completed) {
                         guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
-                              let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
+                              let current = try await store.action(id: action.id, includeHistory: true), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
                     }
                     try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
                     removePendingReminderSync(actionID: action.id)

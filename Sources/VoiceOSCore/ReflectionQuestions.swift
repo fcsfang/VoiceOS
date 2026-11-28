@@ -294,7 +294,7 @@ extension VoiceOSStore {
 
     public func linkTopicAction(questionID: String, actionID: String, expectedVersion: Int) throws {
         _ = try reflectionQuestionRow(questionID)
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let action = try self.action(id: actionID, includeHistory: true),
               action.validity == "current", action.version == expectedVersion,
               let claim = try candidateClaim(id: action.claimID),
               claim.reviewVersion == action.claimReviewVersion else { throw VoiceOSError("这项任务或原话已变化，请刷新后再关联") }

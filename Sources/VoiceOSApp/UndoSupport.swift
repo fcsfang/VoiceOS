@@ -41,9 +41,9 @@ extension ControlCenter {
     private func undo(_ change: WorkspaceChange, store: VoiceOSStore) async -> UndoResult {
         switch change {
         case .action(let entry):
-            let records: [ActionRecord]
-            do { records = try await store.actions(includeHistory: true) } catch { return .failed(error.localizedDescription) }
-            guard let record = records.first(where: { $0.id == entry.actionID }),
+            let action: ActionRecord?
+            do { action = try await store.action(id: entry.actionID, includeHistory: true) } catch { return .failed(error.localizedDescription) }
+            guard let record = action,
                   entry.skipReason(current: LocalActionState(rawValue: record.state)) == nil else { return .skipped }
             isUndoingActionChange = true; defer { isUndoingActionChange = false }
             let receipt = await changeAction(record, state: entry.from, successorID: entry.successorID)
