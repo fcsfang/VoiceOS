@@ -3432,9 +3432,8 @@ final class ControlCenter: ObservableObject {
             // Only durable record-and-process requests need this automatic review.
             // Explicit source understanding and full recording organization review
             // their own source; opening the app must not reprocess the old library.
-            let requested = Set(((try? await store.recordingProcessingRequests()) ?? []).filter { $0.state == "waiting" }.map(\.sourceID))
-            for source in (try? await store.sources()) ?? [] where requested.contains(source.id) && !source.localOnly && source.needsTranscriptionReview {
-                do { try await ensureTranscriptReviewed(sourceID: source.id) }
+            for sourceID in (try? await store.recordingSourcesAwaitingTranscriptionReview()) ?? [] {
+                do { try await ensureTranscriptReviewed(sourceID: sourceID) }
                 catch { transcriptReviewStatus = error.localizedDescription }
             }
         }

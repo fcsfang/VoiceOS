@@ -56,6 +56,17 @@ extension VoiceOSStore {
             .init(id:$0["id"]!,sourceID:$0["source_id"]!,state:$0["state"]!,processingIntentID:$0["processing_intent_id"],segmentedBatchID:$0["segmented_batch_id"],segmentedAssociationState:$0["segmented_association_state"],error:$0["error"])
         }
     }
+
+    /// The automatic review covers explicit recording requests in library order.
+    public func recordingSourcesAwaitingTranscriptionReview() throws -> [String] {
+        let ids = try db.query("SELECT DISTINCT source_id FROM recording_processing_requests WHERE state='waiting'")
+            .map { $0["source_id"]! }
+        return try sourceRecords(ids: ids)
+            .filter { !$0.localOnly && $0.needsTranscriptionReview }
+            .sorted { $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt > $1.createdAt }
+            .map(\.id)
+    }
+
     func setRecordingRequest(_ id: String, state: String, error: String? = nil, queueID: String? = nil) throws {
         try db.execute("UPDATE recording_processing_requests SET state=?,error=?,processing_intent_id=COALESCE(?,processing_intent_id),updated_at=? WHERE id=?", [state,error,queueID,Self.processingNow(),id])
     }

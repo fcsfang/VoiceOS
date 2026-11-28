@@ -41,8 +41,14 @@ extension VoiceOSStore {
     }
 
     public func sourceExtractionFlags() throws -> [String: SourceExtractionFlag] {
+        try readSourceExtractionFlags()
+    }
+
+    private func readSourceExtractionFlags(sourceIDs: Set<String>? = nil) throws -> [String: SourceExtractionFlag] {
+        let scope = sourceIDs == nil ? "" : " WHERE source_id IN (SELECT value FROM json_each(?))"
+        let arguments = try sourceIDs.map { [try Self.relevanceJSON($0.sorted())] } ?? []
         var flags: [String: SourceExtractionFlag] = [:]
-        for row in try db.query("SELECT source_id,state FROM source_extraction_flags") {
+        for row in try db.query("SELECT source_id,state FROM source_extraction_flags" + scope, arguments) {
             guard let id = row["source_id"], let state = row["state"].flatMap(SourceExtractionFlag.init(rawValue:)) else { continue }
             flags[id] = state
         }
@@ -67,8 +73,8 @@ extension VoiceOSStore {
     /// A material that now has references is resolved and loses the row.
     func evaluateSourceExtractionFlags(sourceIDs: Set<String>) throws {
         guard !sourceIDs.isEmpty else { return }
-        let catalog = Dictionary(try sources().filter { sourceIDs.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let existing = try sourceExtractionFlags()
+        let catalog = Dictionary(uniqueKeysWithValues: try sourceRecords(ids: Array(sourceIDs)).map { ($0.id, $0) })
+        let existing = try readSourceExtractionFlags(sourceIDs: sourceIDs)
         for id in sourceIDs.sorted() {
             guard let source = catalog[id] else { continue }
             let facts = SourceExtractionFacts(origin: source.origin, speaker: source.speaker, transcript: source.transcript,
