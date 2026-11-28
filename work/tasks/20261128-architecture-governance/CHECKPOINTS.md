@@ -79,3 +79,9 @@
 - 完成：A09 授权与凭据地图成文；两份手写钥匙串 CRUD（模型密钥、推送地址）归一为 `KeychainCredential`，调用方保留各自的服务名、可访问性与错误文案。
 - 证据：592 项 Swift 测试通过。`NoteHistoryMemory` 只读外部凭据不并入；三种 Apple 权限各只有一处请求与状态读取。未对真实钥匙串写入实测。
 - 下一步：A12 构建、验证与运维入口盘点。
+
+## 2026-11-28T03:52:00Z
+
+- 完成：A12 入口分工成图；`check_architecture.py` 增加「SecItem 只允许在 KeychainCredential 与 NoteHistoryMemory」规则，规则自测通过。
+- 证据：边界检查 0 违规；Python 19 项测试通过。未发现重复打包路径，`build.py` 仍是唯一打包入口并内联边界检查。
+- 下一步：A08 测试与验证覆盖的重复性核对。

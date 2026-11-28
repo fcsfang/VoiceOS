@@ -51,7 +51,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A09 · 已建立授权与凭据地图，归一钥匙串实现 | Apple 权限、云端文字处理许可、模型密钥、记忆身份和消息凭据的合法使用条件分别落在系统、业务状态或单独配置文件。模型密钥与推送地址各写了一份钥匙串 CRUD。 | 核对各授权的写端、读端与恢复入口；两份手写钥匙串 CRUD 归一为 `KeychainCredential`；`NoteHistoryMemory` 只读外部凭据，不并入。云端许可的权威是材料 `local_only` 字段与修订账本。保存范围或默认许可不变。 |
 | A10 · 已建立渠道地图并删除无读端诊断 | 启动/HTTP 诊断、持久化业务错误和用户提示各有写端；监测、整理、备份的错误分类缺少同处的调用方地图。`ModelHTTPDiagnostics` 只有写端，没有读者。 | 已核对五类渠道与三类重试语义，未发现可安全合并的重复分类；无读端的 `ModelHTTPDiagnostics` 连同传输层计时一起删除。字符串分类点与子进程错误载体记录在下方地图。 |
 | A11 · 已统一行动时间与只读投影 | 部分搜索、外部 CLI、工作区和详情各自读取行动与材料；日期、展示标题和有效性已部分有共享解析。只读 CLI 的列表与详情曾各自重复行动 SQL、到期/计划/提醒查询。 | 从同一个材料或行动沿正常入口核对重复投影，避免把分页与轻量快照强行合并。CLI 列表与详情共用一份投影，隐私字段按需投影。unknown 链接语义待确认。 |
-| A12 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 保持一个产品打包入口，核对资产与运行脚本的来源，按执行路径找重叠；现有隔离库和启动安全验证一并保留。 |
+| A12 · 已核对入口分工并加钥匙串边界检查 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 已确认一个打包入口（`build.py` 内联运行 `check_architecture.py`），预览启动器与重启闸门各司其职，未发现重复打包路径。新增 SecItem 只允许在 `KeychainCredential` 与 `NoteHistoryMemory` 的机器检查。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -84,6 +84,18 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 
 要点：模型密钥与推送地址这两份手写 SecItem CRUD 归一到 `KeychainCredential`（钥匙串服务名、账户名、可访问性与错误文案保持原样）。`NoteHistoryMemory` 读取的是外部创建的凭据且无写路径，不并入通用实现。云端许可的权威写入只有策略命令与录音许可命令，二者都留修订账本；界面各处只经由这些命令改动。
 
+## 构建、验证与运维入口（A12）
+
+| 入口 | 角色 | 关系 |
+| --- | --- | --- |
+| `scripts/app/build.py` | 唯一产品打包入口：共享构建锁、release 构建、复制资源、签名、App Intents 元数据、图标；开跑前执行 `check_architecture.py` | 发布产物的唯一来源 |
+| `scripts/app/run.py` | 开发预览启动器：要求先构建；可指定隔离数据根与限时采集 | 不构建、不打包 |
+| `scripts/app/restart_preflight.sh` | 重启闸门：用户空闲与后台任务检查，独立 `VOICEOS_DB` | 运维入口，不构建 |
+| `swift build` / `swift test` | 日常编译与全量测试 | 与打包入口共享同一 `Package.swift` |
+| `scripts/tests/test_*.py` | Python 流程测试（unittest，19 项） | 与 Swift 测试互不重复 |
+| `scripts/tests/check_architecture.py` | 机器可执行的边界规则：CSQLite、Responses URL、资料库路径、SecItem | 打包前强制 |
+| `voiceos-check` / `voiceos-cli` | 产品内验证工具与外部只读工具 | 不进打包链 |
+
 ## 决策记录
 
 - A01 比较过只抽出 SQL statement 方法、给现有 `Database` 增加只读及备份模式、复用单一低层连接。采用单一低层连接，因为只抽方法会留下连接、安全选项与错误处理重复，而在 `Database` 里并列各种模式会让读取者依赖迁移和写配置。SQLite schema 属于 `Database`，导出包格式仍由 `PortablePackage` 管理。
@@ -107,6 +119,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A10 盘点五类输出渠道后发现 `ModelHTTPDiagnostics` 只有写端、没有读者，连同传输层的计时变量一起删除。三类重试语义（同请求线级、操作级结果、推送投递）比较过合并，因预算、payload 与呈现不同而保留分离；子进程字符串分类点记录为后续候选，不在本批改动。
 
 - A09 比较过保留两份钥匙串实现、把模型密钥也搬进 App、以及抽一个低层 `KeychainCredential`。采用低层结构体：两份 CRUD 的 SecItem 形态相同，而服务名、可访问性、错误文案属于各自凭据的契约，留在调用方。`NoteHistoryMemory` 只读外部凭据不并入；三种 Apple 权限各自只有一处请求与状态读取，未发现平行实现，不需要改代码。
+
+- A12 比较过把 Python 测试并进打包入口、与保留独立验证入口。选择保留独立入口，只把边界检查放进打包，因为打包链已经包含构建、签名与元数据，塞入测试会拖长且扩大失败面。钥匙串规则把 A09 的归一变成机器检查，防止第三份手写 SecItem 回潮。
 
 ## 待确认的兼容性取舍
 

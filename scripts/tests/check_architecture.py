@@ -9,19 +9,25 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 RULES = (
     (
-        Path("Sources/VoiceOSCore/SQLiteConnection.swift"),
+        (Path("Sources/VoiceOSCore/SQLiteConnection.swift"),),
         re.compile(r"\bimport\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func)\s+)?CSQLite\b"),
         "CSQLite belongs in",
     ),
     (
-        Path("Sources/VoiceOSCore/ResponsesEndpoint.swift"),
+        (Path("Sources/VoiceOSCore/ResponsesEndpoint.swift"),),
         re.compile(r'\bappendingPathComponent\(\s*"responses"|https://[^"\s]+/v1/responses'),
         "Responses URL construction belongs in",
     ),
     (
-        Path("Sources/VoiceOSCore/LibraryLayout.swift"),
+        (Path("Sources/VoiceOSCore/LibraryLayout.swift"),),
         re.compile(r'\bappendingPathComponent\(\s*"(?:voiceos\.sqlite|Library/Application Support/VoiceOS)"'),
         "Library path construction belongs in",
+    ),
+    (
+        (Path("Sources/VoiceOSPlatform/KeychainCredential.swift"),
+         Path("Sources/VoiceOSApp/NoteHistoryMemory.swift")),
+        re.compile(r"\bSecItem(?:Add|Update|Delete|CopyMatching)\b"),
+        "Keychain access belongs in",
     ),
 )
 
@@ -33,9 +39,10 @@ def main() -> int:
         for number, line in enumerate(source.read_text().splitlines(), start=1):
             if line.lstrip().startswith("//"):
                 continue
-            for owner, pattern, diagnostic in RULES:
-                if relative != owner and pattern.search(line):
-                    violations.append(f"{relative}:{number}: {diagnostic} {owner}")
+            for owners, pattern, diagnostic in RULES:
+                if relative not in owners and pattern.search(line):
+                    allowed = " or ".join(str(owner) for owner in owners)
+                    violations.append(f"{relative}:{number}: {diagnostic} {allowed}")
     for violation in violations:
         print(violation, file=sys.stderr)
     return int(bool(violations))
