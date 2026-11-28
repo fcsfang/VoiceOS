@@ -1,6 +1,43 @@
 import Foundation
 import CryptoKit
 
+extension Database {
+    enum TranscriptRevisionReason: String {
+        case original
+        case manualCorrection = "transcription_error"
+        case aiCorrection = "ai_corrected"
+    }
+
+    // The caller's transaction also owns the source/job or correction ledger.
+    func createTranscript(sourceID: String, assetID: String, inputVersionID: String, jobID: String,
+                          speech: SpeechText, backend: String, createdAt: String) throws {
+        let id = UUID().uuidString
+        try execute("""
+            INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at)
+            VALUES(?,?,?,?,?,'verbatim',?,'zh_CN',?,?)
+            """, [id, sourceID, assetID, inputVersionID, jobID, speech.text, backend, createdAt])
+        _ = try appendTranscriptVersion(transcriptID: id, speech: speech, reason: .original, createdAt: createdAt)
+    }
+
+    func appendTranscriptVersion(transcriptID: String, speech: SpeechText,
+                                 reason: TranscriptRevisionReason, createdAt: String) throws -> String {
+        guard let transcript = try query("SELECT current_version_id,version FROM transcripts WHERE id=?", [transcriptID]).first,
+              let version = transcript["version"].flatMap(Int.init), version < Int.max else {
+            throw VoiceOSError("无法读取逐字稿版本")
+        }
+        let number = transcript["current_version_id"] == nil ? 1 : version + 1
+        let id = UUID().uuidString
+        let spans = try VoiceOSStore.relevanceJSON(speech.spans)
+        let actor = reason == .manualCorrection ? "user" : "system"
+        try execute("""
+            INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at)
+            VALUES(?,?,?,?,?,?,?,?)
+            """, [id, transcriptID, String(number), speech.text, spans, reason.rawValue, actor, createdAt])
+        try execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [id, String(number), transcriptID])
+        return id
+    }
+}
+
 extension VoiceOSStore {
     static func isPrunedHistoricalTranscript(_ version: [String: String], historical: Bool) -> Bool {
         guard historical, let id = version["id"], let current = version["current_version_id"], id != current else { return false }
@@ -27,13 +64,10 @@ extension VoiceOSStore {
             guard !speech.text.isEmpty, speech.spans.allSatisfy({ $0.startMS != nil && $0.endMS != nil }) else { throw VoiceOSError("转写核对必须保留实际录音时间范围") }
             if speech.text == row["current_text"] { return expectedVersionID }
             try invalidateCognition(sourceID: sourceID)
-            let spans = String(decoding: try JSONEncoder().encode(speech.spans), as: UTF8.self)
-            let id = UUID().uuidString, next = Int(row["version"]!)! + 1
-            try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,?,?,?,'ai_corrected','system',?)", [id,row["id"],String(next),speech.text,spans,Self.now()])
+            let id = try db.appendTranscriptVersion(transcriptID: row["id"]!, speech: speech, reason: .aiCorrection, createdAt: Self.now())
             // Keep only an identity placeholder for old references, not a second full transcript.
             try db.execute("UPDATE transcript_versions SET text='',spans_json='[]',reason='ai_superseded',actor='system' WHERE id=?", [expectedVersionID])
             if row["version"] == "1" { try db.execute("UPDATE transcripts SET text='' WHERE id=?", [row["id"]]) }
-            try db.execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [id,String(next),row["id"]])
             return id
         }
     }
@@ -61,15 +95,11 @@ extension VoiceOSStore {
             WHERE s.id=? AND s.state IN ('saved','reference_only') AND t.current_version_id=?
             """, [sourceID,expectedVersionID]).first else { throw VoiceOSError("逐字稿已经更新，请重新打开当前版本再更正") }
             guard text != row["current_text"] else { throw VoiceOSError("文字未改变，无需保存更正") }
-            let versionID = UUID().uuidString
-            let next = Int(row["version"]!)! + 1
             // Editing changes text alignment. Keep the original timed version; do not invent new timestamps.
-            let corrected = SpeechText(text: text)
-            let spans = String(decoding: try JSONEncoder().encode(corrected.spans), as: UTF8.self)
-            let now = ISO8601DateFormatter().string(from: Date())
-            try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,?,?,?,'transcription_error','user',?)", [versionID,row["id"],String(next),text,spans,now])
+            let now = Self.now()
+            let versionID = try db.appendTranscriptVersion(transcriptID: row["id"]!, speech: SpeechText(text: text),
+                                                           reason: .manualCorrection, createdAt: now)
             try db.execute("INSERT INTO transcript_revisions(id,transcript_id,from_version_id,to_version_id,command_id,input_fingerprint,reason,actor,created_at) VALUES(?,?,?,?,?,?,'transcription_error','user',?)", [UUID().uuidString,row["id"],expectedVersionID,versionID,commandID,fingerprint,now])
-            try db.execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [versionID,String(next),row["id"]])
             try invalidateCognition(sourceID: sourceID)
             try checkpoint(.correctionUncommitted)
             return versionID

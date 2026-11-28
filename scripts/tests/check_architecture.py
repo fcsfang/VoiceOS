@@ -54,6 +54,15 @@ RULES = (
         re.compile(r"\bcandidateClaims\([^()]*\)\s*\.first\s*(?:\(where:\s*)?\{\s*\$0\.id\s*=="),
         "Use a claim ID lookup from",
     ),
+    (
+        (Path("Sources/VoiceOSCore/TranscriptRevision.swift"),),
+        re.compile(
+            r"\b(?:INSERT\s+INTO\s+(?:transcripts|transcript_versions)\b|"
+            r"UPDATE\s+transcripts\s+SET\s+current_version_id\b)",
+            re.IGNORECASE,
+        ),
+        "Transcript creation and current revision writes belong in",
+    ),
 )
 
 

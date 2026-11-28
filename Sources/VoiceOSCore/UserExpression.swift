@@ -75,12 +75,11 @@ extension VoiceOSStore {
         let actual = try DurableFiles.hash(original)
         guard String(actual.0) == row["expected_bytes"], actual.1 == row["expected_hash"] else { throw VoiceOSError("表达原件保存期间发生变化") }
         let text = try String(contentsOf: original, encoding: .utf8)
-        let job = UUID().uuidString, transcript = UUID().uuidString, version = UUID().uuidString
+        let job = UUID().uuidString
         // No speech job: the original is already authored text. Keep the common text-version contract.
         try db.execute("INSERT INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','user-text-v1','completed')", [job,row["id"],row["version_id"]])
-        try db.execute("INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at,current_version_id) VALUES(?,?,?,?,?,'verbatim',?,'zh_CN','user-authored-text',?,?)", [transcript,row["id"],row["asset_id"],row["version_id"],job,text,Self.now(),version])
-        let spans = String(decoding: try JSONEncoder().encode(SpeechText(text: text).spans), as: UTF8.self)
-        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?,'original','system',?)", [version,transcript,text,spans,Self.now()])
+        try db.createTranscript(sourceID: row["id"]!, assetID: row["asset_id"]!, inputVersionID: row["version_id"]!,
+                                jobID: job, speech: SpeechText(text: text), backend: "user-authored-text", createdAt: Self.now())
         if let feedback = try Self.feedbackIntent(row["feedback_json"]) {
             guard let current = try db.query("SELECT version FROM actions WHERE id=?", [feedback.actionID]).first,
                   let version = current["version"].flatMap(Int.init), feedback.actionVersion <= version else { throw VoiceOSError("反馈原始行动版本不存在") }

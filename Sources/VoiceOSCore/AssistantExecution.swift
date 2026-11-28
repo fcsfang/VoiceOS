@@ -505,7 +505,7 @@ extension VoiceOSStore {
     }
     private func saveAssistantResultSource(_ result: AssistantExecutionResult, executionID: String, allowsCloud: Bool) throws -> String {
         // AI output is a reference material, never a personal expression or an actual task outcome.
-        let id = UUID().uuidString,asset = UUID().uuidString,version = UUID().uuidString,job = UUID().uuidString,transcript = UUID().uuidString,textVersion = UUID().uuidString
+        let id = UUID().uuidString,asset = UUID().uuidString,version = UUID().uuidString,job = UUID().uuidString
         let data = Data(result.markdown.utf8),hash = Self.relevanceHash(data),relative = "assets/\(asset).txt",now = Self.now()
         let file = try assetURL(relativePath: relative)
         try data.write(to: file, options: .withoutOverwriting)
@@ -515,8 +515,8 @@ extension VoiceOSStore {
         try db.execute("INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,speaker,origin,state,created_at,timezone,expected_bytes,expected_hash,relative_path,duration,local_only) VALUES(?,?,?,?,?,?,'ai_text','assistant','ai','saved',?,?,?,?,?,0,?)", [id,"assistant-result:"+executionID,"assistant-text-v1:"+hash,asset,version,result.title,now,TimeZone.current.identifier,String(data.count),hash,relative,allowsCloud ? "0" : "1"])
         try db.execute("INSERT INTO assets(id,source_id,relative_path,bytes,sha256,role) VALUES(?,?,?,?,?,'original')", [asset,id,relative,String(data.count),hash])
         try db.execute("INSERT INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','assistant-text-v1','completed')", [job,id,version])
-        try db.execute("INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at,current_version_id) VALUES(?,?,?,?,?,'verbatim',?,'zh_CN','assistant-response',?,?)", [transcript,id,asset,version,job,result.markdown,now,textVersion])
-        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?,'original','system',?)", [textVersion,transcript,result.markdown,try Self.relevanceJSON(SpeechText(text: result.markdown).spans),now])
+        try db.createTranscript(sourceID: id, assetID: asset, inputVersionID: version, jobID: job,
+                                speech: SpeechText(text: result.markdown), backend: "assistant-response", createdAt: now)
         return id
     }
     func validateAssistantResultBasis(sourceID: String) throws {

@@ -89,11 +89,10 @@ extension VoiceOSStore {
         let actual = try DurableFiles.hash(file)
         guard String(actual.0) == row["expected_bytes"], actual.1 == row["expected_hash"] else { throw VoiceOSError("外部原文保存期间发生变化") }
         let text = try String(contentsOf: file, encoding: .utf8)
-        let job = UUID().uuidString, transcript = UUID().uuidString, version = UUID().uuidString
+        let job = UUID().uuidString
         try db.execute("INSERT INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','external-text-v1','completed')", [job,row["id"],row["version_id"]])
-        try db.execute("INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at,current_version_id) VALUES(?,?,?,?,?,'verbatim',?,'zh_CN','external-original-text',?,?)", [transcript,row["id"],row["asset_id"],row["version_id"],job,text,Self.now(),version])
-        let spans = try Self.relevanceJSON(SpeechText(text: text).spans)
-        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?,'original','system',?)", [version,transcript,text,spans,Self.now()])
+        try db.createTranscript(sourceID: row["id"]!, assetID: row["asset_id"]!, inputVersionID: row["version_id"]!,
+                                jobID: job, speech: SpeechText(text: text), backend: "external-original-text", createdAt: Self.now())
     }
 
     static func validateStoredExternalTexts(_ db: Database) throws {

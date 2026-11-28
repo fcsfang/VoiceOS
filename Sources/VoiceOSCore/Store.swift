@@ -383,20 +383,12 @@ public actor VoiceOSStore {
                         try db.execute("UPDATE jobs SET state='blocked',lease_token=NULL,error=? WHERE id=?", [SourceRecord.emptyTranscriptJobError,job])
                         return
                     }
-                    let spans = String(decoding: try JSONEncoder().encode(result.spans), as: UTF8.self)
-                    if let existing = try db.query("SELECT id,version FROM transcripts WHERE job_id=?", [job]).first {
-                        let next = Int(existing["version"]!)! + 1, versionID = UUID().uuidString
-                        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,?,?,?,'original','system',?)", [versionID,existing["id"],String(next),text,spans,Self.now()])
-                        try db.execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [versionID,String(next),existing["id"]])
+                    if let existingID = try db.query("SELECT id FROM transcripts WHERE job_id=?", [job]).first?["id"] {
+                        _ = try db.appendTranscriptVersion(transcriptID: existingID,
+                                                           speech: result, reason: .original, createdAt: Self.now())
                     } else {
-                        let transcriptID = UUID().uuidString
-                        try db.execute("""
-                        INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at)
-                        VALUES(?,?,?,?,?,'verbatim',?,'zh_CN',?,?)
-                        """, [transcriptID,source,row["asset_id"],row["input_version_id"],job,text,backend,Self.now()])
-                        let versionID = UUID().uuidString
-                        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,transcriptID,text,spans,Self.now()])
-                        try db.execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,transcriptID])
+                        try db.createTranscript(sourceID: source, assetID: row["asset_id"]!, inputVersionID: row["input_version_id"]!,
+                                                jobID: job, speech: result, backend: backend, createdAt: Self.now())
                     }
                     try db.execute("UPDATE jobs SET state='completed' ,lease_token=NULL,error=NULL WHERE id=?", [job])
                     try checkpoint(.transcriptUncommitted)

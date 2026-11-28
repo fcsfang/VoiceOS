@@ -1590,11 +1590,8 @@ final class Database {
     }
     func backfillTranscriptVersions() throws {
         for row in try query("SELECT * FROM transcripts WHERE current_version_id IS NULL") {
-            let versionID = UUID().uuidString
-            let speech = SpeechText(text: row["text"]!)
-            let spans = String(decoding: try JSONEncoder().encode(speech.spans), as: UTF8.self)
-            try execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,row["id"],row["text"],spans,row["created_at"]])
-            try execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,row["id"]])
+            _ = try appendTranscriptVersion(transcriptID: row["id"]!, speech: SpeechText(text: row["text"]!),
+                                            reason: .original, createdAt: row["created_at"]!)
         }
     }
 }
