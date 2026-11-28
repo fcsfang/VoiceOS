@@ -498,10 +498,7 @@ struct WorkspaceSourceView: View {
     }
 
     private var pendingUnderstanding:Bool {
-        model.records.contains { record in
-            guard let ids=record.presentation?.correctedSourceIDs else { return false }
-            return expressionIDs.contains(record.id) || ids.contains(source.id) || record.presentation?.recordingContext?.externalSourceID == source.id
-        }
+        model.sourcePageIndex.isRecordingUnderstandingPending(for: source.id)
     }
     private var automaticallyUpdating:Bool { pendingUnderstanding && model.fullRecordingBusy }
     /// The failed-transcription retry is the surface's one primary when shown;

@@ -1340,6 +1340,10 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertTrue(pendingCorrection.isTranscriptionCorrection)
         XCTAssertEqual(pendingCorrection.sourceIDs, correctionMembers)
         XCTAssertEqual(pendingCorrection.externalSourceIDBySource, [personalID: programmeID])
+        let pendingIndex = SourcePageIndex(records: try await dual.sources())
+        XCTAssertTrue(pendingIndex.isRecordingUnderstandingPending(for: personalID))
+        XCTAssertTrue(pendingIndex.isRecordingUnderstandingPending(for: programmeID))
+        XCTAssertFalse(pendingIndex.isRecordingUnderstandingPending(for: dualQuestion))
         let scopedRecordings = try await dual.recordingContextCatalog(sourceIDs: correctionMembers)
         XCTAssertEqual(Set(scopedRecordings.keys), [personalID, programmeID])
         do {
@@ -1375,6 +1379,9 @@ final class CoreFlowTests: XCTestCase {
         let finishedCorrection = try await dual.pendingRecordingContextReview()
         XCTAssertFalse(finishedCorrection.hasPendingGroup)
         XCTAssertTrue(finishedCorrection.sourceIDs.isEmpty)
+        let finishedIndex = SourcePageIndex(records: repairedRecords)
+        XCTAssertFalse(finishedIndex.isRecordingUnderstandingPending(for: personalID))
+        XCTAssertFalse(finishedIndex.isRecordingUnderstandingPending(for: programmeID))
         let programmePolicy=try await dual.sourcePolicy(sourceID:programmeID)
         _ = try await dual.setSourceLocalOnly(sourceID:programmeID,expectedVersion:programmePolicy.version,localOnly:true)
         do { _ = try await dual.recordingContextSourceIDs(sourceIDs:[personalID]);XCTFail("撤回节目许可后不能继续发送上下文") } catch {}

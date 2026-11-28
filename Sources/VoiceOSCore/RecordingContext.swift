@@ -149,6 +149,8 @@ public struct SourcePageIndex: Sendable {
     /// `workspacePausedTasks` derives; dismissed actions never pause.
     public let pausedTasks: [ActionRecord]
     private let expressionIssueBySourceID: [String: String]
+    private let correctionGroupOwnerIDs: Set<String>
+    private let correctionAffectedSourceIDs: Set<String>
     /// Materials with unresolved transcription doubts, derived once per
     /// snapshot instead of once per sidebar and processing-page body.
     public let transcriptReviewPoints: [WorkspaceTranscriptReviewPoint]
@@ -180,6 +182,10 @@ public struct SourcePageIndex: Sendable {
         }
         expressionBySourceID = expressions
         expressionIssueBySourceID = issues.filter { expressions[$0.key] == nil }
+
+        let correctionGroups = records.compactMap { RecordingCorrectionGroup(ownerID: $0.id, presentation: $0.presentation) }
+        correctionGroupOwnerIDs = Set(correctionGroups.map(\.ownerID))
+        correctionAffectedSourceIDs = Set(correctionGroups.flatMap(\.memberIDs)).union(correctionGroups.compactMap(\.programmeID))
 
         var claimByID: [String: CandidateClaim] = [:]
         for claim in claims { claimByID[claim.id] = claim }
@@ -272,6 +278,14 @@ public struct SourcePageIndex: Sendable {
     /// The saved-expression issue for a source, decided once per snapshot.
     public func expressionIssue(for sourceID: String) -> String? {
         expressionIssueBySourceID[sourceID]
+    }
+
+    public func isRecordingUnderstandingPending(for sourceID: String) -> Bool {
+        if correctionAffectedSourceIDs.contains(sourceID) { return true }
+        if let expression = expressionBySourceID[sourceID] {
+            return expression.sourceIDs.contains(where: correctionGroupOwnerIDs.contains)
+        }
+        return correctionGroupOwnerIDs.contains(sourceID)
     }
 
     /// Actions whose claim cites any of these sources, in workspace order.

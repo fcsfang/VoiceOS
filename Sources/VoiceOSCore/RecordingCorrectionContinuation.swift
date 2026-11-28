@@ -7,6 +7,19 @@ public struct PendingRecordingContextReview: Sendable {
     public let externalSourceIDBySource: [String: String]
 }
 
+struct RecordingCorrectionGroup {
+    let ownerID: String
+    let memberIDs: [String]
+    let programmeID: String?
+
+    init?(ownerID: String, presentation: RecordingPresentation?) {
+        guard let memberIDs = presentation?.correctedSourceIDs else { return nil }
+        self.ownerID = ownerID
+        self.memberIDs = memberIDs
+        programmeID = presentation?.recordingContext?.externalSourceID
+    }
+}
+
 extension VoiceOSStore {
     /// Discover recorded correction groups before loading any transcript.
     public func pendingRecordingContextReview() throws -> PendingRecordingContextReview {
@@ -15,8 +28,8 @@ extension VoiceOSStore {
             .reduce(into: [String: RecordingPresentation]()) { result, row in
                 result[row["id"]!] = try decoder.decode(RecordingPresentation.self, from: Data(row["presentation_json"]!.utf8))
             }
-        let groups = presentations.values.compactMap(\.correctedSourceIDs)
-        let sourceIDs = Set(groups.joined()).sorted()
+        let groups = presentations.compactMap { RecordingCorrectionGroup(ownerID: $0.key, presentation: $0.value) }
+        let sourceIDs = Set(groups.flatMap(\.memberIDs)).sorted()
         let externalSourceIDBySource = Dictionary(uniqueKeysWithValues: sourceIDs.compactMap { id -> (String, String)? in
             guard let externalID = presentations[id]?.recordingContext?.externalSourceID else { return nil }
             return (id, externalID)
