@@ -205,13 +205,6 @@ final class ControlCenter: ObservableObject {
         } catch { recordingTitleStatus = error.localizedDescription; return false }
     }
     @Published var recentClueOverrides: [RecentClueOverride] = []
-    func renameRecentClue(_ clue: String, title: String?) async -> Bool {
-        guard let store else { status = "资料库尚未打开，无法修改线索标题"; return false }
-        do {
-            try await store.setRecentClueTitle(clue: clue, title: title, commandID: "recent-clue-title:" + UUID().uuidString)
-            await refresh(); return true
-        } catch { status = error.localizedDescription; return false }
-    }
     func mergeRecentClue(_ clue: String, into target: String) async -> Bool {
         guard let store else { status = "资料库尚未打开，无法合并线索"; return false }
         do {
@@ -1901,11 +1894,6 @@ final class ControlCenter: ObservableObject {
             return false
         }
     }
-    /// 探针结果里带上规范化的候选地址，便于诊断 /v1 重复拼接这类问题。
-    func textModelEndpointHint(_ baseURL: String) -> String {
-        guard let url = URL(string: baseURL) else { return "服务地址无效" }
-        return ResponsesEndpoint.url(for: url).absoluteString
-    }
     /// 用给定配置发一次极小请求，验证地址、密钥与模型可用；返回面向用户的结果与延迟。
     func testTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> String {
         guard let base = URL(string: config.baseURL) else { return "服务地址无效" }
@@ -3308,17 +3296,6 @@ final class ControlCenter: ObservableObject {
         workspaceLastError = message
         workspaceLastErrorRetry = retry
     }
-    func chooseFiles(personalAudio: Bool = false) {
-        let panel = NSOpenPanel()
-        panel.title = personalAudio ? "导入仅含我声音的录音 · 不上传原始音频" : "导入音频或视频"; panel.prompt = personalAudio ? "确认为我的录音" : "导入"
-        panel.allowedContentTypes = personalAudio ? [.audio] : [.audio, .movie]; panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.begin { response in
-            guard response == .OK else { return }
-            let urls = panel.urls
-            Task { await self.importFiles(urls, personalAudio: personalAudio) }
-        }
-    }
     @discardableResult
     func importFiles(_ urls: [URL], personalAudio: Bool = false, notify: Bool = true) async -> Bool {
         guard let store, !importing else { return false }
@@ -3573,10 +3550,6 @@ final class ControlCenter: ObservableObject {
         }
         return await playSpan(record, milliseconds: start, endMilliseconds: end)
     }
-    func historyFor(_ record: SourceRecord) async {
-        do { history = try await store?.transcriptHistory(sourceID: record.id) ?? [] }
-        catch { status = error.localizedDescription }
-    }
     func correct(_ record: SourceRecord, text: String) async -> Bool {
         guard let store, let version = record.transcriptVersionID else { return false }
         let previousActions=actionRecords.filter { $0.validity == "current" }.map(\.id)
@@ -3702,21 +3675,6 @@ final class ControlCenter: ObservableObject {
             reminderSyncStatus = "正在核对所选清单的任务"
             await refresh(); requestReminderRefresh()
         } catch {
-            status = error.localizedDescription
-            reminderLastError = error.localizedDescription
-        }
-    }
-    func connectVoiceOSCalendar() async {
-        guard !remindersBusy else { return }
-        remindersBusy = true
-        do {
-            let calendar = try await reminders.voiceOSCalendar()
-            if !reminderCalendars.contains(where: { $0.id == calendar.id }) { reminderCalendars.append(calendar) }
-            proposedReminderCalendarID = calendar.id
-            remindersBusy = false
-            await saveReminderConnection()
-        } catch {
-            remindersBusy = false
             status = error.localizedDescription
             reminderLastError = error.localizedDescription
         }

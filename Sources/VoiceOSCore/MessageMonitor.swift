@@ -428,10 +428,6 @@ extension VoiceOSStore {
         return try Self.monitorReport(row)
     }
 
-    public func latestMonitorReport() throws -> MonitorReport? {
-        guard let row = try db.query("SELECT * FROM monitor_reports ORDER BY report_date DESC LIMIT 1").first else { return nil }
-        return try Self.monitorReport(row)
-    }
 
     public func monitorReports(limit: Int = 30) throws -> [MonitorReport] {
         try db.query("SELECT * FROM monitor_reports ORDER BY report_date DESC LIMIT ?", [String(max(1, limit))]).map { try Self.monitorReport($0) }

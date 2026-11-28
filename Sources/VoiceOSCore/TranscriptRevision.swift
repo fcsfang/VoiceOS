@@ -114,10 +114,4 @@ extension VoiceOSStore {
         try checkpoint(.correctionCommitted)
         return result
     }
-    public func isCurrentTranscriptVersion(_ id: String) throws -> Bool {
-        !(try db.query("""
-        SELECT v.id FROM transcript_versions v JOIN transcripts t ON t.current_version_id=v.id
-        JOIN sources s ON s.id=t.source_id WHERE v.id=? AND s.state IN ('saved','reference_only')
-        """, [id])).isEmpty
-    }
 }

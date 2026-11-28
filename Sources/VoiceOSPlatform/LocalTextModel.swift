@@ -92,30 +92,6 @@ public enum LocalTextModel {
         do { return try ResponsesModelPort(baseURL: address, apiKey: key, model: model) }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
-    public static func loadRelevance(from file: URL) throws -> ResponsesRelevancePort {
-        let cfg = try settings(from: file)
-        let address = cfg.address, key = cfg.key, model = cfg.model
-        do { return try ResponsesRelevancePort(baseURL: address, apiKey: key, model: model) }
-        catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
-    }
-    public static func loadDiscussion(from file: URL) throws -> ResponsesDiscussionPort {
-        let cfg = try settings(from: file)
-        let address = cfg.address, key = cfg.key, model = cfg.model
-        do { return try ResponsesDiscussionPort(baseURL: address, apiKey: key, model: model) }
-        catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
-    }
-    public static func loadOutcome(from file:URL) throws -> ResponsesOutcomePort {
-        let cfg = try settings(from: file)
-        let address = cfg.address, key = cfg.key, model = cfg.model
-        do { return try ResponsesOutcomePort(baseURL:address,apiKey:key,model:model) }
-        catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
-    }
-    public static func loadEnglish(from file:URL) throws -> ResponsesEnglishPracticePort {
-        let cfg = try settings(from: file)
-        let address = cfg.address, key = cfg.key, model = cfg.model
-        do { return try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:model) }
-        catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
-    }
     /// 读取配置文件（导入 / 迁移用），不打印任何密钥。
     public static func inspect(_ file: URL) throws -> Settings { try settings(from: file) }
     private static func normalizedAddress(_ raw: String) -> URL? {

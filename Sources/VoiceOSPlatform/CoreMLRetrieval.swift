@@ -23,7 +23,6 @@ public actor CoreMLRetrieval: LocalRetrievalPort {
               value.modelDescription.outputDescriptionsByName["embedding"]?.multiArrayConstraint?.shape == [1,512] else { throw VoiceOSError("本地语义模型接口不符") }
         model = value
     }
-    public func tokenIDs(_ text:String) throws -> [Int] { try load(); return try tokenizer!.encode(text) }
     public func encode(_ text:String) throws -> [Double] {
         try load()
         let ids = try tokenizer!.encode(text)

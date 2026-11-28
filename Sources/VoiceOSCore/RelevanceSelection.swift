@@ -83,14 +83,6 @@ extension VoiceOSStore {
         }
     }
 
-    /// Read-only local selection. It cannot upgrade provenance, evidence or action state.
-    public func selectLocalRelevant(query: String, queryID: UUID, candidates: [RetrievalHit],
-                                     using port: any LocalRelevancePort) async throws -> [RetrievalHit] {
-        try Task.checkCancellation()
-        let snapshot = try prepareRelevanceSnapshot(query: query, queryID: queryID, candidates: candidates)
-        let selection = try await port.select(snapshot)
-        return try acceptRelevanceSelection(selection, for: snapshot, currentQueryID: queryID)
-    }
 
     static func relevanceDigest(query: String, queryID: UUID, candidates: [RetrievalHit],
                                   destination: ModelDestination, cloudQueryAllowed: Bool, scalarBudget: Int) throws -> String {

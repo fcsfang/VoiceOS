@@ -28,10 +28,6 @@ enum MonitorCredentialStore {
         }
     }
 
-    static func deleteWebhookURL() {
-        item.delete()
-    }
-
     static func tail(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "" }
         guard value.count > 4 else { return "已保存" }
