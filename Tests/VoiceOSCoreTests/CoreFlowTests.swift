@@ -118,6 +118,16 @@ private struct FlowDiscussion: DiscussionModelPort {
         return .init(status: .completed, parts: [.init(kind: .aiSuggestion, text: responseText, references: reference.map { [$0] } ?? [])])
     }
 }
+private struct FlowDiscussionOutcome: ConversationOutcomePort {
+    let configuration = ModelConfiguration(provider: "fixture", model: "outcome", promptVersion: "v1", schemaVersion: "v1", destination: .cloud)
+    let evidence: OutcomeSourceEvidence
+
+    func extract(_ request: ConversationOutcomeRequest) async throws -> ConversationOutcomeResponse {
+        .init(status: .completed, proposals: [
+            .init(statement: "在另一组材料上核对这个发现。", ownership: .aiCandidate, sourceEvidence: [evidence])
+        ])
+    }
+}
 private actor FlowAssistantTransport: ModelHTTPTransport {
     var assessments = 0
     var deliveries = 0
@@ -1486,10 +1496,25 @@ final class CoreFlowTests: XCTestCase {
         let enriched = try await store.reflection(start: month.start, end: month.end, timeZoneID: calendar.timeZone.identifier)
         XCTAssertTrue(enriched.thoughts.contains { $0.claimID == retainedID && $0.ownership == "ai_candidate" })
         XCTAssertTrue(Set(complete.thoughts.map(\.claimID)).isSubset(of: Set(enriched.thoughts.map(\.claimID))))
+        let retainedClaim = try XCTUnwrap(enriched.thoughts.first { $0.claimID == retainedID })
+        let discussedSourceID = try XCTUnwrap(retainedClaim.evidence.first?.reference.sourceID)
+        let detailClaims = try await store.latestCandidateClaims(for: discussedSourceID)
+        let batchClaims = try await store.latestCandidateClaimsBySource()
+        XCTAssertTrue(detailClaims.contains { $0.id == retainedID })
+        XCTAssertEqual(batchClaims[discussedSourceID]?.map(\.id), detailClaims.map(\.id))
         try await store.endConversation(id: discussionID, expectedVersion: 2)
         let outcome = try await store.prepareConversationOutcome(id: discussionID, expectedVersion: 3, destination: .cloud)
         XCTAssertEqual(outcome.context.reflectionFocus?.sourceIDs, complete.sourceIDs)
         XCTAssertGreaterThan(outcome.context.scalarBudget, 12000)
+        let reusable = try await store.prepareReusableConversationOutcome(id: discussionID, expectedVersion: 3, destination: .cloud)
+        let evidence = try XCTUnwrap(retainedClaim.evidence.first)
+        let outcomeIDs = try await store.performConversationOutcome(reusable, using: FlowDiscussionOutcome(evidence: evidence))
+        let outcomeID = try XCTUnwrap(outcomeIDs.first)
+        let afterOutcome = try await store.reflection(start: month.start, end: month.end, timeZoneID: calendar.timeZone.identifier)
+        let sourceAfterOutcome = try await store.latestCandidateClaims(for: discussedSourceID)
+        XCTAssertTrue(sourceAfterOutcome.contains { $0.id == outcomeID })
+        XCTAssertTrue(afterOutcome.thoughts.contains { $0.claimID == outcomeID })
+        XCTAssertTrue(Set(complete.thoughts.map(\.claimID)).isSubset(of: Set(afterOutcome.thoughts.map(\.claimID))))
         let package = root.appendingPathComponent("reflection-package"), restored = root.appendingPathComponent("reflection-restored")
         try await store.exportPackage(to: package, includeMedia: true)
         try await VoiceOSStore.restorePackage(from: package, to: restored, inspector: NativeMediaInspector())

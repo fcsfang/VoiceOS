@@ -365,11 +365,7 @@ extension VoiceOSStore {
         return .init(sourceVersionID: base.sourceVersionID,transcriptVersionID: base.transcriptVersionID,origin: base.origin,speaker: base.speaker,localOnly: base.localOnly,policyVersion: base.policyVersion,scalarBudget: base.textLength,transcriptionReviewJSON: base.transcriptionReviewJSON,claimReviewVersions: claims,continuous: continuous)
     }
     private func knowledgeReviewClaimVersions(sourceID: String) throws -> [String: Int]? {
-        guard let attempt = try db.query("""
-        SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-        WHERE i.source_id=? AND a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-        ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC LIMIT 1
-        """,[sourceID]).first?["id"] else { return [:] }
+        guard let attempt = try latestClaimProducerIDs(sourceID: sourceID)[sourceID] else { return [:] }
         var result: [String: Int] = [:]
         for row in try db.query("""
         SELECT c.id,c.review_version,c.refs_json FROM claims c

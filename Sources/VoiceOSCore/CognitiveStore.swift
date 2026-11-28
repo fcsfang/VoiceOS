@@ -303,27 +303,39 @@ extension VoiceOSStore {
         CandidateClaim(contentKind: row["reviewed_statement"] != nil && row["reviewed_statement"] != row["statement"] ? nil : row["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: row["id"]!, statement: row["reviewed_statement"] ?? row["statement"]!, ownership: row["reviewed_ownership"] ?? row["ownership"]!, evidenceState: row["evidence_state"]!, validity: row["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data(row["refs_json"]!.utf8)), reviewVersion: Int(row["review_version"]!)!, reviewState: row["review_state"] ?? "pending")
     }
 
-    /// SQL predicate for an attempt that can own claims, used where
-    /// `model_attempts` is aliased as `a`. Topic organization also records
-    /// attempts, but writes no claims; it runs later over bundled sources, so it
-    /// must not hide the extraction attempt that a source's claims belong to.
-    static let claimExtractionAttemptFilter = "a.provider NOT LIKE 'english_feedback:%' AND a.prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')"
+    enum ClaimProducerScope {
+        case source, reflection, organizedImport
+    }
+
+    // Topic organization runs after extraction and creates no claims.
+    private static let claimProducerPredicate = "a.provider NOT LIKE 'english_feedback:%' AND a.prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')"
+
+    /// Producer sequence orders even retries recorded within the same second.
+    /// The most recent completed attempt can legitimately contain zero claims.
+    func latestClaimProducerIDs(sourceID: String? = nil, scope: ClaimProducerScope = .source) throws -> [String: String] {
+        let eligible: String
+        switch scope {
+        case .source: eligible = Self.claimProducerPredicate
+        case .reflection:
+            // Retained discussion knowledge augments the original understanding.
+            eligible = Self.claimProducerPredicate + " AND a.provider!='discussion_derivation' AND substr(a.provider,1,19)!='discussion_outcome:'"
+        case .organizedImport: eligible = "a.provider='organized_import'"
+        }
+        let sourceFilter = sourceID == nil ? "" : " AND i.source_id=?"
+        let limit = sourceID == nil ? "" : " LIMIT 1"
+        let rows = try db.query("""
+            SELECT i.source_id,a.id
+            FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
+            WHERE a.state='completed' AND \(eligible)\(sourceFilter)
+            ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC\(limit)
+            """, sourceID.map { [$0] } ?? [])
+        return Dictionary(rows.map { ($0["source_id"]!, $0["id"]!) }, uniquingKeysWith: { newest, _ in newest })
+    }
 
     /// Batch source-facing view for the library: validate contexts and read claims
     /// once, rather than repeating both operations for every recording.
     public func latestCandidateClaimsBySource(includeFrozen: Bool = false) throws -> [String: [CandidateClaim]] {
-        var latestAttemptBySource: [String: String] = [:]
-        for row in try db.query("""
-            SELECT i.source_id,a.id
-            FROM model_attempts a
-            JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-            ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC
-            """) {
-            if let sourceID = row["source_id"], latestAttemptBySource[sourceID] == nil {
-                latestAttemptBySource[sourceID] = row["id"]
-            }
-        }
+        let latestAttemptBySource = try latestClaimProducerIDs()
         var result = latestAttemptBySource.mapValues { _ in [CandidateClaim]() }
         for row in try candidateClaimRows(includeFrozen: includeFrozen) {
             let claim = try decodeCandidateClaim(row)
@@ -342,18 +354,7 @@ extension VoiceOSStore {
     /// second set of thoughts.  This helper deliberately keeps the historical
     /// `candidateClaims` API unchanged and narrows only the source-facing view.
     public func latestCandidateClaims(for sourceID: String, includeFrozen: Bool = false) throws -> [CandidateClaim] {
-        guard let attempt = try db.query("""
-            SELECT a.id
-            FROM model_attempts a
-            JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE i.source_id=? AND a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-            -- created_at is intentionally human-readable and may have only
-            -- second-level precision.  producer_sequence is the durable
-            -- ordering authority for model results, including rapid retries.
-            ORDER BY a.producer_sequence DESC, a.created_at DESC, a.id DESC
-            LIMIT 1
-            """, [sourceID]).first,
-              let attemptID = attempt["id"] else { return [] }
+        guard let attemptID = try latestClaimProducerIDs(sourceID: sourceID)[sourceID] else { return [] }
         return try candidateClaimRows(includeFrozen: includeFrozen, attemptID: attemptID).map(decodeCandidateClaim).filter { claim in
             claim.references.contains { $0.sourceID == sourceID }
         }
@@ -430,7 +431,7 @@ extension VoiceOSStore {
             }
         }
         // 主题整理尝试也写 model_attempts，但其 result_digest 不是观点提案的摘要。
-        for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed' AND provider NOT LIKE 'english_feedback:%' AND prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')") {
+        for attempt in try db.query("SELECT a.* FROM model_attempts a WHERE a.state='completed' AND \(Self.claimProducerPredicate)") {
             var proposals: [ClaimProposal] = []
             for (index, claim) in try db.query("SELECT * FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).enumerated() {
                 guard claim["ordinal"] == String(index), let owner = CandidateOwnership(rawValue: claim["ownership"]!) else { throw VoiceOSError("迁移候选顺序不一致") }

@@ -87,11 +87,7 @@ extension VoiceOSStore {
     /// The organize output is immutable per attempt; counting its claims by
     /// citation is the persisted fact about what this material contributed.
     func organizedReferenceCount(sourceID: String) throws -> Int {
-        guard let attempt = try db.query("""
-            SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE i.source_id=? AND a.provider='organized_import' AND a.state='completed'
-            ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC LIMIT 1
-            """, [sourceID]).first?["id"] else { return 0 }
+        guard let attempt = try latestClaimProducerIDs(sourceID: sourceID, scope: .organizedImport)[sourceID] else { return 0 }
         var count = 0
         for row in try db.query("SELECT refs_json FROM claims WHERE attempt_id=?", [attempt]) {
             guard let json = row["refs_json"], let references = try? JSONDecoder().decode([ClaimReference].self, from: Data(json.utf8)) else { continue }

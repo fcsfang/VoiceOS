@@ -44,6 +44,11 @@ RULES = (
         ),
         "Source policy writes and historical permission lookup belong in",
     ),
+    (
+        (Path("Sources/VoiceOSCore/CognitiveStore.swift"),),
+        re.compile(r"\bprompt_version\s+NOT\s+IN\s*\(\s*'topic-", re.IGNORECASE),
+        "Claim producer eligibility belongs in",
+    ),
 )
 
 

@@ -75,15 +75,7 @@ extension VoiceOSStore {
     func reflectionContents(start: Date, end: Date, timeZoneID: String, selectedSourceIDs: Set<String>?) throws -> ConversationReflectionFocus {
         guard ready, start < end, TimeZone(identifier: timeZoneID) != nil else { throw VoiceOSError("回顾时间范围无效") }
         let claims = try candidateClaims(), byID = Dictionary(uniqueKeysWithValues: claims.map { ($0.id, $0) })
-        // Retaining a discussion result adds knowledge; it must not replace the
-        // original understanding of every recording included in that discussion.
-        var latestAttempt: [String: String] = [:]
-        for row in try db.query("""
-        SELECT i.source_id,a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-        WHERE a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-        AND a.provider!='discussion_derivation' AND substr(a.provider,1,19)!='discussion_outcome:'
-        ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC
-        """) where latestAttempt[row["source_id"]!] == nil { latestAttempt[row["source_id"]!] = row["id"]! }
+        let latestAttempt = try latestClaimProducerIDs(scope: .reflection)
         let claimAttempts = Dictionary(uniqueKeysWithValues: try db.query("SELECT id,attempt_id FROM claims").map { ($0["id"]!, $0["attempt_id"]!) })
         let sources = try sources().filter { ["saved", "reference_only"].contains($0.state) && !($0.transcript ?? "").isEmpty }
         let catalog = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
