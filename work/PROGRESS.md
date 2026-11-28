@@ -158,3 +158,4 @@
 - 架构治理第二轮（A16–A50）：定向读取、快照与许可归一、转写版本链、反馈投影、子进程失败分类、历史批注钥匙串、`Digest`/`StableJSON`/`TimestampFormatting` 归一合并至 `main`（`932600a`）。合并树 593 项 Swift、20 项 Python 测试与 13 条边界规则通过；签名版重建并按空闲闸门重启。
 - A51 日键格式归一：九处 `yyyy-MM-dd` 构造归一到缓存的 `TimestampFormatting.dayString/dayDate`，合并 `47b9154`；593 项 Swift 测试通过。
 - A52 删除 17 个零引用函数（115 行），合并 `1125c2a`；593 项 Swift 测试通过。
+- A53 删除四个冗余不变量包装（25 行），合并 `f9e93a9`；593 项 Swift 测试通过。
