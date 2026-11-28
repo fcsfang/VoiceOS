@@ -74,6 +74,14 @@ final class RecordingExpressionDetailsChecks: XCTestCase {
         let cleared = Dictionary(uniqueKeysWithValues: clearedSources.map { ($0.id, $0) })
         XCTAssertNil(cleared[ids[0]]?.presentation?.expression?.manualTitle)
         XCTAssertEqual(cleared[ids[0]]?.recordingExpression(in: cleared)?.displayTitle(in: cleared), "自动分组标题")
+
+        let policy = try await reopened.sourcePolicy(sourceID: ids[1])
+        _ = try await reopened.setSourceLocalOnly(sourceID: ids[1], expectedVersion: policy.version, localOnly: true)
+        let workflow = try await reopened.recordingExpressions()
+        XCTAssertTrue(workflow.isEmpty)
+        let updated = SourcePageIndex(records: try await reopened.sources())
+        XCTAssertNil(updated.expression(for: ids[0]))
+        XCTAssertEqual(updated.expressionIssue(for: ids[0]), "分组里有一段的原文或文字授权已变化")
     }
 
     func testSingleRecordingTitleStaysOnPresentation() async throws {

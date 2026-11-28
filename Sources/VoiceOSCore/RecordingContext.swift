@@ -32,19 +32,16 @@ public extension SourceRecord {
     /// Views verify all companions using the same loaded catalog, including
     /// program permissions, before presenting a saved whole-expression summary.
     func recordingExpression(in catalog:[String:SourceRecord]) -> RecordingExpression? {
-        guard let expression=recordingExpression,
-              expression.sourceIDs.allSatisfy({ id in
-                  guard let member=catalog[id],member.recordingExpression?.digest == expression.digest else { return false }
-                  if let pair=member.presentation?.recordingContext {
-                      return expression.externalVersions?[pair.externalSourceID] == pair.externalVersionID && expression.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion
-                  }
-                  return true
-              }),
-              (expression.externalVersions ?? [:]).allSatisfy({ id,version in
-                  guard let external=catalog[id] else { return false }
-                  return external.transcriptVersionID == version && external.policyVersion == expression.externalPolicies?[id] && !external.localOnly && !external.needsTranscriptionReview
-              }) else { return nil }
+        guard case .success(let expression) = resolveRecordingExpression(in: catalog) else { return nil }
         return expression
+    }
+
+    internal func resolveRecordingExpression(in catalog: [String: SourceRecord])
+        -> Result<RecordingExpression, RecordingExpressionInvalidity>? {
+        guard presentation?.expression != nil else { return nil }
+        guard let expression = recordingExpression else { return .failure(.sourceChanged) }
+        if let invalidity = expression.invalidity(in: catalog, for: .reading) { return .failure(invalidity) }
+        return .success(expression)
     }
 }
 
@@ -129,16 +126,19 @@ public struct SourcePageIndex: Sendable {
         let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.recordsByID = recordsByID
         var expressions: [String: RecordingExpression] = [:]
+        var issues: [String: String] = [:]
         for record in records {
-            if let expression = record.recordingExpression(in: recordsByID) { expressions[record.id] = expression }
+            switch record.resolveRecordingExpression(in: recordsByID) {
+            case .success(let expression): expressions[record.id] = expression
+            case .failure(let invalidity):
+                if let saved = record.presentation?.expression, saved.sourceIDs.count > 1 {
+                    issues[record.id] = invalidity.message
+                }
+            case nil: break
+            }
         }
         expressionBySourceID = expressions
-        var issues: [String: String] = [:]
-        for record in records where expressions[record.id] == nil {
-            if let saved = record.presentation?.expression, saved.sourceIDs.count > 1,
-               let issue = record.recordingExpressionIssue(in: recordsByID) { issues[record.id] = issue }
-        }
-        expressionIssueBySourceID = issues
+        expressionIssueBySourceID = issues.filter { expressions[$0.key] == nil }
 
         var claimByID: [String: CandidateClaim] = [:]
         for claim in claims { claimByID[claim.id] = claim }

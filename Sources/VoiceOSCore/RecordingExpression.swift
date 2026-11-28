@@ -34,6 +34,61 @@ public struct RecordingExpression: Codable, Sendable, Identifiable {
     }
     public var digest: String { VoiceOSStore.relevanceHash(Data((sourceIDs.map { $0+":"+(versions[$0] ?? "") } + (externalVersions ?? [:]).keys.sorted().map { $0+":"+(externalVersions?[$0] ?? "") }).joined(separator:"\n").utf8)) }
 }
+enum RecordingExpressionInvalidity: Error {
+    case sourceChanged
+    case missingMember
+    case memberChanged
+    case pairedContextChanged
+    case externalChanged
+
+    var message: String {
+        switch self {
+        case .sourceChanged: "这段原文或文字授权已变化"
+        case .missingMember: "分组里有一段录音已不在资料库"
+        case .memberChanged: "分组里有一段的原文或文字授权已变化"
+        case .pairedContextChanged: "节目背景或原文授权已变化"
+        case .externalChanged: "节目原文或文字授权已变化"
+        }
+    }
+}
+
+extension RecordingExpression {
+    enum Use {
+        // The reader uses each member's readable revision and the group digest.
+        case reading
+        // Workflow commands use the saved group identity and captured versions.
+        case workflow
+    }
+
+    func invalidity(in catalog: [String: SourceRecord], for use: Use) -> RecordingExpressionInvalidity? {
+        let readingDigest = use == .reading ? digest : nil
+        for sourceID in sourceIDs {
+            guard let member = catalog[sourceID] else { return .missingMember }
+            switch use {
+            case .reading:
+                guard let expression = member.recordingExpression,
+                      expression.digest == readingDigest else { return .memberChanged }
+            case .workflow:
+                guard member.presentation?.expression?.id == id,
+                      member.transcriptVersionID == versions[sourceID],
+                      member.policyVersion == policies[sourceID],
+                      !member.localOnly, member.state == "saved" else { return .memberChanged }
+            }
+            if let pair = member.presentation?.recordingContext {
+                guard externalVersions?[pair.externalSourceID] == pair.externalVersionID,
+                      externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion else { return .pairedContextChanged }
+            }
+        }
+        for (sourceID, version) in externalVersions ?? [:] {
+            guard let external = catalog[sourceID],
+                  external.transcriptVersionID == version,
+                  external.policyVersion == externalPolicies?[sourceID],
+                  !external.localOnly, !external.needsTranscriptionReview else { return .externalChanged }
+        }
+        return nil
+    }
+}
+
 public struct RecordingExpressionProposal: Codable, Sendable {
     public let existingID: String
     public let sourceIDs: [String]
@@ -144,19 +199,7 @@ extension VoiceOSStore {
         var seen=Set<String>()
         return catalog.values.compactMap { source in
             guard let expression=source.presentation?.expression,seen.insert(expression.id).inserted else { return nil }
-            // An old group is never a route around a changed source or permission.
-            guard expression.sourceIDs.allSatisfy({ id in
-                guard let member=catalog[id] else { return false }
-                return member.presentation?.expression?.id == expression.id && member.transcriptVersionID == expression.versions[id] && member.policyVersion == expression.policies[id] && !member.localOnly && member.state == "saved"
-            }) else { return nil }
-            guard expression.sourceIDs.allSatisfy({ id in
-                guard let pair=catalog[id]?.presentation?.recordingContext else { return true }
-                return expression.externalVersions?[pair.externalSourceID] == pair.externalVersionID && expression.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion
-            }) else { return nil }
-            guard (expression.externalVersions ?? [:]).allSatisfy({ id,version in
-                guard let external=catalog[id] else { return false }
-                return external.transcriptVersionID == version && external.policyVersion == expression.externalPolicies?[id] && !external.localOnly && !external.needsTranscriptionReview
-            }) else { return nil }
+            guard expression.invalidity(in: catalog, for: .workflow) == nil else { return nil }
             return expression
         }.sorted { $0.id < $1.id }
     }

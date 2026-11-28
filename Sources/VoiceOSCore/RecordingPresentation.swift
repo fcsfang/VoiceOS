@@ -303,28 +303,8 @@ public extension SourceRecord {
     /// Explains why a saved multi-segment expression is currently unusable.
     func recordingExpressionIssue(in catalog: [String: SourceRecord]) -> String? {
         guard let saved = presentation?.expression, saved.sourceIDs.count > 1,
-              recordingExpression(in: catalog) == nil else { return nil }
-        guard recordingExpression != nil else { return "这段原文或文字授权已变化" }
-        for id in saved.sourceIDs {
-            guard let member = catalog[id] else { return "分组里有一段录音已不在资料库" }
-            guard member.recordingExpression?.digest == saved.digest else { return "分组里有一段的原文或文字授权已变化" }
-            if let pair = member.presentation?.recordingContext {
-                guard saved.externalVersions?[pair.externalSourceID] == pair.externalVersionID,
-                      saved.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion else {
-                    return "节目背景或原文授权已变化"
-                }
-            }
-        }
-        if let externals = saved.externalVersions {
-            for (id, version) in externals {
-                guard let external = catalog[id], external.transcriptVersionID == version,
-                      external.policyVersion == saved.externalPolicies?[id],
-                      !external.localOnly, !external.needsTranscriptionReview else {
-                    return "节目原文或文字授权已变化"
-                }
-            }
-        }
-        return "分组内容已变化"
+              case .failure(let invalidity) = resolveRecordingExpression(in: catalog) else { return nil }
+        return invalidity.message
     }
 
     /// Short reason shown on a material that has no topic link yet.
