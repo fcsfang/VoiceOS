@@ -176,8 +176,6 @@ struct WorkspaceRow: View {
     }
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hovered = false
     let title: String
     let subtitle: String
     /// Colors the second line without changing its type; reminder exceptions read in warning.
@@ -217,9 +215,7 @@ struct WorkspaceRow: View {
                 }.buttonStyle(.plain).accessibilityLabel(accessibilityText)
                     .zIndex(0)
             }
-            .background(hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-            .onHover { hovered=$0 }
-            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+            .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
         } else {
             Button(action:open) {
                 HStack(alignment:.top,spacing:14) {
@@ -234,11 +230,10 @@ struct WorkspaceRow: View {
                     titleAndTrailing
                 }.padding(.vertical,10).padding(.horizontal,10).padding(.trailing,trailingGutter)
                     .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-                    .background(hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
                     .accessibilityElement(children:.combine)
-            }.buttonStyle(.plain).onHover { hovered=$0 }
+            }.buttonStyle(.plain)
                 .accessibilityLabel(accessibilityText)
-                .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
         }
     }
     private var accessibilityText: String {
@@ -285,6 +280,44 @@ struct WorkspaceRow: View {
         }
     }
 }
+private struct SourceRailRow: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
+    let title: String
+    let subtitle: String
+    let icon: MaterialRowIconKind
+    let isSelected: Bool
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 9) {
+                MaterialRowIcon(kind: icon, size: 27)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).vosFont(WorkspaceText.rowTitle)
+                        .foregroundStyle(palette.text)
+                        .lineLimit(textScale >= 1.3 ? 2 : 1)
+                    if !subtitle.isEmpty {
+                        Text(subtitle).vosFont(WorkspaceText.meta)
+                            .foregroundStyle(palette.secondaryText)
+                            .lineLimit(textScale >= 1.3 ? 2 : 1)
+                    }
+                }
+                Spacer(minLength: 8)
+                WorkspaceRowChevron()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius, isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 private struct WorkspaceAttentionDot: View {
     @ObservedObject var model: ControlCenter
     @ObservedObject var inbox: RecordingInbox
@@ -3914,9 +3947,11 @@ struct WorkspaceView: View {
             ScrollView {
                 LazyVStack(alignment:.leading,spacing:2) {
                     ForEach(rows) { source in
-                        WorkspaceListRow(density:.compact,title:fittedDisplayTitle(source.displayTitle),subtitle:source.recordingDateLabel,materialIcon: MaterialRowIconKind(source),highlighted:source.id == selectedID) { selectSource(source.id) }
-                            .help(fittedDisplayTitle(source.displayTitle))
-                            .accessibilityIdentifier("sourceRail.item." + source.id)
+                        SourceRailRow(title: fittedDisplayTitle(source.displayTitle), subtitle: source.recordingDateLabel,
+                                      icon: MaterialRowIconKind(source), isSelected: source.id == selectedID) {
+                            selectSource(source.id)
+                        }
+                        .accessibilityIdentifier("sourceRail.item." + source.id)
                     }
                 }.padding(.horizontal,8).padding(.bottom,12)
             }
