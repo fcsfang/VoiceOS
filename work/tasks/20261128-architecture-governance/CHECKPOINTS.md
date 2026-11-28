@@ -24,3 +24,9 @@
 - 完成：迁移按实际版本分派，核对 78 个历史迁移的事务及 SQL，当前库只读取一次 schema 版本。
 - 证据：592 项 Swift 测试通过；真实备份副本、空库、新版本拒绝的 CLI 对照在 /tmp/voiceos-architecture-migrations.DzOKPK。
 - 下一步：收敛资料库文件名、默认根和录音收件箱的隔离路径。
+
+## 2026-11-28T02:29:31Z
+
+- 完成：统一 Swift 资料库路径及预览库的根目录解析。
+- 证据：592 项 Swift 测试通过。CLI 路径优先级对照及原生应用隔离库验证在 /tmp/voiceos-architecture-layout.zCmCjO。
+- 下一步：归一 HTTP 请求阶段可重试条件，保留长期跟进和结构修复的各自语义。

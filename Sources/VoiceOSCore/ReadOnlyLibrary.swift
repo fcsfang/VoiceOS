@@ -135,7 +135,7 @@ public struct ReadOnlyLibrary {
     private let databaseFile: URL
 
     public init(root: URL) throws {
-        let file = root.appendingPathComponent("voiceos.sqlite")
+        let file = LibraryLayout.database(in: root)
         guard FileManager.default.fileExists(atPath: file.path) else {
             throw ReadOnlyLibraryError.unavailable("资料库不存在：\(file.path)")
         }

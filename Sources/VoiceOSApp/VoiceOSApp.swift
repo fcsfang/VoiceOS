@@ -996,14 +996,18 @@ final class ControlCenter: ObservableObject {
         actionReviewLedgers.values.flatMap { $0.unresolvedPairs(for: action.id) }.sorted { $0.id < $1.id }
     }
     static weak var primary: ControlCenter?
-    private let rootOverride: URL?
+    private let configuredLibraryRoot: URL
     private(set) var libraryRoot: URL?
-    var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
+    let libraryTitle: String
     init(root: URL? = nil) {
-        rootOverride=root
+        let isolatedRoot = root ?? ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        }
+        configuredLibraryRoot = isolatedRoot ?? LibraryLayout.defaultRoot
+        libraryTitle = root.map { "独立资料库 · " + $0.lastPathComponent } ?? "VoiceOS"
         pendingReminderSyncs = ControlCenter.loadPendingReminderSyncs()
         deliveryReadAt = ControlCenter.loadDeliveryReadAt()
-        recordingInbox=RecordingInbox(libraryRoot:root ?? ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"].map { URL(fileURLWithPath:$0) })
+        recordingInbox = RecordingInbox(libraryRoot: isolatedRoot)
         // Only the app's main model (no root) backs the app-level menu action.
         if root == nil, ControlCenter.primary == nil { ControlCenter.primary = self }
     }
@@ -1340,10 +1344,7 @@ final class ControlCenter: ObservableObject {
         StartupTrace.mark("start.begin")
         startupIssue = ""
         do {
-            let root: URL
-            if let override = rootOverride { root = override }
-            else if let path = ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"] { root = URL(fileURLWithPath: path, isDirectory: true) }
-            else { root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("VoiceOS", isDirectory: true) }
+            let root = configuredLibraryRoot
             libraryRoot = root
             outcomePreferenceKey = "voiceos.outcomeFollowup.skipped:" + root.standardizedFileURL.path
             skippedOutcomeKeys = Set(UserDefaults.standard.stringArray(forKey: outcomePreferenceKey) ?? [])
@@ -1559,7 +1560,7 @@ final class ControlCenter: ObservableObject {
     private func backupLibrary(at root: URL, manual: Bool = false) {
         guard !backupRunning else { return }
         backupRunning = true
-        let database = root.appendingPathComponent("voiceos.sqlite")
+        let database = LibraryLayout.database(in: root)
         let directory = root.appendingPathComponent("Backups", isDirectory: true)
         let retain = backupRetentionPreference
         Task.detached(priority: .utility) { [weak self] in
@@ -1604,7 +1605,7 @@ final class ControlCenter: ObservableObject {
         checkingLibraryHealth = true
         libraryHealthProblem = false
         libraryHealthText = "正在检查资料库…"
-        let database = root.appendingPathComponent("voiceos.sqlite")
+        let database = LibraryLayout.database(in: root)
         let backupDirectory = root.appendingPathComponent("Backups", isDirectory: true)
         Task {
             defer { checkingLibraryHealth = false }

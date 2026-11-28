@@ -18,6 +18,11 @@ RULES = (
         re.compile(r'\bappendingPathComponent\(\s*"responses"|https://[^"\s]+/v1/responses'),
         "Responses URL construction belongs in",
     ),
+    (
+        Path("Sources/VoiceOSCore/LibraryLayout.swift"),
+        re.compile(r'\bappendingPathComponent\(\s*"(?:voiceos\.sqlite|Library/Application Support/VoiceOS)"'),
+        "Library path construction belongs in",
+    ),
 )
 
 

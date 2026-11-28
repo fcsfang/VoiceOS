@@ -4132,7 +4132,14 @@ struct WorkspaceView: View {
     }
     private func chooseLibrary() {
         let panel=NSOpenPanel();panel.title="打开已有 VoiceOS 资料库";panel.canChooseDirectories=true;panel.canChooseFiles=false
-        panel.begin { response in guard response == .OK,let url=panel.url else { return };guard FileManager.default.fileExists(atPath:url.appendingPathComponent("voiceos.sqlite").path) else { error="所选目录不是 VoiceOS 资料库";return };openWindow(id:"restored-library",value:url.path) }
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            guard FileManager.default.fileExists(atPath: LibraryLayout.database(in: url).path) else {
+                error = "所选目录不是 VoiceOS 资料库"
+                return
+            }
+            openWindow(id: "restored-library", value: url.path)
+        }
     }
     private var isNotePage: Bool {
         if case .note = page { return true }

@@ -56,8 +56,9 @@ public actor VoiceOSStore {
         for folder in ["assets", "staging"] {
             try FileManager.default.createDirectory(at: self.root.appendingPathComponent(folder), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
-        db = try Database(self.root.appendingPathComponent("voiceos.sqlite"))
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: self.root.appendingPathComponent("voiceos.sqlite").path)
+        let databaseFile = LibraryLayout.database(in: self.root)
+        db = try Database(databaseFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databaseFile.path)
     }
     public func recover() async throws {
         guard !ready, activeImports.isEmpty else { return }

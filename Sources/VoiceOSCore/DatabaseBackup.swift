@@ -78,7 +78,7 @@ public enum DatabaseBackup {
     }
 
     public static func storageUsage(root: URL, fileManager: FileManager = .default) -> LibraryStorageUsage {
-        let database = root.appendingPathComponent("voiceos.sqlite")
+        let database = LibraryLayout.database(in: root)
         let databaseBytes = ["", "-wal", "-shm"].reduce(Int64(0)) { total, suffix in
             let attributes = try? fileManager.attributesOfItem(atPath: database.path + suffix)
             return total + ((attributes?[.size] as? NSNumber)?.int64Value ?? 0)
@@ -248,7 +248,7 @@ public enum DatabaseBackup {
         }
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         do {
-            let database = destination.appendingPathComponent("voiceos.sqlite")
+            let database = LibraryLayout.database(in: destination)
             guard cloneOrCopy(backup, to: database), quickCheck(at: database) else {
                 throw VoiceOSError("无法复制备份数据库")
             }
