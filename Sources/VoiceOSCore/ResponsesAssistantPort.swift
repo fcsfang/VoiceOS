@@ -93,30 +93,10 @@ public struct ResponsesAssistantPort: AssistantModelPort {
         try Task.checkCancellation()
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         let request = endpoint.request(body: data, timeout: 300)
-        for attempt in 1...3 {
-            let reply: ModelHTTPReply
-            do { reply = try await transport.send(request) }
-            catch let error as URLError {
-                try Task.checkCancellation()
-                guard Self.isTransientURLError(error.code), attempt < 3 else { throw error }
-                try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
-                continue
-            }
-            if reply.status == 200 {
-                try Task.checkCancellation()
-                return reply.body
-            }
-            if attempt < 3, [429, 502, 503, 504].contains(reply.status) {
-                try Task.checkCancellation()
-                try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
-                continue
-            }
-            throw VoiceOSError("助理服务返回 HTTP \(reply.status)；调研需服务支持 web_search，可手动重试")
-        }
-        throw VoiceOSError("助理服务未返回结果")
-    }
-    private static func isTransientURLError(_ code: URLError.Code) -> Bool {
-        [.timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed, .secureConnectionFailed].contains(code)
+        let reply = try await ResponsesRetry.send(request, using: transport,
+                                                  scope: .httpStatusAndConnection, wait: retryDelay)
+        guard reply.status == 200 else { throw VoiceOSError("助理服务返回 HTTP \(reply.status)；调研需服务支持 web_search，可手动重试") }
+        return reply.body
     }
     private static func parseAssessment(_ data: Data) throws -> AssistantAssessment {
         let envelope = try ResponsesEnvelope.parse(data)

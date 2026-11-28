@@ -34,10 +34,8 @@ public struct ResponsesRecordingTitlePort: RecordingTitlePort {
             "text": ["format": ["type": "json_schema", "name": "voiceos_recording_titles", "strict": true, "schema": schema]]]
         let data = try JSONSerialization.data(withJSONObject: body)
         let request = endpoint.request(body: data, timeout: 600)
-        var response = try await transport.send(request)
-        for delay in [5, 15] where [429, 502, 503, 504].contains(response.status) {
-            try await retryDelay(.seconds(delay)); response = try await transport.send(request)
-        }
+        let response = try await ResponsesRetry.send(request, using: transport,
+                                                      scope: .httpStatus, wait: retryDelay)
         guard response.status == 200 else { throw VoiceOSError("内容命名 HTTP \(response.status)，可重试；原件保留") }
         let envelope = try ResponsesEnvelope.parse(response.body)
         guard envelope.status == .completed, let text = envelope.text,

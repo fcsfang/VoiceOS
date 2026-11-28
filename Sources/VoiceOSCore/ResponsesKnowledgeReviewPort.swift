@@ -81,30 +81,9 @@ public struct ResponsesKnowledgeReviewPort: KnowledgeReviewPort {
         if research { payload["tools"]=[["type":"web_search"]];payload["tool_choice"]="required" }
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         let request = endpoint.request(body: data, timeout: 300)
-        // Same transient-status and transport backoff as the followup port; a 502 or TLS hiccup here heals on retry.
-        for attempt in 1...3 {
-            let reply: ModelHTTPReply
-            do { reply = try await transport.send(request) }
-            catch let error as URLError {
-                try Task.checkCancellation()
-                guard Self.isTransientURLError(error.code), attempt < 3 else { throw error }
-                try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
-                continue
-            }
-            if reply.status == 200 {
-                try Task.checkCancellation()
-                return reply.body
-            }
-            if attempt < 3, [429, 502, 503, 504].contains(reply.status) {
-                try Task.checkCancellation()
-                try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
-                continue
-            }
-            throw VoiceOSError("知识核查服务返回 HTTP \(reply.status)；需真实检索支持，可手动重试")
-        }
-        throw VoiceOSError("知识核查服务未返回结果")
-    }
-    private static func isTransientURLError(_ code: URLError.Code) -> Bool {
-        [.timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed, .secureConnectionFailed].contains(code)
+        let reply = try await ResponsesRetry.send(request, using: transport,
+                                                  scope: .httpStatusAndConnection, wait: retryDelay)
+        guard reply.status == 200 else { throw VoiceOSError("知识核查服务返回 HTTP \(reply.status)；需真实检索支持，可手动重试") }
+        return reply.body
     }
 }

@@ -30,10 +30,8 @@ public struct ResponsesReminderFieldPort: ReminderFieldModelPort {
             "text": ["format": ["type": "json_schema", "name": "voiceos_reminder_fields", "strict": true, "schema": schema]]]
         let data = try JSONSerialization.data(withJSONObject: body)
         let request = endpoint.request(body: data, timeout: 600)
-        var response = try await transport.send(request)
-        for delay in [5, 15] where [429, 502, 503, 504].contains(response.status) {
-            try await retryDelay(.seconds(delay)); response = try await transport.send(request)
-        }
+        let response = try await ResponsesRetry.send(request, using: transport,
+                                                      scope: .httpStatus, wait: retryDelay)
         guard response.status == 200 else { throw VoiceOSError("提醒字段模型 HTTP \(response.status)；任务已保存，稍后重试") }
         let envelope = try ResponsesEnvelope.parse(response.body)
         guard envelope.status == .completed, let text = envelope.text,

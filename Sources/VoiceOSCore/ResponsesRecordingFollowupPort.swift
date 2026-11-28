@@ -116,7 +116,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
         let exactInstructions = instructions + "\n仅输出一个符合以下完整 JSON Schema 的 JSON 对象。字段名必须完全一致，所有 required 字段都必须存在，禁止替代字段、Markdown 和额外说明。\n" + schemaText
         let inputText = String(decoding: try JSONSerialization.data(withJSONObject: payloadInput, options: [.sortedKeys]), as: UTF8.self)
         var mismatch: StructuralMismatch?
-        for attempt in 1...3 {
+        for attempt in 1...ResponsesRetry.maximumAttempts {
             try Task.checkCancellation()
             var prompt = exactInstructions
             if let mismatch { prompt += "\n上次响应在 \(mismatch.path) 不符合结构：\(mismatch.diagnostic)。请根据相同完整输入重新生成完整对象。" }
@@ -130,9 +130,8 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
             catch { try Task.checkCancellation(); throw error }
             guard response.status == 200 else {
                 try Task.checkCancellation()
-                if attempt < 3, [429, 502, 503, 504].contains(response.status) {
-                    try Task.checkCancellation()
-                    try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
+                if let delay = ResponsesRetry.delay(forHTTPStatus: response.status, afterAttempt: attempt) {
+                    try await retryDelay(delay)
                     continue
                 }
                 if response.status == 429 || (500...599).contains(response.status) { throw RecordingFollowupTransientError(status: response.status) }
@@ -148,7 +147,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
                 evidence.rejected.append(.init(stage: stage, wireAttempt: attempt, responseID: responseID,
                     path: rejection.path, diagnostic: rejection.diagnostic, rawResponse: raw))
                 try Task.checkCancellation()
-                guard rejection.retryable, attempt < 3 else { throw rejection }
+                guard rejection.retryable, attempt < ResponsesRetry.maximumAttempts else { throw rejection }
                 mismatch = rejection
                 continue
             }

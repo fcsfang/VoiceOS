@@ -715,11 +715,7 @@ extension VoiceOSStore {
         let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure
         if let error = error as? RecordingFollowupTransientError { return error.status == 429 || (500...599).contains(error.status) }
         guard let error = error as? URLError else { return false }
-        switch error.code {
-        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed, .secureConnectionFailed:
-            return true
-        default: return false
-        }
+        return ResponsesRetry.isTransientConnection(error.code)
     }
     public func activateGoalStep(receiptID: String, goalID: String, step: GoalStep) throws -> String {
         guard let receipt = try recordingFollowups().first(where: { $0.id == receiptID }), receipt.state == "completed",
