@@ -31,6 +31,7 @@ final class Database {
         try execute("CREATE INDEX IF NOT EXISTS context_inputs_source_context ON context_inputs(source_id,context_id)")
         try execute("CREATE INDEX IF NOT EXISTS model_attempts_context_state ON model_attempts(context_id,state,producer_sequence)")
         try execute("CREATE INDEX IF NOT EXISTS claims_attempt ON claims(attempt_id)")
+        try execute("CREATE INDEX IF NOT EXISTS transcripts_source_created ON transcripts(source_id,created_at)")
         try ensureSearchTriggers()
     }
 
