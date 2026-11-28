@@ -1,13 +1,33 @@
 import Foundation
 import VoiceOSCore
 
+/// Raw values are the action scopes saved in workspace views.
+enum ActionFilter: String, CaseIterable {
+    case all = "全部"
+    case todo = "我的待办"
+    case assistant = "AI 助理"
+    case completed = "已完成"
+    case questions = "问题"
+    case goals = "目标"
+    case needsReview = "待核对"
+    case history = "历史记录"
+
+    var menuTitle: String { self == .assistant ? "AI 交付" : rawValue }
+    var usesTodoList: Bool { self == .all || self == .todo }
+
+    init?(savedValue: String) {
+        if savedValue == "问题与目标" { self = .questions }
+        else { self.init(rawValue: savedValue) }
+    }
+}
+
 enum SavedViewPage: String, Codable {
     case materials, actions
 
     var filters: [String] {
         switch self {
         case .materials: MaterialReadingFilter.allCases.map(\.rawValue)
-        case .actions: ["全部", "我的待办", "AI 助理", "已完成", "问题", "目标", "待核对", "历史记录"]
+        case .actions: ActionFilter.allCases.map(\.rawValue)
         }
     }
 }
@@ -51,17 +71,13 @@ extension ControlCenter {
         return "voiceos.savedViews.v1:" + (root?.standardizedFileURL.path ?? libraryTitle)
     }
 
-    /// Views saved before the split keep working; new saves only use the
-    /// current filter names.
-    private static let legacyActionFilterNames = ["问题与目标": "问题"]
-
     private func loadSavedViews(key: String) -> [SavedWorkspaceView] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([SavedWorkspaceView].self, from: data) else { return [] }
         return Array(decoded
             .map { view in
                 var view = view
-                if view.page == .actions, let mapped = Self.legacyActionFilterNames[view.filter] { view.filter = mapped }
+                if view.page == .actions, let mapped = ActionFilter(savedValue: view.filter) { view.filter = mapped.rawValue }
                 return view
             }
             .filter { $0.page.filters.contains($0.filter) && (1...ControlCenter.savedViewNameLimit).contains($0.name.count) }
