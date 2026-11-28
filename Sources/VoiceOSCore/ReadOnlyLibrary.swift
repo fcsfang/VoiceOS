@@ -301,14 +301,19 @@ public struct ReadOnlyLibrary {
                               topics: try count("SELECT COUNT(*) AS n FROM reflection_questions"))
     }
 
-    // LEFT JOINs: a feedback row without a current transcript must still list,
-    // and its text stays out of the default output.
+    // One current revision from the latest transcription. Use the same choice
+    // when matching a material's saved title and when returning feedback text.
+    private static let latestTranscriptVersion = """
+        (SELECT t.current_version_id FROM transcripts t WHERE t.source_id=s.id
+         ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1)
+        """
+
     private func feedbackRecords(actionID: String, includeText: Bool) throws -> [ReadOnlyFeedback] {
+        let textJoin = includeText ? "LEFT JOIN transcript_versions v ON v.id=\(Self.latestTranscriptVersion)" : ""
         let rows = try connection.query("""
         SELECT f.id,f.kind,f.created_at,s.feedback_json\(includeText ? ",v.text" : "")
         FROM action_feedback f JOIN sources s ON s.id=f.source_id
-        LEFT JOIN transcripts t ON t.source_id=s.id
-        LEFT JOIN transcript_versions v ON v.id=t.current_version_id
+        \(textJoin)
         WHERE f.action_id=? ORDER BY f.sequence
         """, [actionID])
         return rows.map { row in
@@ -345,7 +350,7 @@ public struct ReadOnlyLibrary {
               let sourceID = references.first?.sourceID,
               let row = try connection.query("""
               SELECT s.id,s.name,s.kind,s.state,s.created_at,s.timezone,s.presentation_json,
-                     (SELECT t.current_version_id FROM transcripts t WHERE t.source_id=s.id ORDER BY t.created_at DESC LIMIT 1) AS transcript_version_id
+                     \(Self.latestTranscriptVersion) AS transcript_version_id
               FROM sources s WHERE s.id=?
               """, [sourceID]).first else {
             return nil
