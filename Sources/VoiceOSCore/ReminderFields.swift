@@ -140,8 +140,6 @@ public protocol ReminderFieldModelPort: Sendable {
 extension VoiceOSStore {
     public func prepareReminderFields(actionIDs: Set<String>? = nil) throws -> ReminderFieldInput {
         let linked = Set(try reminderLinks().map(\.actionID))
-        try validateClaimContexts()
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var entries: [ReminderFieldInput.Task] = [], sourceIDs = Set<String>()
         for action in try actions() where action.kind == "task" && (actionIDs.map { $0.contains(action.id) } ?? !linked.contains(action.id)) && action.intent?.reminderFields?.desired == nil {
             guard let claim = try eligibleReminderClaim(for: action) else { continue }
@@ -150,10 +148,10 @@ extension VoiceOSStore {
                                  sourceIDs: refs, isSuggestedStep: action.intent?.goalID != nil))
             sourceIDs.formUnion(refs)
         }
-        let sources = try sourceIDs.sorted().compactMap { id -> ReminderFieldInput.Source? in
-            guard let source = catalog[id], let text = source.transcript, let version = source.transcriptVersionID,
-                  let row = try db.query("SELECT timezone FROM sources WHERE id=?", [id]).first else { return nil }
-            let zone = row["timezone"] ?? ""
+        let catalog = Dictionary(try sourceRecords(ids: Array(sourceIDs)).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let sources = sourceIDs.sorted().compactMap { id -> ReminderFieldInput.Source? in
+            guard let source = catalog[id], let text = source.transcript, let version = source.transcriptVersionID else { return nil }
+            let zone = source.timeZone
             var anchor: String? = nil
             if source.kind == "user_text" || source.name.hasPrefix("我的口述") { anchor = source.createdAt }
             else {
@@ -167,7 +165,7 @@ extension VoiceOSStore {
                     }
                 }
             }
-            var input = ReminderFieldInput.Source(id: id, text: text, version: version, policyVersion: source.policyVersion, expressedAt: anchor, timeZone: zone)
+            var input = ReminderFieldInput.Source(id: source.id, text: text, version: version, policyVersion: source.policyVersion, expressedAt: anchor, timeZone: zone)
             input.transcriptionReview = source.transcriptionReview
             return input
         }
@@ -180,6 +178,7 @@ extension VoiceOSStore {
         guard !ids.isEmpty, ids.allSatisfy({ !$0.isEmpty }), proposals.count == input.tasks.count,
               Set(proposals.map(\.taskID)) == Set(input.tasks.map(\.id)) else { throw VoiceOSError("提醒字段核对未覆盖全部任务") }
         let encoder = JSONEncoder()
+        let expectedSources = Dictionary(uniqueKeysWithValues: input.sources.map { ($0.id, $0) })
         var saved: [(String, ActionIntentMetadata)] = []
         for proposal in proposals {
             let entry = input.tasks.first { $0.id == proposal.taskID }!
@@ -187,9 +186,12 @@ extension VoiceOSStore {
                   action.title == entry.title, try eligibleReminderClaim(for: action) != nil else { throw VoiceOSError("提醒字段处理期间任务已变化") }
             // An explicit user edit while inference was in flight takes precedence.
             if action.intent?.reminderFields?.desired != nil { continue }
+            let currentSources = try sourceTranscriptRevisions(ids: entry.sourceIDs)
+            var sourceVersions: [String: String] = [:]
             for id in entry.sourceIDs {
-                guard let expected = input.sources.first(where: { $0.id == id }), let actual = try sources().first(where: { $0.id == id }),
-                      actual.transcriptVersionID == expected.version, actual.policyVersion == expected.policyVersion, !actual.localOnly else { throw VoiceOSError("提醒字段处理期间原话或授权已变化") }
+                guard let expected = expectedSources[id], let actual = currentSources[id],
+                      actual.versionID == expected.version, actual.policyVersion == expected.policyVersion, !actual.localOnly else { throw VoiceOSError("提醒字段处理期间原话或授权已变化") }
+                sourceVersions[id] = expected.version
             }
             let fields: ReminderFields
             var reviewNote = proposal.reviewNote
@@ -197,7 +199,7 @@ extension VoiceOSStore {
             catch { fields = .init(); reviewNote = [reviewNote, error.localizedDescription].filter { !$0.isEmpty }.joined(separator: "；") }
             var metadata = action.intent ?? .init(intentType: "task", followupState: "pending", uncertain: false)
             metadata.reminderFields = .init(desired: fields, reviewNote: reviewNote, responseIDs: ids, actor: "spoken",
-                                           sourceVersions: Dictionary(uniqueKeysWithValues: input.sources.filter { entry.sourceIDs.contains($0.id) }.map { ($0.id, $0.version) }))
+                                           sourceVersions: sourceVersions)
             metadata.reminderFields?.proposal = proposal
             saved.append((action.id, metadata))
         }

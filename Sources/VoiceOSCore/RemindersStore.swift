@@ -192,8 +192,10 @@ extension VoiceOSStore {
                 guard try reminderCognitionIsLatest(currentClaim) else { throw VoiceOSError("发送前认知批次已更新，停止历史任务外写") }
             }
             if let fields = current.intent?.reminderFields?.desired {
-                for (sourceID, version) in current.intent?.reminderFields?.sourceVersions ?? [:] {
-                    guard try sources().first(where: { $0.id == sourceID })?.transcriptVersionID == version else { throw VoiceOSError("提醒字段的原话已变化，请重新核对") }
+                let expected = current.intent?.reminderFields?.sourceVersions ?? [:]
+                let currentSources = try sourceTranscriptRevisions(ids: Array(expected.keys))
+                guard expected.allSatisfy({ currentSources[$0.key]?.versionID == $0.value }) else {
+                    throw VoiceOSError("提醒字段的原话已变化，请重新核对")
                 }
                 guard let fieldsPort = port as? any RemindersFieldsPort else { throw VoiceOSError("当前连接不支持日期、通知和优先级") }
                 try await fieldsPort.create(calendarID: calendarID, title: action.title, marker: marker, context: reminderContext(actionID: actionID), fields: fields)

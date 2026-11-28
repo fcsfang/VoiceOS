@@ -236,12 +236,16 @@ public actor VoiceOSStore {
             throw error
         }
     }
+    private static let sourceTranscriptJoin = """
+        FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
+        LEFT JOIN transcripts t ON t.job_id=j.id
+        """
+
     private static let sourceSelect = """
         SELECT s.id,s.asset_id,s.name,s.state,s.kind,s.created_at,s.expected_bytes,s.duration,s.error,s.relative_path,
                s.local_only,s.policy_version,s.origin,s.speaker,s.feedback_json,s.timezone,s.presentation_json,
                j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json,v.reason AS transcript_version_reason
-        FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
-        LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id
+        \(sourceTranscriptJoin) LEFT JOIN transcript_versions v ON v.id=t.current_version_id
         """
     /// Row-change counter for this connection; stable means no writes happened,
     /// so a periodic full reload can skip re-reading the whole library.
@@ -258,6 +262,18 @@ public actor VoiceOSStore {
         guard !ids.isEmpty else { return [] }
         let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
         return try db.query(Self.sourceSelect + " WHERE s.id IN (\(marks))", ids).map(Self.sourceRecord)
+    }
+
+    func sourceTranscriptRevisions(ids: [String]) throws -> [String: (versionID: String?, policyVersion: Int, localOnly: Bool)] {
+        guard !ids.isEmpty else { return [:] }
+        let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let rows = try db.query("""
+            SELECT s.id,t.current_version_id,s.policy_version,s.local_only
+            \(Self.sourceTranscriptJoin) WHERE s.id IN (\(marks))
+            """, ids)
+        return Dictionary(rows.map { row in
+            (row["id"]!, (row["current_version_id"], Int(row["policy_version"]!)!, row["local_only"] != "0"))
+        }, uniquingKeysWith: { first, _ in first })
     }
     private static func sourceRecord(_ row: [String: String]) throws -> SourceRecord {
         let feedback = try feedbackIntent(row["feedback_json"])
