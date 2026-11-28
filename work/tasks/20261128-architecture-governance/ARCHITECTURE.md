@@ -91,6 +91,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A49 · 已统一确定性 JSON 编码 | 26 个文件 33 处各自配置 `JSONEncoder` 的 sortedKeys 输出；讨论端口另带 iso8601 日期策略。 | 归一到 `StableJSON.makeEncoder()`（可选日期策略），`outputFormatting = [.sortedKeys]` 只允许出现在工厂内。pretty 与无斜杠转义等不同格式保留原处。 |
 | A50 · 已统一 ISO 8601 构造 | 60 处直接链式 `ISO8601DateFormatter()` 仍在各文件构造默认格式器；应用两处静态实例与模型提示的两处本地偏移格式器也各自构造。 | 直链迁到 `TimestampFormatting.iso`；提示语境改用新变体 `local(_:)`（带时区偏移，语义不同不并入 UTC 档）；删除两个 App 静态枚举；`ISO8601DateFormatter()` 只允许在 `TimestampFormatting.swift` 的机器检查。 |
 | A51 · 已统一日键格式 | `"yyyy-MM-dd"` 在 9 个文件手写 `DateFormatter`（POSIX、日历与时区组合各不相同），且每次调用新建格式器。 | 归一到按日历与时区缓存的 `TimestampFormatting.dayString/dayDate`；调用方显式传原有日历与时区，输出不变；`"yyyy-MM-dd"` 只允许权威文件。 |
+| A52 · 已删除零引用函数 | 全仓函数级扫描发现 17 个零引用 helper/API：旧版逐端口 `.env` 加载器、未接线的 UI 动作、未使用的查询与笔记映射。另有四个零引用校验器编码安全不变量。 | 删除 17 个（115 行），逐个核实无动态引用；校验器的删除或接线属设计决策，记入待确认。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -193,6 +194,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 
 - A51 日键格式的差异只在日历、时区与 locale 组合，输出规则本身相同。`dayKey` 静态格式器改为缓存工厂的第一个用户，新增 `dayString/dayDate` 按「日历标识|时区标识」缓存；九处调用方显式传入原有日历与时区，因此输出逐字节不变，同时消除了每次调用新建 `DateFormatter` 的开销。`"yyyy-MM-dd"` 进入机器检查。
 
+- A52 用「声明后全仓零引用」扫描函数，得到 21 个候选；其中四个校验器（分段证据账本、分段聚合复核、成果复用计划、会话个人发言理解入口）编码安全或产品不变量，先保留待评审；其余 17 个（旧 `.env` 逐端口加载器、未接线 UI 动作、未使用查询）逐个确认无动态引用后删除，共 115 行。
+
 ## 待确认的兼容性取舍
 
 - A11：行动时间页排除 unknown 提醒链接作为实际到期依据，只读 CLI 仍可从该链接读取最近观察。普通日期解析与逾期计算可先统一。修改 CLI 的有效到期结果前，区分外部调用使用的原始观察和应用显示的到期日期，明确兼容方式。
@@ -200,5 +203,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A11 复用 ReminderDueDate 的展示投影，归一行动界面和只读 CLI 的时间、时区及逾期计算。以调用方的日历比较日期，保留既有来源选择及 CLI 对明确无期限的序列化。
 
 - UI 间距与图标尺寸令牌化：约 700 处 padding 字面量与混用的面板宽度、图标尺寸共存，`WorkspaceMetrics` 已承担部分间距令牌。全面令牌化需要先定语义分组（行内、容器、工具条、图标），否则只是形式统一，按待确认处理。
+
+- 四个零引用校验器（`validateSegmentedEvidenceLedger`、`validatePersistedSegmentAggregationReview`、`validateConversationOutcomeReusePlan`、`understandConversationUserTurn`）编码安全或产品不变量，但当前没有调用点。删除会移除保障，接线可能改变现有流程，属设计决策，单列评审。
 
 - 环境变量名（`VOICEOS_TEXT_MODEL` 等）在 Swift 与 Python 两侧共同读取，属外部契约。Swift 侧每名约 3 处，抽常量只减字面量不减同步成本；跨语言契约以文档与脚本测试保证，暂不引入常量层。

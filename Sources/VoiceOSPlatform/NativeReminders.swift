@@ -240,25 +240,6 @@ public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort
         try store.save(item, commit: true)
     }
 
-    public func updateContext(calendarID: String, externalID: String, marker: String, context: String) throws {
-        guard !reading else { throw VoiceOSError("提醒事项读取正在进行") }
-        _ = try calendar(calendarID)
-        guard let item = store.calendarItem(withIdentifier: externalID) as? EKReminder,
-              item.calendar.calendarIdentifier == calendarID, self.marker(item) == marker else { throw VoiceOSError("提醒事项身份已变化，请重新核对") }
-        var existing = item.notes == marker ? "" : (item.notes ?? "")
-        let url = URL(string: "voiceos://task/" + marker.replacingOccurrences(of: "voiceos-action:", with: ""))
-        guard let link = url?.absoluteString else { throw VoiceOSError("提醒事项链接无效") }
-        let compact = "详情：" + link
-        // Only remove our exact generated text; any user's additions remain.
-        if existing.hasPrefix(context) { existing.removeFirst(context.count) }
-        existing = existing.replacingOccurrences(of: "\n\n在 VoiceOS 查看：\n" + link, with: "")
-        if existing.hasPrefix(compact) { existing.removeFirst(compact.count) }
-        existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
-        let notes: String? = existing.isEmpty ? nil : existing
-        if item.notes == notes, item.url == url { return }
-        item.notes = notes; item.url = url
-        try store.save(item, commit: true)
-    }
     public func setCompletion(calendarID: String, externalID: String, marker: String, completed: Bool,
                               authorize: @MainActor () async throws -> Void) async throws {
         let matches = try await find(calendarID: calendarID, externalID: externalID, marker: marker)

@@ -2,10 +2,6 @@ import SwiftUI
 import VoiceOSCore
 
 extension ControlCenter {
-    func claimNoteMap() async throws -> [String:ClaimNote] {
-        guard let store else { throw VoiceOSError("资料库尚未打开") }
-        return try await store.claimNotes()
-    }
     @discardableResult
     func saveClaimNote(claimID:String,body:String) async throws -> ClaimNote {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
