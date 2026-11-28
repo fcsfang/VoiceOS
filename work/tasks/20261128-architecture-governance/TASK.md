@@ -1,10 +1,10 @@
 ---
-status: in_progress
+status: in_review
 started: 2026-11-28
 updated: 2026-11-29
 branch: codex/architecture-governance-20261128
 pr: -
-owner: codex
+owner: claude
 ---
 # VoiceOS 架构治理
 
