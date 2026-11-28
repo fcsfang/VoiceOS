@@ -38,6 +38,7 @@ extension CoreFlowTests {
         XCTAssertEqual(settings.model, "gpt-6.2-sol")
         XCTAssertEqual(settings.noteEffort, "xhigh")
         XCTAssertEqual(settings.topicEffort, "medium")
+        XCTAssertThrowsError(try LocalTextModel.loadSuite(settings: settings))
     }
 
     func test文本服务地址策略只接受授权主机的精确端点() {

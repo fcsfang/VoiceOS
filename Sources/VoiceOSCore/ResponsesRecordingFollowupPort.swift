@@ -1,8 +1,7 @@
 import Foundation
 
 public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let model: String
     private let transport: any ModelHTTPTransport
     private let retryDelay: @Sendable (Duration) async throws -> Void
@@ -10,8 +9,8 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
         try self.init(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport, retryDelay: { try await Task.sleep(for: $0) })
     }
     init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
-        _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.model = model; self.transport = transport
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        self.model = model; self.transport = transport
         self.retryDelay = retryDelay
     }
     public func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration {
@@ -124,9 +123,8 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
             let body: [String: Any] = ["model": model, "store": false, "reasoning": ["effort": "high"], "max_output_tokens": 32768, "truncation": "disabled", "instructions": prompt,
                 "input": [["role": "user", "content": inputText]],
                 "text": ["format": ["type": "json_schema", "name": name, "strict": true, "schema": schema]]]
-            var request = URLRequest(url: endpoint, timeoutInterval: 600); request.httpMethod = "POST"
-            request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-            request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+            let request = endpoint.request(body: data, timeout: 600)
             let response: ModelHTTPReply
             do { response = try await transport.send(request) }
             catch { try Task.checkCancellation(); throw error }

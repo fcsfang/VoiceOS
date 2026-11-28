@@ -1939,7 +1939,7 @@ final class ControlCenter: ObservableObject {
     /// 探针结果里带上规范化的候选地址，便于诊断 /v1 重复拼接这类问题。
     func textModelEndpointHint(_ baseURL: String) -> String {
         guard let url = URL(string: baseURL) else { return "服务地址无效" }
-        return url.appendingPathComponent("responses").absoluteString
+        return ResponsesEndpoint.url(for: url).absoluteString
     }
     /// 用给定配置发一次极小请求，验证地址、密钥与模型可用；返回面向用户的结果与延迟。
     func testTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> String {
@@ -1948,18 +1948,16 @@ final class ControlCenter: ObservableObject {
         guard TextModelHostPolicy.isAllowed(base) else {
             return "服务地址须为 https://api.openai.com/v1 或 https://api.chiyi.cc/v1（不带端口、查询或子路径）"
         }
-        let url = base.appendingPathComponent("responses")
+        let url = ResponsesEndpoint.url(for: base)
         guard !apiKey.isEmpty else { return "没有可用的密钥：请填写后点「保存并启用」（若已在弹窗中拒绝钥匙串访问，请允许后重试）" }
         let payload: [String: Any] = ["model": config.model, "store": false,
             "reasoning": ["effort": "minimal"], "max_output_tokens": 32, "truncation": "disabled",
             "instructions": "你是连通性探针。只回复两个字符：ok",
             "input": [["role": "user", "content": "ping"]]]
         do {
-            var request = URLRequest(url: url, timeoutInterval: 30)
-            request.httpMethod = "POST"
-            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-            request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let endpoint = try ResponsesEndpoint(baseURL: base, apiKey: apiKey, model: config.model)
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let request = endpoint.request(body: data, timeout: 30)
             let started = Date()
             let reply = try await DirectModelHTTPTransport().send(request)
             let ms = Int(Date().timeIntervalSince(started) * 1000)

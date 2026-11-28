@@ -1,8 +1,7 @@
 import Foundation
 
 public struct ResponsesMaterialNotePort: MaterialNotePort {
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let model: String
     private let transport: any ModelHTTPTransport
     private let deadline: TimeInterval
@@ -34,14 +33,13 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
     public init(baseURL: URL, apiKey: String, model: String,
                 transport: any ModelHTTPTransport = DirectModelHTTPTransport(),
                 deadline: TimeInterval = 600, effort: String = "high") throws {
-        _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
         guard deadline.isFinite, deadline > 0 else { throw VoiceOSError("笔记生成时限无效") }
-        endpoint = baseURL.appendingPathComponent("responses")
-        self.apiKey = apiKey; self.model = model; self.transport = transport; self.deadline = deadline
+        self.model = model; self.transport = transport; self.deadline = deadline
         self.effort = effort
     }
     public var identity: MaterialNoteAttemptIdentity {
-        .init(provider: "responses:" + (endpoint.host ?? "unknown"), model: model,
+        .init(provider: endpoint.provider, model: model,
               promptVersion: Self.promptVersion, schemaVersion: Self.schemaVersion)
     }
 
@@ -198,11 +196,8 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
     }
 
     private func send(_ payload: [String: Any], operation: String) async throws -> ResponsesEnvelope {
-        var request = URLRequest(url: endpoint, timeoutInterval: deadline)
-        request.httpMethod = "POST"
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let request = endpoint.request(body: data, timeout: deadline)
         let transport = self.transport, sendRequest = request
         let response = try await withModelDeadline(seconds: deadline, operation: operation) { try await transport.send(sendRequest) }
         guard response.status == 200 else { throw VoiceOSError(operation + " HTTP \(response.status)，可重试；原资料保留") }

@@ -3,13 +3,12 @@ import Foundation
 /// One bounded Responses request over the complete, ended, explicitly prepared text snapshot.
 public struct ResponsesOutcomePort:ConversationOutcomePort {
     public let configuration:ModelConfiguration
-    private let endpoint:URL
-    private let apiKey:String
+    private let endpoint: ResponsesEndpoint
     private let transport:any ModelHTTPTransport
     public init(baseURL:URL,apiKey:String,model:String,transport:any ModelHTTPTransport=DirectModelHTTPTransport()) throws {
-        let validated=try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
-        configuration=ModelConfiguration(provider:validated.configuration.provider,model:model,promptVersion:"discussion-outcomes-reuse-v2",schemaVersion:"discussion-outcomes-v2",destination:.cloud)
-        endpoint=baseURL.appendingPathComponent("responses");self.apiKey=apiKey;self.transport=transport
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        configuration=ModelConfiguration(provider:endpoint.provider,model:model,promptVersion:"discussion-outcomes-reuse-v2",schemaVersion:"discussion-outcomes-v2",destination:.cloud)
+        self.transport = transport
     }
     public func extract(_ request:ConversationOutcomeRequest) async throws -> ConversationOutcomeResponse {
         try Task.checkCancellation()
@@ -66,8 +65,7 @@ public struct ResponsesOutcomePort:ConversationOutcomePort {
             "input":[["role":"user","content":content]],"text":["format":["type":"json_schema","name":"voiceos_discussion_outcomes","strict":true,"schema":Self.schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
         guard data.count <= 4000000 else { throw ModelPortFailure.rejected("完整成果请求超过字节预算") }
-        var http=URLRequest(url:endpoint,timeoutInterval:600);http.httpMethod="POST";http.httpBody=data
-        http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");http.setValue("application/json",forHTTPHeaderField:"Content-Type");return http
+        return endpoint.request(body: data, timeout: 600)
     }
     static var schema:[String:Any] {
         func object(_ properties:[String:Any]) -> [String:Any] { ["type":"object","properties":properties,"required":properties.keys.sorted(),"additionalProperties":false] }

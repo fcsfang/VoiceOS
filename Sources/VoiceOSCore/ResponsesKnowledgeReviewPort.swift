@@ -4,17 +4,16 @@ import Foundation
 /// Search receives only a public concept query; independent adjudication has no tools.
 public struct ResponsesKnowledgeReviewPort: KnowledgeReviewPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     private let retryDelay: @Sendable (Duration) async throws -> Void
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
         try self.init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,retryDelay:{ try await Task.sleep(for:$0) })
     }
     init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
-        let validated=try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
-        configuration = .init(provider:validated.configuration.provider,model:model,promptVersion:"knowledge-review-v2",schemaVersion:"knowledge-review-v1",destination:.cloud)
-        endpoint=baseURL.appendingPathComponent("responses");self.apiKey=apiKey;self.transport=transport;self.retryDelay=retryDelay
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        configuration = .init(provider:endpoint.provider,model:model,promptVersion:"knowledge-review-v2",schemaVersion:"knowledge-review-v1",destination:.cloud)
+        self.transport = transport;self.retryDelay=retryDelay
     }
     public func identify(_ input: KnowledgeReviewInput) async throws -> KnowledgeReviewSelection {
         try requireCloudInput(input)
@@ -80,8 +79,8 @@ public struct ResponsesKnowledgeReviewPort: KnowledgeReviewPort {
         var payload:[String:Any] = ["model":configuration.model,"store":false,"reasoning":["effort":"high"],"max_output_tokens":16384,"truncation":"disabled","instructions":instructions,"input":[["role":"user","content":input]]]
         if let schema { payload["text"]=["format":["type":"json_schema","name":name,"strict":true,"schema":schema]] }
         if research { payload["tools"]=[["type":"web_search"]];payload["tool_choice"]="required" }
-        var request=URLRequest(url:endpoint,timeoutInterval:300);request.httpMethod="POST";request.httpBody=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
-        request.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");request.setValue("application/json",forHTTPHeaderField:"Content-Type")
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let request = endpoint.request(body: data, timeout: 300)
         // Same transient-status and transport backoff as the followup port; a 502 or TLS hiccup here heals on retry.
         for attempt in 1...3 {
             let reply: ModelHTTPReply

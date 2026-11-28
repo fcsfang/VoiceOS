@@ -41,7 +41,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | 编号 | 发现与证据 | 处理方向 |
 | --- | --- | --- |
 | A01 · 已验证 | `Database`、`ReadOnlyLibrary`、`DatabaseBackup` 重复直接使用 SQLite C API。写端、读端和迁移测试分别固定当前 schema。 | 迁移到一个 SQLite 连接实现和一个当前 schema 来源，保留连接模式、备份策略和历史迁移。 |
-| A02 | Responses 各领域端口通过构建 `ResponsesModelPort` 复用校验，随后各自构造相同的 HTTP 地址、POST、鉴权和 JSON 请求。 | 让所有端口使用同一个 Responses 请求实现。保留已有超时、请求字节生成方式、传输和持久化失败分类。 |
+| A02 · 已迁移 | Responses 各领域端口通过构建 `ResponsesModelPort` 复用校验，随后各自构造相同的 HTTP 地址、POST、鉴权和 JSON 请求。 | 让所有端口使用同一个 Responses 请求实现。保留已有超时、请求字节生成方式、传输和持久化失败分类。 |
 | A03 | `Database.configure()` 用连续的 `PRAGMA user_version` 查询判断迁移来源，当前库每次打开也遍历条件。当前 schema 写在上限及最后一条历史迁移。 | 把迁移身份和运行顺序集中起来。保留所有历史迁移事务、外键切换和跨版本恢复契约。 |
 | A04 | `ControlCenter` 的全量/按段刷新同时读取 `WorkspaceSnapshot` 和若干独立数据，再分散更新可观察状态。`WorkspaceView` 还持有选中态与导航。 | 先追踪每段读写者，再按刷新数据的所有权归一，保留在用的性能约束与异步导航保护。避免仅切割文件。 |
 | A05 | `WorkspaceRow`、`WorkspaceListRow` 以及部分页面自制行共存。 | 逐条核对 hover、选择、焦点、菜单和图标变体，统一语义相同的实现，用两条真实入口验证。 |
@@ -56,3 +56,5 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 ## 决策记录
 
 - A01 比较过只抽出 SQL statement 方法、给现有 `Database` 增加只读及备份模式、复用单一低层连接。采用单一低层连接，因为只抽方法会留下连接、安全选项与错误处理重复，而在 `Database` 里并列各种模式会让读取者依赖迁移和写配置。SQLite schema 属于 `Database`，导出包格式仍由 `PortablePackage` 管理。
+
+- A02 比较过各端口复用静态请求工厂，以及将校验、凭据、目标地址和 HTTP 请求组成一个值。采用后者，使未校验的地址无法由同一个值构造请求。各端口保留功能对应的输入、响应格式、流式传输和重试。设置测试及双语译文使用相同校验。Python 整理器和 Hindsight 仍按各自的运行时与接口审查。

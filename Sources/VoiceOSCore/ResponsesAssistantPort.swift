@@ -7,8 +7,7 @@ import Foundation
 /// the rejection diagnostic.
 public struct ResponsesAssistantPort: AssistantModelPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     private let retryDelay: @Sendable (Duration) async throws -> Void
     private struct StructuralMismatch: LocalizedError {
@@ -19,9 +18,9 @@ public struct ResponsesAssistantPort: AssistantModelPort {
         try self.init(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport, retryDelay: { try await Task.sleep(for: $0) })
     }
     init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
-        let validated = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport)
-        configuration = .init(provider: validated.configuration.provider, model: model, promptVersion: "assistant-delivery-v2", schemaVersion: "assistant-report-v1", destination: .cloud)
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.transport = transport; self.retryDelay = retryDelay
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        configuration = .init(provider: endpoint.provider, model: model, promptVersion: "assistant-delivery-v2", schemaVersion: "assistant-report-v1", destination: .cloud)
+        self.transport = transport; self.retryDelay = retryDelay
     }
     public func assess(_ input: AssistantTaskInput) async throws -> AssistantAssessment {
         let properties: [String: Any] = ["intent":["type":"string","enum":["analysis","execution","reminder","none"]],"supported":["type":"boolean"],"kind":["type":"string","enum":["research","draft","comparison"]],"reason":["type":"string"]]
@@ -92,9 +91,8 @@ public struct ResponsesAssistantPort: AssistantModelPort {
     }
     private func send(_ payload: [String: Any]) async throws -> Data {
         try Task.checkCancellation()
-        var request = URLRequest(url: endpoint,timeoutInterval: 300)
-        request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: payload,options: [.sortedKeys])
-        request.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");request.setValue("application/json",forHTTPHeaderField:"Content-Type")
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let request = endpoint.request(body: data, timeout: 300)
         for attempt in 1...3 {
             let reply: ModelHTTPReply
             do { reply = try await transport.send(request) }

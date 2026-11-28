@@ -1,8 +1,7 @@
 import Foundation
 
 public struct ResponsesReminderFieldPort: ReminderFieldModelPort {
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let model: String
     private let transport: any ModelHTTPTransport
     private let retryDelay: @Sendable (Duration) async throws -> Void
@@ -10,8 +9,8 @@ public struct ResponsesReminderFieldPort: ReminderFieldModelPort {
         try self.init(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport, retryDelay: { try await Task.sleep(for: $0) })
     }
     init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
-        _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.model = model; self.transport = transport
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        self.model = model; self.transport = transport
         self.retryDelay = retryDelay
     }
     public func extract(_ input: ReminderFieldInput) async throws -> ([ReminderFieldProposal], [String]) {
@@ -29,9 +28,8 @@ public struct ResponsesReminderFieldPort: ReminderFieldModelPort {
             "instructions": Self.instructions,
             "input": [["role": "user", "content": String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)]],
             "text": ["format": ["type": "json_schema", "name": "voiceos_reminder_fields", "strict": true, "schema": schema]]]
-        var request = URLRequest(url: endpoint, timeoutInterval: 600); request.httpMethod = "POST"
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let data = try JSONSerialization.data(withJSONObject: body)
+        let request = endpoint.request(body: data, timeout: 600)
         var response = try await transport.send(request)
         for delay in [5, 15] where [429, 502, 503, 504].contains(response.status) {
             try await retryDelay(.seconds(delay)); response = try await transport.send(request)

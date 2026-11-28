@@ -1,13 +1,12 @@
 import Foundation
 
 public struct ResponsesRecordingExpressionPort: RecordingExpressionPort, RecordingExpressionActionPort {
-    private let endpoint:URL
-    private let key:String
+    private let endpoint: ResponsesEndpoint
     private let model:String
     private let transport:any ModelHTTPTransport
     public init(baseURL:URL,apiKey:String,model:String,transport:any ModelHTTPTransport = DirectStreamingModelHTTPTransport()) throws {
-        _ = try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model)
-        endpoint=baseURL.appendingPathComponent("responses");key=apiKey;self.model=model;self.transport=transport
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        self.model=model;self.transport=transport
     }
     public func group(_ input:RecordingExpressionInput) async throws -> ([RecordingExpressionProposal],[String]) {
         guard input.context.sources.allSatisfy({ !$0.localOnly }), (input.recordingContexts ?? []).allSatisfy({ $0.context.sources.allSatisfy { !$0.localOnly } }) else { throw VoiceOSError("仅本地录音不能用于连续表达判断") }
@@ -57,8 +56,8 @@ public struct ResponsesRecordingExpressionPort: RecordingExpressionPort, Recordi
         """ + (draft == nil ? "先完成逐项判断。" : "这是独立复核轮：重新通读完整表达，逐项检查误沿用、遗漏任务、把撤回当完成及条件丢失，输出修正后的全部判断。")
         for attempt in 0..<3 {
             let body:[String:Any] = ["model":model,"store":false,"reasoning":["effort":"high"],"truncation":"disabled","max_output_tokens":32768,"instructions":instructions,"input":[["role":"user","content":String(decoding:try JSONSerialization.data(withJSONObject:payload),as:UTF8.self)]],"text":["format":["type":"json_schema","name":"voiceos_expression_actions","strict":true,"schema":schema]]]
-            var request=URLRequest(url:endpoint,timeoutInterval:600);request.httpMethod="POST";request.httpBody=try JSONSerialization.data(withJSONObject:body)
-            request.setValue("Bearer "+key,forHTTPHeaderField:"Authorization");request.setValue("application/json",forHTTPHeaderField:"Content-Type")
+            let data = try JSONSerialization.data(withJSONObject: body)
+            let request = endpoint.request(body: data, timeout: 600)
             let response=try await transport.send(request)
             guard response.status == 200 else { throw VoiceOSError("补录行动核对 HTTP \(response.status)，原记录保留") }
             let envelope=try ResponsesEnvelope.parse(response.body)
@@ -104,8 +103,8 @@ public struct ResponsesRecordingExpressionPort: RecordingExpressionPort, Recordi
         """ + (draft == nil ? "输出分组初稿。" : "你是独立复核轮。重新通读全部原话，检查合并、否定、时间顺序与补录接续，直接输出修正后的完整分组。")
         for attempt in 0..<3 {
             let body:[String:Any] = ["model":model,"store":false,"reasoning":["effort":"high"],"truncation":"disabled","max_output_tokens":32768,"instructions":instructions,"input":[["role":"user","content":String(decoding:try JSONSerialization.data(withJSONObject:payload),as:UTF8.self)]],"text":["format":["type":"json_schema","name":"voiceos_recording_expressions","strict":true,"schema":schema]]]
-            var request=URLRequest(url:endpoint,timeoutInterval:600);request.httpMethod="POST";request.httpBody=try JSONSerialization.data(withJSONObject:body)
-            request.setValue("Bearer "+key,forHTTPHeaderField:"Authorization");request.setValue("application/json",forHTTPHeaderField:"Content-Type")
+            let data = try JSONSerialization.data(withJSONObject: body)
+            let request = endpoint.request(body: data, timeout: 600)
             let response=try await transport.send(request)
             guard response.status == 200 else { throw VoiceOSError("连续表达判断 HTTP \(response.status)，原件和转写保留") }
             let envelope=try ResponsesEnvelope.parse(response.body)

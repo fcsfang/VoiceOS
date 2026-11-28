@@ -188,8 +188,7 @@ public enum NotificationAnalysisValidation {
 }
 
 public struct ResponsesNotificationAnalysisPort: NotificationAnalysisPort {
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let model: String
     private let transport: any ModelHTTPTransport
     private let deadline: TimeInterval
@@ -200,11 +199,10 @@ public struct ResponsesNotificationAnalysisPort: NotificationAnalysisPort {
     public init(baseURL: URL, apiKey: String, model: String,
                 transport: any ModelHTTPTransport = DirectStreamingModelHTTPTransport(deadlineCap: 1800),
                 deadline: TimeInterval = 600) throws {
-        _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
         guard deadline.isFinite, deadline > 0 else { throw VoiceOSError("每日消息分析时限无效") }
-        endpoint = baseURL.appendingPathComponent("responses")
-        self.apiKey = apiKey; self.model = model; self.transport = transport; self.deadline = deadline
-        identity = NotificationAnalysisIdentity(provider: "responses:" + (endpoint.host ?? "unknown"), model: model,
+        self.model = model; self.transport = transport; self.deadline = deadline
+        identity = NotificationAnalysisIdentity(provider: endpoint.provider, model: model,
                                                 promptVersion: "message-monitor-daily-v3", schemaVersion: "message-monitor-items-v1")
     }
 
@@ -300,11 +298,8 @@ public struct ResponsesNotificationAnalysisPort: NotificationAnalysisPort {
     }
 
     private func send(_ payload: [String: Any], operation: String, deadline: TimeInterval) async throws -> ModelReply {
-        var request = URLRequest(url: endpoint, timeoutInterval: deadline)
-        request.httpMethod = "POST"
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let request = endpoint.request(body: data, timeout: deadline)
         let transport = self.transport
         let response = try await withModelDeadline(seconds: deadline, operation: operation) { try await transport.send(request) }
         guard response.status == 200 else { throw VoiceOSError(operation + " HTTP \(response.status)，可重试；原文已保存") }

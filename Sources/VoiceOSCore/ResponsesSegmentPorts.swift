@@ -1,32 +1,30 @@
 import Foundation
 
 private struct SegmentResponsesTransport: Sendable {
-    let base: ResponsesModelPort
-    let endpoint: URL
-    let apiKey: String
+    let endpoint: ResponsesEndpoint
     let transport: any ModelHTTPTransport
     let deadline: TimeInterval
     let streaming: Bool
     init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, deadline: TimeInterval = 120, streaming: Bool = false) throws {
         guard [120,600].contains(deadline), !streaming || deadline == 600 else { throw VoiceOSError("流式候选须使用600秒长文字窗口") }
         self.deadline=deadline
-        base=try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
-        endpoint=baseURL.appendingPathComponent("responses"); self.apiKey=apiKey; self.transport=transport; self.streaming=streaming
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        self.transport = transport
+        self.streaming = streaming
     }
     func config(_ version: String) -> ModelConfiguration {
         let waitIdentity=deadline==120 ? version : version+"-wait600"
         let identity=streaming ? waitIdentity+"-stream" : waitIdentity
-        return .init(provider:base.configuration.provider,model:base.configuration.model,promptVersion:identity+"-intent-context",schemaVersion:identity,destination:.cloud)
+        return .init(provider:endpoint.provider,model:endpoint.model,promptVersion:identity+"-intent-context",schemaVersion:identity,destination:.cloud)
     }
     func send(input: String, schema: [String:Any], name: String, instructions: String, tokens: Int) async throws -> ResponsesEnvelope {
         try Task.checkCancellation()
-        let payload: [String:Any]=["model":base.configuration.model,"store":false,"reasoning":["effort":"low"],"max_output_tokens":tokens,
+        let payload: [String:Any]=["model":endpoint.model,"store":false,"reasoning":["effort":"low"],"max_output_tokens":tokens,
             "truncation":"disabled","instructions":instructions,"input":[["role":"user","content":input]],
             "text":["format":["type":"json_schema","name":name,"strict":true,"schema":schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
         guard data.count<=160000 else { throw ModelPortFailure.rejected("分段文本请求超过字节预算") }
-        var http=URLRequest(url:endpoint,timeoutInterval:deadline); http.httpMethod="POST"; http.httpBody=data
-        http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization"); http.setValue("application/json",forHTTPHeaderField:"Content-Type")
+        let http = endpoint.request(body: data, timeout: deadline)
         let reply=try await transport.send(http)
         guard reply.status==200 else { throw ModelPortFailure.rejected("HTTP \(reply.status)；费用未知，不自动重发") }
         return try ResponsesEnvelope.parse(reply.body)

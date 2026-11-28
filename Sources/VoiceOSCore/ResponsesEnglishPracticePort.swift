@@ -23,13 +23,12 @@ public struct EnglishPracticeResponse: Codable, Sendable {
 }
 public struct ResponsesEnglishPracticePort: EnglishPracticeModelPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
-        let validated = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport)
-        configuration = ModelConfiguration(provider: validated.configuration.provider, model: model, promptVersion: "english-practice-v1", schemaVersion: "english-feedback-v1", destination: .cloud)
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.transport = transport
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        configuration = ModelConfiguration(provider: endpoint.provider, model: model, promptVersion: "english-practice-v1", schemaVersion: "english-feedback-v1", destination: .cloud)
+        self.transport = transport
     }
     public func generate(_ request: EnglishPracticeRequest) async throws -> EnglishPracticeResponse {
         let reply = try await transport.send(try makeRequest(request))
@@ -54,8 +53,7 @@ public struct ResponsesEnglishPracticePort: EnglishPracticeModelPort {
             "input": [["role": "user", "content": String(decoding: try JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]), as: UTF8.self)]],
             "text": ["format": ["type": "json_schema", "name": "voiceos_english_feedback", "strict": true, "schema": Self.schema]]]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]); guard data.count <= 160000 else { throw ModelPortFailure.rejected("英文练习请求超过字节预算") }
-        var http = URLRequest(url: endpoint, timeoutInterval: 60); http.httpMethod = "POST"; http.httpBody = data
-        http.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization"); http.setValue("application/json", forHTTPHeaderField: "Content-Type"); return http
+        return endpoint.request(body: data, timeout: 60)
     }
     static let instructions = """
     帮用户把这次练习里想表达的意思说得更清楚、更自然。挑出值得反馈的表达，给出贴合语境的英文说法，解释它好在哪里。已有表达中值得保留、可以迁移到其他场景的用法也可以指出。

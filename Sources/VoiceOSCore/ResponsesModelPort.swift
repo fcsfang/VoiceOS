@@ -199,31 +199,15 @@ private final class ModelDeadlineRace<T: Sendable>: @unchecked Sendable {
     }
 }
 
-/// 文本服务地址的唯一授权口径：HTTPS、指定主机、精确 `/v1`，不带用户信息、端口、查询或片段。
-/// 端口构造与设置页「测试连接」共用这一处，避免两条路径对同一地址给出不同结论。
-public enum TextModelHostPolicy {
-    public static let allowedHosts: Set<String> = ["api.openai.com", "api.chiyi.cc"]
-    public static func isAllowed(_ baseURL: URL) -> Bool {
-        let host = baseURL.host ?? ""
-        return baseURL.scheme == "https" && allowedHosts.contains(host)
-            && baseURL.absoluteString == "https://" + host + "/v1"
-            && baseURL.path == "/v1" && baseURL.query == nil && baseURL.fragment == nil
-            && baseURL.user == nil && baseURL.password == nil && baseURL.port == nil
-    }
-}
-
 /// Text-only Responses-compatible driver. One POST, no fallback, polling, tools or retry.
 public struct ResponsesModelPort: ModelPort {
     public let configuration: ModelConfiguration
-    private let endpoint: URL
-    private let apiKey: String
+    private let endpoint: ResponsesEndpoint
     private let transport: any ModelHTTPTransport
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport()) throws {
-        guard TextModelHostPolicy.isAllowed(baseURL),
-              !apiKey.isEmpty, apiKey.unicodeScalars.allSatisfy({ $0.value >= 33 && $0.value <= 126 }),
-              !model.isEmpty else { throw VoiceOSError("模型配置须使用已授权的 HTTPS 服务和有效本地凭据") }
-        endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.transport = transport
-        configuration = ModelConfiguration(provider: "responses:" + baseURL.host!, model: model, promptVersion: "expression-comprehensive-v6", schemaVersion: "claims-actions-v3", destination: .cloud)
+        endpoint = try ResponsesEndpoint(baseURL: baseURL, apiKey: apiKey, model: model)
+        self.transport = transport
+        configuration = ModelConfiguration(provider: endpoint.provider, model: model, promptVersion: "expression-comprehensive-v6", schemaVersion: "claims-actions-v3", destination: .cloud)
     }
     public func generate(_ request: ModelRequest) async throws -> ModelResponse {
         let http = try makeRequest(request)
@@ -253,11 +237,7 @@ public struct ResponsesModelPort: ModelPort {
             "input": String(decoding: input, as: UTF8.self),
             "text": ["format": ["type": "json_schema", "name": "voiceos_claims", "strict": true, "schema": Self.schema]]]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-        var result = URLRequest(url: endpoint, timeoutInterval: 300)
-        result.httpMethod = "POST"; result.httpBody = data
-        result.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
-        result.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return result
+        return endpoint.request(body: data, timeout: 300)
     }
     private static func object(_ properties: [String: Any]) -> [String: Any] {
         ["type": "object", "properties": properties, "required": properties.keys.sorted(), "additionalProperties": false]
