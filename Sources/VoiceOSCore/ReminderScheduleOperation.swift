@@ -145,7 +145,7 @@ extension VoiceOSStore {
               link.lastObservationID == observationID,
               let raw = try db.query("SELECT * FROM reminder_links WHERE id=?", [link.id]).first,
               let action = try self.action(id: intent.actionID),
-              try reminderSourceAllowed(action), try reminderCognitionIsLatest(action),
+              try eligibleReminderClaim(for: action) != nil,
               let grant = try db.query("SELECT access_version FROM action_schedule_intents WHERE id=?", [intentID]).first,
               grant["access_version"] == String(accessVersion) else { throw VoiceOSError("行动、排期版本、出处、外部基线或授权已变化，停止旧改期") }
         try checkReminderAccess(calendarID: link.calendarID, expectedVersion: accessVersion)

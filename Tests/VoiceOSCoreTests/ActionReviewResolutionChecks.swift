@@ -143,7 +143,7 @@ final class ActionReviewResolutionChecks: XCTestCase {
                                                     actions: snapshot.actions,
                                                     ledgers: snapshot.actionReviewLedgers), .recordingActionReview)
         XCTAssertTrue(PausedActionBatch.plan(snapshot: snapshot).reviewOnlyActionIDs.contains(fixture.newID))
-        let allowedBefore = try await store.reminderSourceAllowed(newAction)
+        let allowedBefore = try await store.eligibleReminderClaim(for: newAction, requiresLatest: false) != nil
         XCTAssertFalse(allowedBefore)
         do {
             _ = try await store.enqueueAssistantExecution(actionID: fixture.newID, expectedVersion: newAction.version)
@@ -169,7 +169,7 @@ final class ActionReviewResolutionChecks: XCTestCase {
                                                  currentClaimsBySource: after.currentClaimsBySource,
                                                  actions: after.actions, ledgers: after.actionReviewLedgers))
         XCTAssertFalse(PausedActionBatch.plan(snapshot: after).reviewOnlyActionIDs.contains(fixture.newID))
-        let allowedAfter = try await store.reminderSourceAllowed(newAfter)
+        let allowedAfter = try await store.eligibleReminderClaim(for: newAfter, requiresLatest: false) != nil
         XCTAssertTrue(allowedAfter)
         _ = try await store.enqueueAssistantExecution(actionID: fixture.newID, expectedVersion: newAfter.version)
     }
@@ -241,7 +241,7 @@ final class ActionReviewResolutionChecks: XCTestCase {
         let initial = try await ledger(store, expressionID)
         XCTAssertTrue(initial.canAcknowledge)
         XCTAssertTrue(initial.requiresReview(actionID: task.id))
-        let allowedBefore = try await store.reminderSourceAllowed(task)
+        let allowedBefore = try await store.eligibleReminderClaim(for: task, requiresLatest: false) != nil
         XCTAssertFalse(allowedBefore)
         do {
             _ = try await store.enqueueAssistantExecution(actionID: task.id, expectedVersion: task.version)
@@ -255,7 +255,7 @@ final class ActionReviewResolutionChecks: XCTestCase {
         let acknowledged = try await ledger(store, expressionID)
         XCTAssertTrue(acknowledged.isAcknowledged)
         XCTAssertFalse(acknowledged.requiresReview(actionID: task.id))
-        let allowedAfter = try await store.reminderSourceAllowed(task)
+        let allowedAfter = try await store.eligibleReminderClaim(for: task, requiresLatest: false) != nil
         XCTAssertTrue(allowedAfter)
         _ = try await store.enqueueAssistantExecution(actionID: task.id, expectedVersion: task.version)
 

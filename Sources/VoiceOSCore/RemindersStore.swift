@@ -172,9 +172,9 @@ extension VoiceOSStore {
               let action = try self.action(id: actionID), action.version == expectedVersion, action.kind == "task", action.intentActor == "user" else {
             throw VoiceOSError("只能把有效的明确任务发送到所选清单")
         }
-        guard try reminderSourceAllowed(action) else { throw VoiceOSError("行动依据仅限本机或连续表达仍待核对，不能写入提醒事项") }
+        guard let claim = try eligibleReminderClaim(for: action, requiresLatest: false) else { throw VoiceOSError("行动依据仅限本机或连续表达仍待核对，不能写入提醒事项") }
         if expectedAccessVersion != nil {
-            guard try reminderCognitionIsLatest(action) else { throw VoiceOSError("行动认知批次已更新，停止历史任务外写") }
+            guard try reminderCognitionIsLatest(claim) else { throw VoiceOSError("行动认知批次已更新，停止历史任务外写") }
         }
         let id = UUID().uuidString; let marker = "voiceos-action:" + id
         try db.execute("INSERT INTO reminder_links(id,action_id,action_version,calendar_id,marker,desired_title,state,created_at) VALUES(?,?,?,?,?,?,'reserved',?)", [id,actionID,String(expectedVersion),calendarID,marker,action.title,ISO8601DateFormatter().string(from: Date())])
@@ -186,9 +186,10 @@ extension VoiceOSStore {
             try Task.checkCancellation()
             try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             guard found.isEmpty else { throw VoiceOSError("操作标记已有匹配，停止新建并请回读") }
-            guard let current = try self.action(id: actionID), current.version == expectedVersion, try reminderSourceAllowed(current) else { throw VoiceOSError("发送前行动或依据已变化") }
+            guard let current = try self.action(id: actionID), current.version == expectedVersion,
+                  let currentClaim = try eligibleReminderClaim(for: current, requiresLatest: false) else { throw VoiceOSError("发送前行动或依据已变化") }
             if expectedAccessVersion != nil {
-                guard try reminderCognitionIsLatest(current) else { throw VoiceOSError("发送前认知批次已更新，停止历史任务外写") }
+                guard try reminderCognitionIsLatest(currentClaim) else { throw VoiceOSError("发送前认知批次已更新，停止历史任务外写") }
             }
             if let fields = current.intent?.reminderFields?.desired {
                 for (sourceID, version) in current.intent?.reminderFields?.sourceVersions ?? [:] {
@@ -221,21 +222,25 @@ extension VoiceOSStore {
             throw VoiceOSError("提醒事项结果尚未确认；尝试已保留，请回读，不会自动重建（\(error.localizedDescription)）")
         }
     }
-    func reminderSourceAllowed(_ action: ActionRecord) throws -> Bool {
-        guard let claim = try candidateClaim(id: action.claimID), !claim.references.isEmpty else { return false }
+    /// Read the claim once for permission and freshness checks at each preflight.
+    /// Callers re-enter after an await wherever the operation requires revalidation.
+    func eligibleReminderClaim(for action: ActionRecord, requiresLatest: Bool = true) throws -> CandidateClaim? {
+        guard let claim = try candidateClaim(id: action.claimID), !claim.references.isEmpty else { return nil }
         let ledgers = try actionReviewLedgers()
-        return try claim.references.allSatisfy { ref in
-            guard let source=try db.query("SELECT local_only,presentation_json FROM sources WHERE id=?", [ref.sourceID]).first,source["local_only"] == "0" else { return false }
+        var checkedSources = Set<String>()
+        for ref in claim.references where checkedSources.insert(ref.sourceID).inserted {
+            guard let source=try db.query("SELECT local_only,presentation_json FROM sources WHERE id=?", [ref.sourceID]).first,source["local_only"] == "0" else { return nil }
             if let raw=source["presentation_json"],let expression=try JSONDecoder().decode(RecordingPresentation.self,from:Data(raw.utf8)).expression {
-                guard let ledger = ledgers[expression.id], !ledger.requiresReview(actionID: action.id) else { return false }
+                guard let ledger = ledgers[expression.id], !ledger.requiresReview(actionID: action.id) else { return nil }
             }
-            return true
         }
+        if requiresLatest, try !reminderCognitionIsLatest(claim) { return nil }
+        return claim
     }
     /// A source may be reprocessed while the connector's preflight is awaiting.
     /// Only new writes use this barrier; existing links still reconcile history.
-    func reminderCognitionIsLatest(_ action: ActionRecord) throws -> Bool {
-        guard let claim = try candidateClaim(id: action.claimID), !claim.references.isEmpty else { return false }
+    func reminderCognitionIsLatest(_ claim: CandidateClaim) throws -> Bool {
+        guard !claim.references.isEmpty else { return false }
         for sourceID in Set(claim.references.map(\.sourceID)) {
             guard try latestCandidateClaims(for: sourceID).contains(where: { $0.id == claim.id }) else { return false }
         }

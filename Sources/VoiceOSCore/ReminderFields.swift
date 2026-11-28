@@ -140,11 +140,11 @@ public protocol ReminderFieldModelPort: Sendable {
 extension VoiceOSStore {
     public func prepareReminderFields(actionIDs: Set<String>? = nil) throws -> ReminderFieldInput {
         let linked = Set(try reminderLinks().map(\.actionID))
-        let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
+        try validateClaimContexts()
         let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var entries: [ReminderFieldInput.Task] = [], sourceIDs = Set<String>()
         for action in try actions() where action.kind == "task" && (actionIDs.map { $0.contains(action.id) } ?? !linked.contains(action.id)) && action.intent?.reminderFields?.desired == nil {
-            guard let claim = claims[action.claimID], try reminderSourceAllowed(action), try reminderCognitionIsLatest(action) else { continue }
+            guard let claim = try eligibleReminderClaim(for: action) else { continue }
             let refs = Array(Set(claim.references.map(\.sourceID))).sorted()
             entries.append(.init(id: action.id, version: action.version, title: action.title, quote: action.note,
                                  sourceIDs: refs, isSuggestedStep: action.intent?.goalID != nil))
@@ -184,7 +184,7 @@ extension VoiceOSStore {
         for proposal in proposals {
             let entry = input.tasks.first { $0.id == proposal.taskID }!
             guard let action = try self.action(id: entry.id), action.version == entry.version,
-                  action.title == entry.title, try reminderSourceAllowed(action), try reminderCognitionIsLatest(action) else { throw VoiceOSError("提醒字段处理期间任务已变化") }
+                  action.title == entry.title, try eligibleReminderClaim(for: action) != nil else { throw VoiceOSError("提醒字段处理期间任务已变化") }
             // An explicit user edit while inference was in flight takes precedence.
             if action.intent?.reminderFields?.desired != nil { continue }
             for id in entry.sourceIDs {
@@ -291,6 +291,6 @@ extension VoiceOSStore {
     private func checkReminderFieldWrite(actionID: String, expectedVersion: Int, calendarID: String, accessVersion: Int) throws {
         try checkReminderAccess(calendarID: calendarID, expectedVersion: accessVersion)
         guard let action = try self.action(id: actionID), action.version == expectedVersion,
-              try reminderSourceAllowed(action) else { throw VoiceOSError("设置期间任务或授权已变化") }
+              try eligibleReminderClaim(for: action, requiresLatest: false) != nil else { throw VoiceOSError("设置期间任务或授权已变化") }
     }
 }

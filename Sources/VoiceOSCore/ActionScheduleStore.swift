@@ -114,7 +114,7 @@ extension VoiceOSStore {
               let link = try reminderLinks().first(where: { $0.actionID == intent.actionID }) else { throw VoiceOSError("没有当前排期或提醒事项关联") }
         try checkReminderAccess(calendarID: link.calendarID, expectedVersion: expectedAccessVersion)
         let action = try self.action(id: intent.actionID, includeHistory: true)
-        let sourcesAllowed = try action.map { try reminderSourceAllowed($0) && reminderCognitionIsLatest($0) } ?? false
+        let sourcesAllowed = try action.flatMap { try eligibleReminderClaim(for: $0) } != nil
         let proposal = try ReminderScheduleProposal(due: intent.due, authority: intent.authority,
                                                     rawExpression: intent.rawExpression, anchorEventTime: intent.anchorEventTime)
         if intent.eligibleForPlanning, sourcesAllowed, link.state == "linked", link.remoteMarkerValid == true,

@@ -383,8 +383,9 @@ private func verifyScopedExpressionActionReview(at root:URL) async throws {
         let retained=try XCTUnwrap(currentActions.first { $0.id == report.id })
         let backup=try XCTUnwrap(currentActions.first { $0.id == clear.id })
         let candidate=try XCTUnwrap(currentActions.first { $0.id == newLabel.id })
-        let allowed=try await store.reminderSourceAllowed(backup),blocked=try await store.reminderSourceAllowed(retained)
-        XCTAssertTrue(allowed);XCTAssertFalse(blocked)
+        let allowed = try await store.eligibleReminderClaim(for: backup, requiresLatest: false)
+        let blocked = try await store.eligibleReminderClaim(for: retained, requiresLatest: false)
+        XCTAssertNotNil(allowed); XCTAssertNil(blocked)
         try await store.sendTaskToReminders(actionID:retained.id,expectedVersion:retained.version,calendarID:access.calendarID,using:reminders,expectedAccessVersion:access.version)
         let retainedRemote=await reminders.items
         XCTAssertEqual(retainedRemote.count,2)

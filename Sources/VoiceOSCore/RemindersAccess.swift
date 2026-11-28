@@ -66,7 +66,7 @@ extension VoiceOSStore {
             guard let claim, try claim.references.allSatisfy({ try sourcePolicy(sourceID: $0.sourceID).localOnly == false }) else { continue }
             // An earlier task's await may let a newer batch supersede the
             // remaining snapshot. Skip it without starving unrelated sources.
-            guard try reminderCognitionIsLatest(action) else { continue }
+            guard try reminderCognitionIsLatest(claim) else { continue }
             do {
                 try await sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
                 try clearReminderSyncFailure(actionID: action.id, stage: .activation)
