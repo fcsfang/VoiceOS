@@ -291,7 +291,7 @@ extension VoiceOSStore {
         try saveExpressionPresentation(presentation,sourceID:personalSourceID)
     }
     public func recordingContext(sourceID: String) throws -> RecordingContext? {
-        try recordingContext(sourceID: sourceID, catalog: Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first }))
+        try recordingContext(sourceID: sourceID, catalog: sourceCatalog())
     }
     public func recordingContext(sourceID: String, catalog:[String:SourceRecord]) throws -> RecordingContext? {
         guard let personal=catalog[sourceID],let pairing=personal.presentation?.recordingContext else { return nil }
@@ -303,7 +303,7 @@ extension VoiceOSStore {
         return pairing
     }
     public func recordingContextSourceIDs(sourceIDs: [String]) throws -> [String] {
-        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first }))
+        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: sourceCatalog())
     }
     public func recordingContextSourceIDs(sourceIDs: [String], catalog:[String:SourceRecord]) throws -> [String] {
         var result=sourceIDs,seen=Set(sourceIDs)
@@ -313,9 +313,13 @@ extension VoiceOSStore {
         return result
     }
     public func prepareRecordingContext(sourceID: String) throws -> RecordingContextSnapshot? {
-        guard let pairing=try recordingContext(sourceID:sourceID) else { return nil }
-        let catalog=try sources().filter { $0.id == sourceID || $0.id == pairing.externalSourceID }
-        let context=try prepareLocalTranscriptContext(sourceIDs:[sourceID,pairing.externalSourceID],scalarBudget:max(1,catalog.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
+        try prepareRecordingContext(sourceID: sourceID, catalog: sourceCatalog())
+    }
+    func prepareRecordingContext(sourceID: String, catalog: [String: SourceRecord]) throws -> RecordingContextSnapshot? {
+        guard let pairing=try recordingContext(sourceID:sourceID,catalog:catalog) else { return nil }
+        let members = [sourceID, pairing.externalSourceID]
+        let budget = members.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) }
+        let context=try prepareLocalTranscriptContext(sourceIDs:members,scalarBudget:max(1,budget))
         return .init(pairing:pairing,context:context)
     }
     public func recordingContextLinks(sourceID: String) throws -> [RecordingContextLink] {

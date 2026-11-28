@@ -480,9 +480,11 @@ extension VoiceOSStore {
               current.contentDigest == context.contentDigest else { throw VoiceOSError("上下文来源或逐字稿已变化，请重新准备") }
     }
     private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String) throws {
-        try followupContinuousIsCurrent(input, sourceID: sourceID, catalog: try sources(), expressions: try recordingExpressions())
+        let catalog = try sourceCatalog()
+        try followupContinuousIsCurrent(input, sourceID: sourceID, catalog: catalog,
+                                       expressions: RecordingExpression.current(in: catalog))
     }
-    private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String, catalog: [SourceRecord], expressions: [RecordingExpression]) throws {
+    private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String, catalog: [String: SourceRecord], expressions: [RecordingExpression]) throws {
         guard let input, Self.isDigestContext(input.context) else {
             try validateContinuousRecordingContext(input, sourceID: sourceID, catalog: catalog, expressions: expressions); return
         }
@@ -503,6 +505,14 @@ extension VoiceOSStore {
     /// transcript and continuous-expression context is validated once, instead
     /// of once per receipt.
     public func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]? = nil, claimRows preloadedClaims: [CandidateClaim]? = nil, actionRows preloadedActions: [ActionRecord]? = nil, latest preloadedLatest: [String: [CandidateClaim]]? = nil) throws -> [String: RecordingFollowupValidity] {
+        try recordingFollowupValidities(receipts, catalogRows: preloadedCatalog, claimRows: preloadedClaims,
+                                        actionRows: preloadedActions, latest: preloadedLatest, expressions: nil)
+    }
+
+    func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]?,
+                                     claimRows preloadedClaims: [CandidateClaim]?, actionRows preloadedActions: [ActionRecord]?,
+                                     latest preloadedLatest: [String: [CandidateClaim]]?,
+                                     expressions preloadedExpressions: [RecordingExpression]?) throws -> [String: RecordingFollowupValidity] {
         let completed = receipts.filter { $0.state == "completed" && $0.result != nil }
         guard !completed.isEmpty else { return [:] }
         let catalogRows: [SourceRecord]
@@ -528,7 +538,13 @@ extension VoiceOSStore {
         let actions: [String: ActionRecord] = Dictionary(uniqueKeysWithValues: actionRows.map { ($0.id, $0) })
         let policies = Dictionary(catalogRows.map { ($0.id, $0.policyVersion) }, uniquingKeysWith: { first, _ in first })
         let feedback = try StartupTrace.measure("validity.feedback") { try followupFeedback(actions: actionRows, claims: claims, catalog: catalog) }
-        let expressions = try StartupTrace.measure("validity.expressions") { try recordingExpressions() }
+        let expressions = try StartupTrace.measure("validity.expressions") {
+            if let preloadedExpressions { return preloadedExpressions }
+            // A caller can preload a subset. Only a store-owned full catalog
+            // can establish the complete set of workflow groups.
+            if preloadedCatalog != nil { return try recordingExpressions() }
+            return RecordingExpression.current(in: catalog)
+        }
         let scalarsCache = FollowupTranscriptScalars()
         var rememberedCache: [String: RememberedThought?] = [:]
         func remembered(_ claim: CandidateClaim) throws -> RememberedThought? {
@@ -552,7 +568,7 @@ extension VoiceOSStore {
                 key = sourceID + "|" + input.expressionID + "|" + input.digest + "|" + ((try? Self.relevanceJSON(input.policies)) ?? "")
             } else { key = sourceID + "|none" }
             if let cached = continuousValidity[key] { return cached }
-            let current = (try? followupContinuousIsCurrent(input, sourceID: sourceID, catalog: catalogRows, expressions: expressions)) != nil
+            let current = (try? followupContinuousIsCurrent(input, sourceID: sourceID, catalog: catalog, expressions: expressions)) != nil
             continuousValidity[key] = current
             return current
         }

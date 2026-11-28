@@ -249,6 +249,9 @@ public actor VoiceOSStore {
     public func sources() throws -> [SourceRecord] {
         try db.query(Self.sourceSelect + " ORDER BY s.created_at DESC,s.id").map(Self.sourceRecord)
     }
+    func sourceCatalog() throws -> [String: SourceRecord] {
+        Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
     /// Targeted read for callers that hold ids; the full-table variant decodes
     /// every transcript and is far too heavy to run once per checked id.
     public func sourceRecords(ids: [String]) throws -> [SourceRecord] {

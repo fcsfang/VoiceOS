@@ -66,6 +66,7 @@ extension VoiceOSStore {
         let wantsAssistant = scope == .full || scope == .assistant
         let wantsKnowledge = scope == .full || scope == .knowledge
         var result = WorkspaceSnapshot()
+        var expressions: [RecordingExpression] = []
         func readCore() throws {
             result.questions = try StartupTrace.measure("snapshot.questions") { try questions() }
             result.questionHistories = try StartupTrace.measure("snapshot.questionHistories") { try questionHistories() }
@@ -103,8 +104,10 @@ extension VoiceOSStore {
             result.attempts = try StartupTrace.measure("snapshot.attempts") { try modelAttemptsBySource() }
             result.sources = try StartupTrace.measure("snapshot.sources") { try sources() }
             result.actionReviewLedgers = try StartupTrace.measure("snapshot.actionReviewLedgers") {
-                ActionReviewLedger.buildMap(
-                    expressions: try recordingExpressions(), actions: result.actions,
+                let catalog = Dictionary(result.sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                expressions = RecordingExpression.current(in: catalog)
+                return ActionReviewLedger.buildMap(
+                    expressions: expressions, actions: result.actions,
                     resolutions: try actionReviewResolutions(),
                     acknowledgements: try actionReviewAcknowledgements(),
                     linkedActionIDs: Set(result.reminderLinks.map(\.actionID)))
@@ -166,7 +169,8 @@ extension VoiceOSStore {
                     catalogRows: reusable ? result.sources : nil,
                     claimRows: reusable ? result.claims : nil,
                     actionRows: reusable ? result.actions : nil,
-                    latest: reusable ? result.currentClaimsBySource : nil)
+                    latest: reusable ? result.currentClaimsBySource : nil,
+                    expressions: reusable ? expressions : nil)
             }
         }
         return result
