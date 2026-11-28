@@ -1,5 +1,7 @@
 # 项目状态
 
+- 2026-11-28 架构治理在独立 worktree 进行，基线和当前批次见[任务卡](tasks/20261128-architecture-governance/TASK.md)。
+
 - 2026-11-26 笔记目录、历史批注和统一侧栏已合并至 `main`（PR #251，`be0f34d`）。本机日常版已更新，见[任务卡](tasks/2026-11-26-note-discussion/TASK.md)。
 
 - 2026-11-24 主窗口与材料阅读的原生交互首批改动见[任务卡](tasks/20261124-native-materials/TASK.md)。

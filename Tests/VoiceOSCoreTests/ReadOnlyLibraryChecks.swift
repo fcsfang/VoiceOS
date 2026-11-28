@@ -161,7 +161,7 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         XCTAssertEqual(try library.actions(limit: 2, offset: 1).map(\.id), ["action-a", "action-b"])
 
         let status = try library.status()
-        XCTAssertEqual(status.userVersion, 78)
+        XCTAssertEqual(status.userVersion, Database.schemaVersion)
         XCTAssertTrue(status.walPresent)
         XCTAssertEqual(status.sources, 5)
         XCTAssertEqual(status.actionsOpen, 1)
@@ -335,12 +335,15 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         }
     }
 
-    func testReadConnectionRejectsWrites() throws {
+    func testReadConnectionRejectsWritesAndKeepsItsSnapshot() throws {
         try insertSource("source-a", name: "来源")
         let library = try ReadOnlyLibrary(root: base)
         XCTAssertThrowsError(try library.query("INSERT INTO sources(id) VALUES('probe')"))
         XCTAssertThrowsError(try library.query("CREATE TABLE probe_write(x TEXT)"))
+        try insertSource("source-b", name: "并发写入")
         XCTAssertEqual(try library.query("SELECT COUNT(*) AS n FROM sources").first?["n"], "1")
+        let nextLibrary = try ReadOnlyLibrary(root: base)
+        XCTAssertEqual(try nextLibrary.query("SELECT COUNT(*) AS n FROM sources").first?["n"], "2")
     }
 
     func testDisplayTitleFunnelSharesExplicitTitleContract() throws {

@@ -343,7 +343,7 @@ final class TopicOrganizationBatchChecks: XCTestCase {
         let url = root.appendingPathComponent("voiceos.sqlite")
         do {
             let db = try Database(url)
-            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
             try db.execute("DROP TABLE topic_organization_stages")
             try db.execute("""
             CREATE TABLE topic_organization_stages(
@@ -361,7 +361,7 @@ final class TopicOrganizationBatchChecks: XCTestCase {
             try db.execute("PRAGMA user_version=70")
         }
         let migrated = try Database(url)
-        XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         XCTAssertEqual(try migrated.query("SELECT count(*) AS n FROM topic_organization_stages").first?["n"], "1")
         XCTAssertEqual(try migrated.query("SELECT digest FROM topic_organization_stages").first?["digest"], "kept")
         try migrated.execute("INSERT INTO topic_organization_stages(digest,stage,scope,state,result_json,error,attempt_id,updated_at) VALUES('m','skeleton-merge','all','completed','{}',NULL,NULL,'t')")

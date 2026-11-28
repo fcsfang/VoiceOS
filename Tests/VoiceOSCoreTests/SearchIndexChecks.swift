@@ -86,7 +86,7 @@ final class SearchIndexChecks: XCTestCase {
     func testMigrationCreatesSearchIndex() async throws {
         let store = try await openStore()
         let db = await store.db
-        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         for table in ["search_index", "search_index_meta"] {
             XCTAssertEqual(try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
         }

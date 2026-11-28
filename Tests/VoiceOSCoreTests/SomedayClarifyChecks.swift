@@ -82,7 +82,7 @@ final class SomedayClarifyChecks: XCTestCase {
                              "62 的 CHECK 不应接受 someday")
 
         let migrated = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         XCTAssertEqual(try migrated.query("SELECT state FROM actions WHERE id=?", [seeded.id]).first?["state"], "open")
         XCTAssertEqual(try migrated.query("SELECT count(*) AS n FROM sqlite_master WHERE type='trigger' AND name='search_dirty_actions'").first?["n"], "1")
         try VoiceOSStore.validateStoredActions(migrated)

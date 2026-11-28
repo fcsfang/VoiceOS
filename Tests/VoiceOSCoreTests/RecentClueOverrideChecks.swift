@@ -148,21 +148,21 @@ final class RecentClueOverrideChecks: XCTestCase {
         let url = base.appendingPathComponent("voiceos.sqlite")
         do {
             let db = try Database(url)
-            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
             XCTAssertEqual(try db.query("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='recent_clue_overrides'").first?["n"], "1")
             try db.execute("DROP TABLE recent_clue_overrides")
             try db.execute("PRAGMA user_version=65")
         }
         do {
             let migrated = try Database(url)
-            XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+            XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
             XCTAssertEqual(try migrated.query("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='recent_clue_overrides'").first?["n"], "1")
             // Simulate a retry that created the table before bumping the version.
             try migrated.execute("PRAGMA user_version=65")
         }
 
         let retried = try Database(url)
-        XCTAssertEqual(try retried.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try retried.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         XCTAssertEqual(try retried.query("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='recent_clue_overrides'").first?["n"], "1")
     }
 }

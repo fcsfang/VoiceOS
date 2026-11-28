@@ -1,5 +1,4 @@
 import Foundation
-import CSQLite
 
 public enum ReadOnlyLibraryError: Error, LocalizedError, Sendable {
     case unavailable(String)
@@ -10,7 +9,7 @@ public enum ReadOnlyLibraryError: Error, LocalizedError, Sendable {
         case let .unavailable(message):
             return message
         case let .incompatibleSchema(found):
-            return "资料库格式不兼容（user_version=\(found)，需要 \(ReadOnlyLibrary.schemaVersion)）"
+            return "资料库格式不兼容（user_version=\(found)，需要 \(Database.schemaVersion)）"
         }
     }
 }
@@ -132,8 +131,7 @@ public struct ReadOnlyStatus: Codable, Sendable, Equatable {
 /// recovery and an exclusive flock, so an agent process must not open it;
 /// this type reads the same file directly and never writes.
 public struct ReadOnlyLibrary {
-    static let schemaVersion = 78
-    private let connection: ReadOnlyConnection
+    private let connection: SQLiteConnection
     private let databaseFile: URL
 
     public init(root: URL) throws {
@@ -141,9 +139,13 @@ public struct ReadOnlyLibrary {
         guard FileManager.default.fileExists(atPath: file.path) else {
             throw ReadOnlyLibraryError.unavailable("资料库不存在：\(file.path)")
         }
-        let connection = try ReadOnlyConnection(url: file)
-        let version = Int(try connection.query("PRAGMA user_version").first?["user_version"] ?? "") ?? -1
-        guard version == Self.schemaVersion else {
+        let connection = try SQLiteConnection(file, access: .readOnly,
+                                              openError: ReadOnlyLibraryError.unavailable("无法只读打开资料库：\(file.path)"))
+        try connection.query("PRAGMA query_only=ON")
+        // The version check establishes the WAL snapshot all later reads use.
+        try connection.query("BEGIN")
+        let version = try connection.schemaVersion
+        guard version == Database.schemaVersion else {
             throw ReadOnlyLibraryError.incompatibleSchema(found: version)
         }
         self.connection = connection
@@ -238,7 +240,7 @@ public struct ReadOnlyLibrary {
     }
 
     public func status() throws -> ReadOnlyStatus {
-        let version = Int(try connection.query("PRAGMA user_version").first?["user_version"] ?? "") ?? -1
+        let version = try connection.schemaVersion
         func count(_ sql: String) throws -> Int {
             Int(try connection.query(sql).first?["n"] ?? "0") ?? 0
         }
@@ -428,71 +430,6 @@ public struct ReadOnlyLibrary {
             return date < now
         case .dateOnly:
             return Calendar.current.startOfDay(for: date) < Calendar.current.startOfDay(for: now)
-        }
-    }
-}
-
-final class ReadOnlyConnection {
-    private var handle: OpaquePointer?
-
-    init(url: URL) throws {
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, handle != nil else {
-            if let handle { sqlite3_close(handle) }
-            handle = nil
-            throw ReadOnlyLibraryError.unavailable("无法只读打开资料库：\(url.path)")
-        }
-        sqlite3_busy_timeout(handle, 5000)
-        do {
-            try query("PRAGMA query_only=ON")
-            try query("BEGIN")
-        } catch {
-            sqlite3_close(handle)
-            handle = nil
-            throw error
-        }
-    }
-
-    deinit {
-        if let handle {
-            sqlite3_exec(handle, "ROLLBACK", nil, nil, nil)
-            sqlite3_close(handle)
-        }
-    }
-
-    func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {
-        guard let handle else { throw VoiceOSError("资料库连接已关闭") }
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw VoiceOSError("查询失败：\(String(cString: sqlite3_errmsg(handle)))")
-        }
-        defer { sqlite3_finalize(statement) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        for (index, value) in arguments.enumerated() {
-            let code: Int32
-            if let value {
-                code = value.utf8CString.withUnsafeBufferPointer { bytes in
-                    sqlite3_bind_text(statement, Int32(index + 1), bytes.baseAddress, Int32(bytes.count - 1), transient)
-                }
-            } else {
-                code = sqlite3_bind_null(statement, Int32(index + 1))
-            }
-            guard code == SQLITE_OK else { throw VoiceOSError("查询参数绑定失败") }
-        }
-        var rows: [[String: String]] = []
-        while true {
-            let result = sqlite3_step(statement)
-            if result == SQLITE_DONE { return rows }
-            guard result == SQLITE_ROW else {
-                throw VoiceOSError("查询失败：\(String(cString: sqlite3_errmsg(handle)))")
-            }
-            var row: [String: String] = [:]
-            for index in 0..<sqlite3_column_count(statement) where sqlite3_column_type(statement, index) != SQLITE_NULL {
-                let key = String(cString: sqlite3_column_name(statement, index))
-                if let value = sqlite3_column_text(statement, index) {
-                    row[key] = String(decoding: UnsafeBufferPointer(start: value, count: Int(sqlite3_column_bytes(statement, index))), as: UTF8.self)
-                }
-            }
-            rows.append(row)
         }
     }
 }

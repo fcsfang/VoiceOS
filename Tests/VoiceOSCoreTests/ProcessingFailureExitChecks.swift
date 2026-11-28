@@ -72,7 +72,7 @@ final class ProcessingFailureExitChecks: XCTestCase {
         let store = try await openStore()
         let database = await store.db
         XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"],
-                       TestSchema.currentVersion, "数据库应升级到当前版本")
+                       String(Database.schemaVersion), "数据库应升级到当前版本")
 
         let queued = try await queueIntent(store, text: "我想验证被拒绝后的重新理解。", commandID: "exit-rejected")
         let rejected = try await store.runExpressionProcessingIntent(id: queued.id, retrieval: NativeRetrieval(),

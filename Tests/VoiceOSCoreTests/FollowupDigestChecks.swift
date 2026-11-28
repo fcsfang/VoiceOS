@@ -99,7 +99,7 @@ final class FollowupDigestChecks: XCTestCase {
         let sourceID = prepared.sourceID, before = prepared.before
 
         let migrated: Database? = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try migrated?.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try migrated?.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         let rows = try XCTUnwrap(migrated).query("SELECT followup_json,followup_digest FROM sources WHERE id=?", [sourceID])
         let row = try XCTUnwrap(rows.first)
         XCTAssertEqual(row["followup_json"], before.json)
@@ -230,7 +230,7 @@ final class FollowupDigestChecks: XCTestCase {
         let url = root.appendingPathComponent("voiceos.sqlite")
         do {
             let migrated = try Database(url)
-            XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+            XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
             let row = try XCTUnwrap(try migrated.query("SELECT followup_json,followup_digest,followup_receipt_digest FROM sources WHERE id=?", [sourceID]).first)
             let body = try XCTUnwrap(row["followup_json"])
             XCTAssertEqual(row["followup_digest"], VoiceOSStore.relevanceHash(Data(body.utf8)))
@@ -240,7 +240,7 @@ final class FollowupDigestChecks: XCTestCase {
             try migrated.execute("PRAGMA user_version=66")
         }
         let retried = try Database(url)
-        XCTAssertEqual(try retried.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try retried.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         XCTAssertNotNil(try retried.query("SELECT followup_receipt_digest FROM sources WHERE id=?", [sourceID]).first?["followup_receipt_digest"])
         let reopened = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
         try await reopened.recover()

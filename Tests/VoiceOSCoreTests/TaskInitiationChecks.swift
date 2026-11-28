@@ -250,7 +250,7 @@ final class TaskInitiationChecks: XCTestCase {
         XCTAssertEqual(rows.first?.route, .answer)
         XCTAssertEqual(rows.first?.proposal.answer, TaskInitiationFixtures.answer().answer)
         let database = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
     }
 
     func testManualAnswerReusesOriginalWordsAndParsesPlainReply() async throws {
@@ -529,7 +529,7 @@ final class TaskInitiationChecks: XCTestCase {
         XCTAssertEqual(rows.first?.state, "draft")
         XCTAssertEqual(rows.first?.basisChanged, false)
         let database = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"], String(Database.schemaVersion))
         XCTAssertEqual(try database.query("SELECT name FROM sqlite_master WHERE name='task_initiations'").count, 1)
         for table in ["action_review_resolutions", "expression_review_acknowledgements"] {
             XCTAssertEqual(try database.query("SELECT name FROM sqlite_master WHERE name=?", [table]).count, 1)

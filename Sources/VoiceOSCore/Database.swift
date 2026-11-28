@@ -1,27 +1,23 @@
 import Foundation
-import CSQLite
 
 // Confined to the Store actor. No SQLite transaction spans an await.
 final class Database {
-    private var handle: OpaquePointer?
+    static let schemaVersion = 78
+    private let connection: SQLiteConnection
     /// Counts rows changed on this connection, so a statement that matches no
     /// rows leaves context validation cached. Every write passes through `execute`.
     private(set) var writeGeneration: Int64 = 0
     init(_ url: URL) throws {
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
-            throw VoiceOSError("无法打开资料库")
-        }
-        do { try configure() }
-        catch { sqlite3_close(handle); handle = nil; throw error }
+        connection = try SQLiteConnection(url, access: .readWriteCreate, openError: VoiceOSError("无法打开资料库"))
+        try configure()
     }
     private func configure() throws {
-        sqlite3_busy_timeout(handle, 5000)
         try execute("PRAGMA foreign_keys=ON")
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
-        let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...78).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
-        if version == "1" {
+        let version = try connection.schemaVersion
+        guard (0...Self.schemaVersion).contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        if version == 1 {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
             let revised = original.replacingOccurrences(of: "CREATE TABLE sources", with: "CREATE TABLE sources_next").replacingOccurrences(of: "'quarantined'))", with: "'quarantined','reference_only'))")
@@ -38,7 +34,7 @@ final class Database {
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
         }
-        if version == "0" {
+        if version == 0 {
             try transaction {
                 try execute("""
                 CREATE TABLE sources (
@@ -1598,6 +1594,9 @@ final class Database {
                 try execute("PRAGMA user_version=78")
             }
         }
+        guard try connection.schemaVersion == Self.schemaVersion else {
+            throw VoiceOSError("资料库升级未达到当前格式")
+        }
         try ensureSearchTriggers()
     }
 
@@ -1635,40 +1634,14 @@ final class Database {
         guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM (SELECT producer_sequence FROM model_attempts UNION ALL SELECT producer_sequence FROM segmented_extraction_attempts UNION ALL SELECT producer_sequence FROM segmented_aggregation_attempts)").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
         return String(value+1)
     }
-    deinit { sqlite3_close(handle) }
     func execute(_ sql: String, _ arguments: [String?] = []) throws {
-        _ = try query(sql, arguments)
-        writeGeneration = sqlite3_total_changes64(handle)
+        try connection.query(sql, arguments)
+        writeGeneration = connection.totalChanges
     }
     /// Rows touched by the last statement; distinguishes an ignored duplicate insert.
-    func lastChangeCount() -> Int { Int(sqlite3_changes(handle)) }
+    func lastChangeCount() -> Int { connection.lastChangeCount }
     func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error(sql) }
-        defer { sqlite3_finalize(stmt) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        for (i, value) in arguments.enumerated() {
-            let code: Int32
-            if let value {
-                guard value.utf8.count < Int(Int32.max) else { throw VoiceOSError("资料字段过大") }
-                code = value.utf8CString.withUnsafeBufferPointer { bytes in
-                    sqlite3_bind_text(stmt, Int32(i + 1), bytes.baseAddress, Int32(bytes.count - 1), transient)
-                }
-            } else { code = sqlite3_bind_null(stmt, Int32(i + 1)) }
-            guard code == SQLITE_OK else { throw error() }
-        }
-        var rows: [[String: String]] = []
-        while true {
-            let result = sqlite3_step(stmt)
-            if result == SQLITE_DONE { return rows }
-            guard result == SQLITE_ROW else { throw error(sql) }
-            var row: [String: String] = [:]
-            for i in 0..<sqlite3_column_count(stmt) where sqlite3_column_type(stmt, i) != SQLITE_NULL {
-                let key = String(cString: sqlite3_column_name(stmt, i))
-                if let value = sqlite3_column_text(stmt, i) { row[key] = String(decoding: UnsafeBufferPointer(start: value, count: Int(sqlite3_column_bytes(stmt, i))), as: UTF8.self) }
-            }
-            rows.append(row)
-        }
+        try connection.query(sql, arguments)
     }
     func transaction<T>(_ body: () throws -> T) throws -> T {
         try execute("BEGIN IMMEDIATE")
@@ -1683,11 +1656,5 @@ final class Database {
             try execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,row["id"],row["text"],spans,row["created_at"]])
             try execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,row["id"]])
         }
-    }
-    private func error(_ sql: String? = nil) -> VoiceOSError {
-        let message=String(cString: sqlite3_errmsg(handle))
-        guard let sql else { return VoiceOSError("资料库错误：\(message)") }
-        let statement=sql.split(whereSeparator: \.isWhitespace).prefix(14).joined(separator: " ")
-        return VoiceOSError("资料库错误：\(message)｜\(statement)")
     }
 }

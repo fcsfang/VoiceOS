@@ -1,6 +1,5 @@
 import Foundation
 import Darwin
-import CSQLite
 
 public struct LibraryStorageUsage: Sendable, Equatable {
     public let databaseBytes: Int64
@@ -144,40 +143,23 @@ public enum DatabaseBackup {
     }
 
     private static func writeSnapshot(database: URL, to destination: URL) throws {
-        var source: OpaquePointer?
-        guard sqlite3_open_v2(database.path, &source, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            sqlite3_close(source)
-            throw VoiceOSError("无法只读打开资料库")
+        let source = try SQLiteConnection(database, access: .readOnly,
+                                          openError: VoiceOSError("无法只读打开资料库"))
+        let target = try SQLiteConnection(destination, access: .readWriteCreate,
+                                          openError: VoiceOSError("无法建立备份文件"))
+        try source.copyPages(to: target)
+        do {
+            try target.query("PRAGMA journal_mode=DELETE")
+        } catch {
+            throw VoiceOSError("备份完整性校验失败")
         }
-        defer { sqlite3_close(source) }
-        sqlite3_busy_timeout(source, 5000)
-        var target: OpaquePointer?
-        guard sqlite3_open_v2(destination.path, &target, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
-            sqlite3_close(target)
-            throw VoiceOSError("无法建立备份文件")
-        }
-        defer { sqlite3_close(target) }
-        guard let backup = sqlite3_backup_init(target, "main", source, "main") else {
-            throw VoiceOSError("无法开始资料库备份")
-        }
-        let step = sqlite3_backup_step(backup, -1)
-        let finish = sqlite3_backup_finish(backup)
-        guard step == SQLITE_DONE, finish == SQLITE_OK,
-              sqlite3_exec(target, "PRAGMA journal_mode=DELETE", nil, nil, nil) == SQLITE_OK,
-              integrityOK(target) else {
+        guard check(target, "PRAGMA integrity_check(1)") else {
             throw VoiceOSError("备份完整性校验失败")
         }
     }
 
     public static func integrityCheck(at url: URL) -> Bool {
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            sqlite3_close(handle)
-            return false
-        }
-        defer { sqlite3_close(handle) }
-        sqlite3_busy_timeout(handle, 5000)
-        return integrityOK(handle)
+        checkDatabase(at: url, "PRAGMA integrity_check(1)")
     }
 
     public struct SourceAssetScan: Sendable {
@@ -205,18 +187,7 @@ public enum DatabaseBackup {
     /// Walks the backup's b-tree pages without a full integrity pass. Used by
     /// the library check so a 270 MB backup stays cheap to verify repeatedly.
     public static func quickCheck(at url: URL) -> Bool {
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            sqlite3_close(handle)
-            return false
-        }
-        defer { sqlite3_close(handle) }
-        sqlite3_busy_timeout(handle, 5000)
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, "PRAGMA quick_check", -1, &statement, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW, let value = sqlite3_column_text(statement, 0) else { return false }
-        return String(cString: value) == "ok"
+        checkDatabase(at: url, "PRAGMA quick_check(1)")
     }
 
     public static func latestBackupFile(directory: URL) -> URL? {
@@ -239,27 +210,20 @@ public enum DatabaseBackup {
     /// Read-only enumeration of the originals recorded in `assets`. Missing
     /// files are returned as relative paths so the caller can name key items.
     public static func scanSourceAssets(database: URL, root: URL) throws -> SourceAssetScan {
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(database.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            sqlite3_close(handle)
-            throw VoiceOSError("无法只读打开资料库：" + database.path)
-        }
-        defer { sqlite3_close(handle) }
-        sqlite3_busy_timeout(handle, 5000)
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, "SELECT relative_path FROM assets", -1, &statement, nil) == SQLITE_OK else {
-            throw VoiceOSError("无法读取原件清单：" + database.path)
-        }
-        defer { sqlite3_finalize(statement) }
+        let connection = try SQLiteConnection(database, access: .readOnly,
+                                              openError: VoiceOSError("无法只读打开资料库：" + database.path))
         var count = 0
         var missing: [String] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let raw = sqlite3_column_text(statement, 0) else { continue }
-            count += 1
-            let relative = String(cString: raw)
-            if !FileManager.default.fileExists(atPath: root.appendingPathComponent(relative).path) {
-                missing.append(relative)
+        do {
+            try connection.forEachRow("SELECT relative_path FROM assets") { row in
+                guard let relative = row["relative_path"] else { return }
+                count += 1
+                if !FileManager.default.fileExists(atPath: root.appendingPathComponent(relative).path) {
+                    missing.append(relative)
+                }
             }
+        } catch {
+            throw VoiceOSError("无法读取原件清单：" + database.path)
         }
         return SourceAssetScan(sourceCount: count, missing: missing)
     }
@@ -334,12 +298,15 @@ public enum DatabaseBackup {
         return destination
     }
 
-    private static func integrityOK(_ handle: OpaquePointer?) -> Bool {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, "PRAGMA integrity_check", -1, &statement, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW, let value = sqlite3_column_text(statement, 0) else { return false }
-        return String(cString: value) == "ok"
+    private static func checkDatabase(at url: URL, _ pragma: String) -> Bool {
+        guard let connection = try? SQLiteConnection(url, access: .readOnly,
+                                                     openError: VoiceOSError("无法只读打开资料库")) else { return false }
+        return check(connection, pragma)
+    }
+
+    private static func check(_ connection: SQLiteConnection, _ pragma: String) -> Bool {
+        guard let rows = try? connection.query(pragma), rows.count == 1 else { return false }
+        return rows[0].values.first == "ok"
     }
 
     private static func discard(_ destination: URL) {
