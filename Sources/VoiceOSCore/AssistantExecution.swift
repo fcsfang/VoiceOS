@@ -316,7 +316,7 @@ extension VoiceOSStore {
         var changed = false
         var context = snapshot?.assistantValidation
         _ = try assistantExecutions(context: &context)
-        for action in try actions() where action.kind == "task" && action.intentActor == "user" && action.state == "open" && action.validity == "current" {
+        for action in try actions() where action.isCurrentOpenTask && action.intentActor == "user" {
             try Task.checkCancellation()
             let prior = try db.query("SELECT * FROM assistant_assessments WHERE action_id=? AND action_version=?", [action.id,String(action.version)]).first
             // Assessments written before intent classification always decided

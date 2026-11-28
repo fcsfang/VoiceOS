@@ -47,7 +47,7 @@ extension VoiceOSStore {
             return receipt["id"]!
         }
         guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
-              action.version == expectedActionVersion, action.kind == "task", action.state == "open", action.validity == "current" else {
+              action.version == expectedActionVersion, action.isCurrentOpenTask else {
             throw VoiceOSError("只有当前有效且未完成任务可以记录排期提案")
         }
         let prior = try db.query("SELECT * FROM action_schedule_intents WHERE action_id=? ORDER BY schedule_version DESC LIMIT 1", [actionID]).first
@@ -103,7 +103,7 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM action_schedule_intents \(clause) ORDER BY action_id,schedule_version").map { row in
             let latest = try db.query("SELECT MAX(schedule_version) AS n FROM action_schedule_intents WHERE action_id=?", [row["action_id"]]).first?["n"]
             let action = actions[row["action_id"]!]
-            return try Self.scheduleIntent(row, baseOperationID: db.query("SELECT operation_id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).first?["operation_id"], eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.kind == "task" && action?.state == "open" && action?.validity == "current" && row["action_version"] == action.map { String($0.version) })
+            return try Self.scheduleIntent(row, baseOperationID: db.query("SELECT operation_id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).first?["operation_id"], eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.isCurrentOpenTask == true && row["action_version"] == action.map { String($0.version) })
         }
     }
 

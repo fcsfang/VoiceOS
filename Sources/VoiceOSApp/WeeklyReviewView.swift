@@ -42,7 +42,7 @@ struct WeeklyReviewView: View {
     }
 
     private var openTasks: [ActionRecord] {
-        model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }
+        model.actionRecords.filter(\.isCurrentOpenTask)
     }
     private var surface: ActionTimeSurface {
         ActionTimeSurface.build(actions: openTasks, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)

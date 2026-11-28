@@ -218,8 +218,7 @@ public struct SourcePageIndex: Sendable {
         pausedTasks = paused
 
         var openActionIDsBySourceID: [String: Set<String>] = [:]
-        for action in actionByID.values where action.kind == "task" && action.state == "open"
-            && action.validity == "current" && !reviewRequired.contains(action.id) {
+        for action in actionByID.values where action.isCurrentOpenTask && !reviewRequired.contains(action.id) {
             guard let claim = claimByID[action.claimID] else { continue }
             for sourceID in Set(claim.references.map(\.sourceID)) {
                 openActionIDsBySourceID[sourceID, default: []].insert(action.id)

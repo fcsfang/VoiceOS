@@ -21,7 +21,7 @@ struct ReflectionEventListView: View {
         let claimIDs = Set(model.claims.filter { claim in
             claim.references.contains { $0.sourceID == source.id }
         }.map(\.id))
-        return model.actionRecords.filter { $0.kind == "task" && $0.validity == "current" && claimIDs.contains($0.claimID) }
+        return model.actionRecords.filter { $0.isCurrentTask && claimIDs.contains($0.claimID) }
     }
     private func updates(_ source: SourceRecord) -> [ThoughtUpdate] {
         var seen = Set<String>()

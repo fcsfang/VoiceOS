@@ -13,7 +13,7 @@ public struct DailyReview: Sendable {
     public static func build(actions: [ActionRecord], schedules: [ActionScheduleIntent],
                              links: [ReminderLink], now: Date,
                              calendar: Calendar = .current) -> DailyReview {
-        let tasks = actions.filter { $0.kind == "task" && $0.validity == "current" }
+        let tasks = actions.filter(\.isCurrentTask)
         let surface = ActionTimeSurface.build(actions: tasks, schedules: schedules, links: links,
                                               now: now, calendar: calendar)
         let openToday = surface.today.filter { $0.action.state == "open" }

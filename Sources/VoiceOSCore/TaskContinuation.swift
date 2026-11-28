@@ -23,7 +23,7 @@ extension VoiceOSStore {
     func existingRecordingTasks(excludingSourceIDs: Set<String> = []) throws -> [ExistingRecordingTask] {
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
         var result: [ExistingRecordingTask] = []
-        for action in try actions(includeHistory: true) where action.kind == "task" && action.intentActor == "user" && action.validity == "current" && ["open", "completed"].contains(action.state) {
+        for action in try actions(includeHistory: true) where action.isCurrentTask && action.intentActor == "user" && ["open", "completed"].contains(action.state) {
             guard let claim = claims[action.claimID], claim.reviewVersion == action.claimReviewVersion,
                   !claim.references.isEmpty, claim.references.allSatisfy({ !excludingSourceIDs.contains($0.sourceID) }) else { continue }
             var policies: [String: Int] = [:]

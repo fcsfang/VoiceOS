@@ -41,6 +41,8 @@ public struct ActionRecord: Identifiable, Sendable {
         self.id = id; self.claimID = claimID; self.claimReviewVersion = claimReviewVersion; self.title = title; self.kind = kind; self.intentActor = intentActor; self.note = note; self.state = state; self.validity = validity; self.version = version; self.autoSend = autoSend; self.intent = intent; self.commandID = commandID; self.createdAt = createdAt; self.parentID = parentID; self.nature = nature; self.completedAt = completedAt
     }
     public var isExtracted: Bool { commandID.hasPrefix("extracted:") }
+    public var isCurrentTask: Bool { kind == ActionKind.task.rawValue && validity == "current" }
+    public var isCurrentOpenTask: Bool { isCurrentTask && state == LocalActionState.open.rawValue }
 }
 public struct ActionRevision: Identifiable, Codable, Sendable {
     public let id: String

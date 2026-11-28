@@ -226,7 +226,7 @@ extension VoiceOSStore {
             return try rememberedThought(claim, catalog: catalog, scalarsCache: scalarsCache)
         }
         let feedback = try preloaded ?? followupFeedback(actions: actions, claims: claims, catalog: catalog)
-        return try actions.filter { $0.validity == "current" && $0.kind == "task" && $0.intentActor == "user" && $0.state != "dismissed" }.compactMap { action in
+        return try actions.filter { $0.isCurrentTask && $0.intentActor == "user" && $0.state != "dismissed" }.compactMap { action in
             guard let claim = claims[action.claimID], try thought(for: claim) != nil else { return nil }
             return .init(id: action.id, version: action.version, title: action.title, state: action.state, goalID: action.intent?.goalID ?? goalIDByTaskID[action.id], feedback: feedback[action.id] ?? [])
         }.sorted { $0.id < $1.id }

@@ -2100,7 +2100,7 @@ struct WorkspaceView: View {
     }
     private var focusRefreshKey: String { model.sourcePageIndex.actionRevisionKey }
     private var myTodoActions: [ActionRecord] {
-        model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && !model.sourcePageIndex.requiresReview($0.id) }
+        model.actionRecords.filter { $0.isCurrentOpenTask && !model.sourcePageIndex.requiresReview($0.id) }
     }
     private var visibleActions: [ActionRecord] {
         switch actionFilter {
@@ -2319,7 +2319,7 @@ struct WorkspaceView: View {
         searchSuggestionCache.topics = model.workspaceTopics.map { topic in
             SearchSuggestionCache.Entry(id:"suggestion:topic:" + topic.id,title:topic.title) { selectTopic(topic.id) }
         }
-        searchSuggestionCache.tasks = model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }.map { action in
+        searchSuggestionCache.tasks = model.actionRecords.filter(\.isCurrentOpenTask).map { action in
             SearchSuggestionCache.Entry(id:"suggestion:task:" + action.id,title:action.title) { go(.task(action.id)) }
         }
         let claims = model.claims.filter { $0.validity == "current" && $0.reviewState != "rejected" }
@@ -3295,7 +3295,7 @@ struct WorkspaceView: View {
         let keyboardHighlighted=page == .actions && !selectingActions && actionKeyboardHighlightID == action.id
         let focused=focusedActionIDs.contains(action.id)
         let canChangeDay=actionable && reads.linkedReminderByActionID[action.id] != nil && !model.savingAction && !model.remindersBusy
-        let canComplete=actionable && action.kind == "task"
+        let canComplete = !selectingActions && action.isCurrentOpenTask
         let externalCompletion=model.workspaceExternalCompletion(action) != nil
         let layout=actionRowStatus(action,timeEntry:timeEntry,group:group,nature:nature,nextStepCount:nextStepCounts[action.id] ?? 0,reads:reads)
         let tagged=StatementTagParser.split(action.title)
@@ -3303,7 +3303,6 @@ struct WorkspaceView: View {
         let reminderException=layout.meta.contains("提醒待核对") || layout.meta.contains("提醒缺失") || layout.meta.contains("已逾期")
         let trailingStyle:WorkspaceRow.TrailingStyle=marksSelected ? .status(palette.accent) : (layout.status.isEmpty ? .secondary : .status(actionRowToneColor(layout.tone)))
         let icon:String=selectingActions ? (selectable ? (selected ? "checkmark.circle.fill" : "circle") : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : nature == .question ? "questionmark.circle" : nature == .goal ? "target" : typeIcon(tagged.tag)
-        let showsCompletion = !selectingActions && action.kind == "task" && action.state == "open" && action.validity == "current"
         return WorkspaceActionRowChrome(action:action,
             canTransition:actionable || externalCompletion,
             revealed:keyboardHighlighted,
@@ -3315,7 +3314,7 @@ struct WorkspaceView: View {
                     trailingStyle:trailingStyle,
                     statusAccessibility:layout.status,
                     trailingGutter:WorkspaceRowChrome.actionGutter,
-                    completion:showsCompletion ? WorkspaceRow.CompletionControl(enabled:canComplete && !model.savingAction,complete:{ applyActionState(action,to:.completed) }) : nil) {
+                    completion:canComplete ? WorkspaceRow.CompletionControl(enabled:!model.savingAction,complete:{ applyActionState(action,to:.completed) }) : nil) {
                     if selectingActions {
                         guard selectable else { return }
                         if selected { selectedActionIDs.remove(action.id) } else { selectedActionIDs.insert(action.id) }
@@ -4146,7 +4145,7 @@ struct WorkspaceView: View {
         guard let action=model.actionRecords.first(where: { $0.id == actionID }) else {
             error="这条行动已不在当前资料库，完成未写入"; return
         }
-        guard action.kind == "task", action.state == "open", action.validity == "current" else {
+        guard action.isCurrentOpenTask else {
             error="这条行动当前不能标记完成"; return
         }
         applyActionState(action,to:.completed)

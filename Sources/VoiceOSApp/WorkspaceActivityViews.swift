@@ -412,7 +412,7 @@ struct WorkspaceTaskView: View {
         return model.workspaceActionStatus(action)
     }
     private var showsClarification: Bool {
-        guard action.isExtracted, action.kind == "task", action.state == "open", action.validity == "current",
+        guard action.isExtracted, action.isCurrentOpenTask,
               action.parentID == nil,
               model.actionClarifications[action.id] == nil,
               let created = ConversationReflectionFocus.date(action.createdAt),

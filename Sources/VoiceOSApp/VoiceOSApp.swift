@@ -938,7 +938,7 @@ final class ControlCenter: ObservableObject {
     var pendingReminderSyncList: [PendingReminderSync] { pendingReminderSyncs.values.sorted { $0.createdAt < $1.createdAt } }
     func pendingReminderSync(for actionID: String) -> PendingReminderSync? { pendingReminderSyncs[actionID] }
     func canCompleteLocally(_ action: ActionRecord) -> Bool {
-        action.kind == "task" && action.state == LocalActionState.open.rawValue && action.validity == "current"
+        action.isCurrentOpenTask
             && reminderSyncUnavailable
             && reminderLinks.contains { $0.actionID == action.id && $0.state == "linked" && $0.externalID != nil }
     }
@@ -4761,7 +4761,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         for item in todayOverviewMenuItems { menu.removeItem(item) }
         todayOverviewMenuItems = []
         guard let model else { return }
-        let actions = model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }
+        let actions = model.actionRecords.filter(\.isCurrentOpenTask)
         let surface = ActionTimeSurface.build(actions: actions, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
         let overdue = Array(surface.today.filter { $0.isOverdue }.prefix(3))
         let dueToday = Array(surface.today.filter { !$0.isOverdue }.prefix(3))
