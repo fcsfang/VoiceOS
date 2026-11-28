@@ -115,7 +115,7 @@ extension ControlCenter {
     }
     func rejudgeRecordingExpressions(sourceIDs: Set<String>) async throws -> Int {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
-        guard let port = recordingExpressionModel else { throw VoiceOSError("需要先配置文本模型，才能重新判断连续表达") }
+        guard let port = textModels?.recordingExpressions else { throw VoiceOSError("需要先配置文本模型，才能重新判断连续表达") }
         guard !fullRecordingBusy, understandingSource == nil else { throw VoiceOSError("当前录音仍在处理，完成后再重新判断") }
         _ = try await store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
         let groups = try await store.connectRecordingExpressions(using: port)
@@ -1144,7 +1144,7 @@ struct WorkspaceView: View {
                         HStack(spacing:10) {
                             Text(issue).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                             if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.controlSize(.small) }
-                            if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
+                            if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
                         }
                     }
                 }.padding(24)
@@ -2500,7 +2500,7 @@ struct WorkspaceView: View {
                 Button("更改") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改语音转文字")
             }
             WorkspaceSettingsRow(title:"理解、核对与 AI 助理",
-                                 subtitle:model.textModelConfigured ? model.modelSummary : (model.modelConfigIssue ?? "尚未配置文本模型")) {
+                                 subtitle:model.modelConfigured ? model.modelSummary : (model.modelConfigIssue ?? "尚未配置文本模型")) {
                 HStack(spacing:8) {
                     if model.modelConfigured {
                         Button("清除") { model.clearTextModel() }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("清除文本模型配置")

@@ -1129,7 +1129,7 @@ struct MaterialNoteReadingView: View {
     private func generateHistory() async {
         defer { historyRun = false }
         guard let displayed = display, displayed.isCurrent,
-              let store = model.store, let root = model.libraryRoot, let port = model.materialNoteModel else {
+              let store = model.store, let root = model.libraryRoot, let port = model.textModels?.note else {
             historyNotice = "暂时无法回看历史，请检查资料库和文本模型。"
             return
         }

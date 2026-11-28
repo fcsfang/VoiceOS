@@ -105,9 +105,9 @@ struct OnboardingView: View {
             }
             OnboardingCheckRow(
                 title: "文本模型",
-                detail: model.textModelConfigured ? "已就绪" : (model.modelConfigIssue ?? "尚未配置"),
-                ready: model.textModelConfigured,
-                action: model.textModelConfigured ? nil : "配置文本模型",
+                detail: model.modelConfigured ? "已就绪" : (model.modelConfigIssue ?? "尚未配置"),
+                ready: model.modelConfigured,
+                action: model.modelConfigured ? nil : "配置文本模型",
                 perform: { model.chooseTextModel() }
             )
             OnboardingCheckRow(

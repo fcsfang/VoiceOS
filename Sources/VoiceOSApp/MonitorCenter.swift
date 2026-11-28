@@ -747,7 +747,7 @@ extension ControlCenter {
         let loaded = MonitorQQSettingsStore.loadResult()
         recordMonitorQQSettingsLoad(decodeFailed: loaded.decodeFailed)
         let user = loaded.settings
-        let analysis: (any NotificationAnalysisPort)? = monitorSettings.cloudAnalysisAuthorized ? monitorAnalysisModel : nil
+        let analysis: (any NotificationAnalysisPort)? = monitorSettings.cloudAnalysisAuthorized ? textModels?.notificationAnalysis : nil
         let runner = MessageMonitorRunner(
             store: store, analysis: analysis,
             qqCollector: QQMonitorHelper(),

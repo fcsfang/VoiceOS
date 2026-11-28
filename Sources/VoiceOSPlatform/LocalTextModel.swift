@@ -4,6 +4,7 @@ import VoiceOSCore
 /// Development configuration only. Never evaluate shell text or expose parsing errors.
 public enum LocalTextModel {
     public struct Suite {
+        package let organizerEnvironment: [String: String]
         public let recordingExpressions: ResponsesRecordingExpressionPort
         public let topics: ResponsesTopicOrganizationPort
         public let note: ResponsesMaterialNotePort
@@ -51,7 +52,38 @@ public enum LocalTextModel {
         let address = cfg.address, key = cfg.key, model = cfg.model
         do {
             let chosenTransport: any ModelHTTPTransport = segmentStreaming ? DirectStreamingModelHTTPTransport() : segmentTransport
-            return Suite(recordingExpressions: try ResponsesRecordingExpressionPort(baseURL:address,apiKey:key,model:model),topics: try ResponsesTopicOrganizationPort(baseURL:address,apiKey:key,model:model,deadline:1800,effort:cfg.topicEffort),note: try ResponsesMaterialNotePort(baseURL:address,apiKey:key,model:model,effort:cfg.noteEffort),recordingTitles: try ResponsesRecordingTitlePort(baseURL:address,apiKey:key,model:model),reminderFields: try ResponsesReminderFieldPort(baseURL:address,apiKey:key,model:model),followup:try ResponsesRecordingFollowupPort(baseURL:address,apiKey:key,model:model),assistant:try ResponsesAssistantPort(baseURL:address,apiKey:key,model:model),initiation:try ResponsesTaskInitiationPort(baseURL:address,apiKey:key,model:model),knowledgeReview:try ResponsesKnowledgeReviewPort(baseURL:address,apiKey:key,model:model),cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:model),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:model),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:model),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:model),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:model),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:model),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:model,transport:chosenTransport,compactInput:compactSegmentExtraction,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,expandAmbiguousQuotes:expandAmbiguousQuotes),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:model,transport:chosenTransport,compactInput:compactSegmentAggregation,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,strictProvenance:strictSegmentAggregation),notificationAnalysis:try ResponsesNotificationAnalysisPort(baseURL:address,apiKey:key,model:model))
+            return Suite(
+                organizerEnvironment: [
+                    "VOICEOS_TEXT_BASE_URL": address.absoluteString,
+                    "VOICEOS_TEXT_API_KEY": key,
+                    "VOICEOS_TEXT_MODEL": model,
+                    "VOICEOS_TEXT_EFFORT": cfg.reviewEffort
+                ],
+                recordingExpressions: try ResponsesRecordingExpressionPort(baseURL: address, apiKey: key, model: model),
+                topics: try ResponsesTopicOrganizationPort(baseURL: address, apiKey: key, model: model, deadline: 1800, effort: cfg.topicEffort),
+                note: try ResponsesMaterialNotePort(baseURL: address, apiKey: key, model: model, effort: cfg.noteEffort),
+                recordingTitles: try ResponsesRecordingTitlePort(baseURL: address, apiKey: key, model: model),
+                reminderFields: try ResponsesReminderFieldPort(baseURL: address, apiKey: key, model: model),
+                followup: try ResponsesRecordingFollowupPort(baseURL: address, apiKey: key, model: model),
+                assistant: try ResponsesAssistantPort(baseURL: address, apiKey: key, model: model),
+                initiation: try ResponsesTaskInitiationPort(baseURL: address, apiKey: key, model: model),
+                knowledgeReview: try ResponsesKnowledgeReviewPort(baseURL: address, apiKey: key, model: model),
+                cognition: try ResponsesModelPort(baseURL: address, apiKey: key, model: model),
+                relevance: try ResponsesRelevancePort(baseURL: address, apiKey: key, model: model),
+                discussion: try ResponsesDiscussionPort(baseURL: address, apiKey: key, model: model),
+                outcome: try ResponsesOutcomePort(baseURL: address, apiKey: key, model: model),
+                english: try ResponsesEnglishPracticePort(baseURL: address, apiKey: key, model: model),
+                association: try ResponsesExpressionAssociationPort(baseURL: address, apiKey: key, model: model),
+                segmentExtraction: try ResponsesSegmentExtractionPort(
+                    baseURL: address, apiKey: key, model: model, transport: chosenTransport,
+                    compactInput: compactSegmentExtraction, requestTimeout: segmentRequestTimeout,
+                    streaming: segmentStreaming, expandAmbiguousQuotes: expandAmbiguousQuotes),
+                segmentAggregation: try ResponsesSegmentAggregationPort(
+                    baseURL: address, apiKey: key, model: model, transport: chosenTransport,
+                    compactInput: compactSegmentAggregation, requestTimeout: segmentRequestTimeout,
+                    streaming: segmentStreaming, strictProvenance: strictSegmentAggregation),
+                notificationAnalysis: try ResponsesNotificationAnalysisPort(baseURL: address, apiKey: key, model: model)
+            )
         } catch { throw VoiceOSError("无法使用当前文本模型配置；请检查服务地址、模型与密钥") }
     }
     public static func load(from file: URL) throws -> ResponsesModelPort {

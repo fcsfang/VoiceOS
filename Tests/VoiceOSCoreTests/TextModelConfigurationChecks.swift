@@ -32,13 +32,26 @@ extension CoreFlowTests {
                        "https://api.example.com/v1")
     }
 
-    func test内部设置构建套件前先校验地址() {
+    func test内部设置构建套件前先校验地址() throws {
         let settings = LocalTextModel.Settings(address: URL(string: "https://api.example.com/v1")!, key: "k",
                                                model: "gpt-6.2-sol", noteEffort: "xhigh", topicEffort: "medium")
         XCTAssertEqual(settings.model, "gpt-6.2-sol")
         XCTAssertEqual(settings.noteEffort, "xhigh")
         XCTAssertEqual(settings.topicEffort, "medium")
         XCTAssertThrowsError(try LocalTextModel.loadSuite(settings: settings))
+
+        let address = try XCTUnwrap(URL(string: "https://api.openai.com/v1"))
+        let valid = LocalTextModel.Settings(address: address, key: "fixture", model: "fixture-model",
+                                           noteEffort: "medium", topicEffort: "low", reviewEffort: "high")
+        let suite = try LocalTextModel.loadSuite(settings: valid, segmentRequestTimeout: 600, segmentStreaming: true)
+        XCTAssertEqual(suite.cognition.configuration.model, valid.model)
+        XCTAssertEqual(suite.note.identity.model, valid.model)
+        XCTAssertEqual(suite.organizerEnvironment, [
+            "VOICEOS_TEXT_BASE_URL": address.absoluteString,
+            "VOICEOS_TEXT_API_KEY": valid.key,
+            "VOICEOS_TEXT_MODEL": valid.model,
+            "VOICEOS_TEXT_EFFORT": valid.reviewEffort
+        ])
     }
 
     func test文本服务地址策略只接受授权主机的精确端点() {
