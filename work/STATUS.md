@@ -1,5 +1,7 @@
 # 项目状态
 
+- 2026-11-29 A54 刷新架构地图并收敛本轮治理：基线与状态所有权更新，登记 SourcePolicy、TranscriptRevision、TimestampFormatting、Digest、StableJSON、KeychainCredential 六个新权威所有者；数据访问扫描确认 Core 之外无裸 SQL、备份恢复单一实现。仅剩 UI 间距与图标令牌化（需设计语义分组）留待确认。
+
 - 2026-11-29 A53 删除冗余不变量包装（`f9e93a9`，25 行）：四个零引用校验器的规则均有现行等价保护；593 项 Swift 测试通过。治理循环继续。
 
 - 2026-11-29 A52 删除零引用函数合并（`1125c2a`）：17 个无调用 helper/API 共 115 行移除，四个安全校验器保留待评审；合并树 593 项 Swift 测试通过。

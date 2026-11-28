@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: in_review
 started: 2026-11-28
 updated: 2026-11-29
 branch: codex/architecture-governance-20261128
@@ -21,6 +21,8 @@ owner: claude
 以日常版源码 `964c164` 起步，在独立 worktree 开发。PR #254 已合并，A01 至 A15 已随 `d540257` 进入 main。A16 起的提交在治理分支独立交付。
 
 ## 当前状态
+
+2026-11-29 A54 随本轮最后合并进入 main，治理收敛：仅剩 UI 间距与图标令牌化待设计决策。
 
 2026-11-29 A53 随 `f9e93a9` 合并发布；循环继续。
 
