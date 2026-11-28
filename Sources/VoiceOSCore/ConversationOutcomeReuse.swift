@@ -40,12 +40,6 @@ extension VoiceOSStore {
         guard try db.query("SELECT id FROM conversation_outcome_attempts WHERE conversation_id=?",[snapshot.input.conversationID]).isEmpty else { throw VoiceOSError("讨论已有成果尝试；请查看原回执，不重新规划发送") }
         return try Self.buildOutcomeReusePlan(db,snapshot:snapshot)
     }
-    /// Re-read after await to detect another producer consuming a formerly available target.
-    /// Existing review/action changes do not re-enable the original input or reset its identity.
-    public func validateConversationOutcomeReusePlan(_ plan:ConversationOutcomeReusePlan,snapshot:ConversationOutcomeSnapshot) throws {
-        let current=try conversationOutcomeReusePlan(for:snapshot)
-        guard try Self.relevanceJSON(current) == Self.relevanceJSON(plan) else { throw VoiceOSError("讨论已有成果身份或新增目标已变化，请重新读取；不接纳旧计划") }
-    }
     static func buildOutcomeReusePlan(_ db:Database,snapshot:ConversationOutcomeSnapshot,beforeSequence:Int64?=nil,excludingAttemptID:String?=nil) throws -> ConversationOutcomeReusePlan {
         var prior:[OutcomePriorResult]=[],covered:Set<String>=[]
         // Conservative coverage matches the existing cross-entry barrier: any actual cognition

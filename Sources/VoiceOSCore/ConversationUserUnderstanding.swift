@@ -1,12 +1,6 @@
 import Foundation
 
 extension VoiceOSStore {
-    /// Explicitly understand one personal turn through the existing cognition/action pipeline.
-    /// Discussion replies and entry history are not added to this request or endorsed by it.
-    public func understandConversationUserTurn(conversationID:String,turnID:String,using port:any ModelPort) async throws -> [String] {
-        let sourceID = try currentConversationUserSource(conversationID: conversationID, turnID: turnID)
-        return try await understandSource(sourceID:sourceID,using:port)
-    }
     public func continueConversationUserUnderstanding(conversationID: String, turnID: String, using port: any ModelPort) async throws -> SourceUnderstandingContinuation {
         let sourceID = try currentConversationUserSource(conversationID: conversationID, turnID: turnID)
         return try await continueSourceUnderstanding(sourceID: sourceID, using: port)
