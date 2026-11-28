@@ -1,6 +1,31 @@
 import Foundation
 
+public struct PendingRecordingContextReview: Sendable {
+    public let hasPendingGroup: Bool
+    public let isTranscriptionCorrection: Bool
+    public let sourceIDs: [String]
+    public let externalSourceIDBySource: [String: String]
+}
+
 extension VoiceOSStore {
+    /// Discover recorded correction groups before loading any transcript.
+    public func pendingRecordingContextReview() throws -> PendingRecordingContextReview {
+        let decoder = JSONDecoder()
+        let presentations = try db.query("SELECT id,presentation_json FROM sources WHERE presentation_json IS NOT NULL")
+            .reduce(into: [String: RecordingPresentation]()) { result, row in
+                result[row["id"]!] = try decoder.decode(RecordingPresentation.self, from: Data(row["presentation_json"]!.utf8))
+            }
+        let groups = presentations.values.compactMap(\.correctedSourceIDs)
+        let sourceIDs = Set(groups.joined()).sorted()
+        let externalSourceIDBySource = Dictionary(uniqueKeysWithValues: sourceIDs.compactMap { id -> (String, String)? in
+            guard let externalID = presentations[id]?.recordingContext?.externalSourceID else { return nil }
+            return (id, externalID)
+        })
+        return PendingRecordingContextReview(hasPendingGroup: !groups.isEmpty,
+                                             isTranscriptionCorrection: sourceIDs.contains { presentations[$0]?.recordingUnderstandingIsCorrection == true },
+                                             sourceIDs: sourceIDs, externalSourceIDBySource: externalSourceIDBySource)
+    }
+
     /// Re-enrol the complete personal recording after an explicit transcription
     /// correction. Only membership and old action identities are queued here;
     /// current interpretation still requires normal independent model review.

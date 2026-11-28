@@ -1335,6 +1335,11 @@ final class CoreFlowTests: XCTestCase {
         do { _ = try await dual.recordingContextLinks(sourceID:personalID);XCTFail("旧双轨关联不能绕过节目更正") } catch {}
         let correctionMembers=try await dual.queueCorrectedRecordingUnderstanding(sourceID:programmeID,previousActionIDs:[dualTask.id])
         XCTAssertEqual(correctionMembers,[personalID])
+        let pendingCorrection = try await dual.pendingRecordingContextReview()
+        XCTAssertTrue(pendingCorrection.hasPendingGroup)
+        XCTAssertTrue(pendingCorrection.isTranscriptionCorrection)
+        XCTAssertEqual(pendingCorrection.sourceIDs, correctionMembers)
+        XCTAssertEqual(pendingCorrection.externalSourceIDBySource, [personalID: programmeID])
         let scopedRecordings = try await dual.recordingContextCatalog(sourceIDs: correctionMembers)
         XCTAssertEqual(Set(scopedRecordings.keys), [personalID, programmeID])
         do {
@@ -1346,7 +1351,7 @@ final class CoreFlowTests: XCTestCase {
         }
         // Explicit user correction is authoritative text; do not invent new
         // audio alignment or run an AI transcription correction over it.
-        try await dual.refreshCorrectedRecordingContexts(sourceIDs:correctionMembers)
+        try await dual.refreshCorrectedRecordingContexts(sourceIDs: pendingCorrection.sourceIDs)
         let refreshedPair = try await dual.recordingContext(sourceID: personalID)
         let revisedProgramme = try await dual.sourceRecord(id: programmeID)
         XCTAssertNotEqual(refreshedPair?.externalVersionID, programmeBefore.transcriptVersionID)
@@ -1367,6 +1372,9 @@ final class CoreFlowTests: XCTestCase {
         let repairedPersonal=try XCTUnwrap(repairedRecords.first { $0.id == personalID })
         XCTAssertNil(repairedPersonal.presentation?.correctedSourceIDs)
         XCTAssertNil(repairedPersonal.presentation?.correctedActionIDs)
+        let finishedCorrection = try await dual.pendingRecordingContextReview()
+        XCTAssertFalse(finishedCorrection.hasPendingGroup)
+        XCTAssertTrue(finishedCorrection.sourceIDs.isEmpty)
         let programmePolicy=try await dual.sourcePolicy(sourceID:programmeID)
         _ = try await dual.setSourceLocalOnly(sourceID:programmeID,expectedVersion:programmePolicy.version,localOnly:true)
         do { _ = try await dual.recordingContextSourceIDs(sourceIDs:[personalID]);XCTFail("撤回节目许可后不能继续发送上下文") } catch {}
@@ -1376,7 +1384,12 @@ final class CoreFlowTests: XCTestCase {
         _ = try await dual.setSourceLocalOnly(sourceID:programmeID,expectedVersion:revokedPolicy.version,localOnly:false)
         let dualRestoredMembers=try await dual.queueRecordingUnderstanding(sourceID:programmeID,previousActionIDs:[dualTask.id])
         XCTAssertEqual(dualRestoredMembers,[personalID])
-        try await dual.refreshCorrectedRecordingContexts(sourceIDs:dualRestoredMembers)
+        let restoredReview = try await dual.pendingRecordingContextReview()
+        XCTAssertTrue(restoredReview.hasPendingGroup)
+        XCTAssertFalse(restoredReview.isTranscriptionCorrection)
+        XCTAssertEqual(restoredReview.sourceIDs, dualRestoredMembers)
+        XCTAssertEqual(restoredReview.externalSourceIDBySource, [personalID: programmeID])
+        try await dual.refreshCorrectedRecordingContexts(sourceIDs: restoredReview.sourceIDs)
         let restoredGroups=try await dual.connectRecordingExpressions(using:fixture)
         let restoredGroup=try XCTUnwrap(restoredGroups.first)
         XCTAssertTrue(restoredGroup.previousActionIDs.contains(dualTask.id))

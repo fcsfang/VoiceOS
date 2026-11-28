@@ -2203,7 +2203,7 @@ final class ControlCenter: ObservableObject {
         resumedSavedRecordingExpressions=true
         do {
             try await store.enrollPreviouslyImportedAutomaticRecordings()
-            let corrected=try await store.sources().contains { $0.presentation?.correctedSourceIDs != nil }
+            let corrected = try await store.pendingRecordingContextReview().hasPendingGroup
             // A corrected programme deliberately invalidates the old pair. Repair
             // its saved versions before asking for fresh semantic grouping.
             let newInput=corrected ? nil : try await store.prepareRecordingExpressions()
@@ -2246,15 +2246,16 @@ final class ControlCenter: ObservableObject {
     }
     private func preparePendingCorrectedRecordingContexts() async throws {
         guard let store else { return }
-        let records=try await store.sources()
-        let ids=Set(records.flatMap { $0.presentation?.correctedSourceIDs ?? [] })
-        guard !ids.isEmpty else { return }
-        setFullRecordingStatus(records.contains(where: { ids.contains($0.id) && $0.presentation?.recordingUnderstandingIsCorrection == true }) ? "已保存原文更正，正在更新完整理解与关联…" : "正在按当前原文与许可，更新完整理解与关联…")
-        for id in ids.sorted() {
-            try await ensureTranscriptReviewed(sourceID:id)
-            if let pair=records.first(where: { $0.id == id })?.presentation?.recordingContext { try await ensureTranscriptReviewed(sourceID:pair.externalSourceID) }
+        let pending = try await store.pendingRecordingContextReview()
+        guard !pending.sourceIDs.isEmpty else { return }
+        setFullRecordingStatus(pending.isTranscriptionCorrection ? "已保存原文更正，正在更新完整理解与关联…" : "正在按当前原文与许可，更新完整理解与关联…")
+        for id in pending.sourceIDs {
+            try await ensureTranscriptReviewed(sourceID: id)
+            if let externalID = pending.externalSourceIDBySource[id] {
+                try await ensureTranscriptReviewed(sourceID: externalID)
+            }
         }
-        try await store.refreshCorrectedRecordingContexts(sourceIDs:Array(ids))
+        try await store.refreshCorrectedRecordingContexts(sourceIDs: pending.sourceIDs)
     }
     private func understandPendingRecordingExpressions(store:VoiceOSStore,speech:LocalQwenSpeechPort,grouping:ResponsesRecordingExpressionPort,modelEnvironment:[String:String],script:URL) async throws {
         let root=await store.root
