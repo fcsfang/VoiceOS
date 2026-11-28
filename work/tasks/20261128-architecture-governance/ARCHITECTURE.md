@@ -90,6 +90,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A48 · 已核对不收敛 | UserDefaults 有 30 个键、约 44 处访问，多数已由就近常量持有，少数键在同一文件重复字面量。 | 全局键注册表只是浅常量层，键值是持久化契约、值不会变，删除检验不支持；保留就近所有权。新键继续用 `voiceos.` 前缀并就近声明。 |
 | A49 · 已统一确定性 JSON 编码 | 26 个文件 33 处各自配置 `JSONEncoder` 的 sortedKeys 输出；讨论端口另带 iso8601 日期策略。 | 归一到 `StableJSON.makeEncoder()`（可选日期策略），`outputFormatting = [.sortedKeys]` 只允许出现在工厂内。pretty 与无斜杠转义等不同格式保留原处。 |
 | A50 · 已统一 ISO 8601 构造 | 60 处直接链式 `ISO8601DateFormatter()` 仍在各文件构造默认格式器；应用两处静态实例与模型提示的两处本地偏移格式器也各自构造。 | 直链迁到 `TimestampFormatting.iso`；提示语境改用新变体 `local(_:)`（带时区偏移，语义不同不并入 UTC 档）；删除两个 App 静态枚举；`ISO8601DateFormatter()` 只允许在 `TimestampFormatting.swift` 的机器检查。 |
+| A51 · 已统一日键格式 | `"yyyy-MM-dd"` 在 9 个文件手写 `DateFormatter`（POSIX、日历与时区组合各不相同），且每次调用新建格式器。 | 归一到按日历与时区缓存的 `TimestampFormatting.dayString/dayDate`；调用方显式传原有日历与时区，输出不变；`"yyyy-MM-dd"` 只允许权威文件。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -189,6 +190,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A49 33 处 sortedKeys 配置分散在 26 个文件，配置知识完全重复。抽出 `StableJSON.makeEncoder(dateEncodingStrategy:)` 后，调用方只声明需要的编码器；带 pretty、无斜杠转义或动态 pretty 的四处格式不同，保留原实现。编码字节不变，身份与回执无需迁移。
 
 - A50 复核 A13 的时区探针只比较了默认与 GMT 两种 UTC 写法；非 UTC 时区会把偏移写进输出（`+08:00`），所以模型提示里的本地墙钟时间是独立语义，不能并入 UTC 档。60 处默认格式器直链迁到 `TimestampFormatting.iso`（同为 `Z` 输出），提示语境改用显式变体 `local(_:)`；两个 App 静态解析实例删除。至此 `ISO8601DateFormatter()` 的构造只出现在权威文件一处，由机器检查保证。
+
+- A51 日键格式的差异只在日历、时区与 locale 组合，输出规则本身相同。`dayKey` 静态格式器改为缓存工厂的第一个用户，新增 `dayString/dayDate` 按「日历标识|时区标识」缓存；九处调用方显式传入原有日历与时区，因此输出逐字节不变，同时消除了每次调用新建 `DateFormatter` 的开销。`"yyyy-MM-dd"` 进入机器检查。
 
 ## 待确认的兼容性取舍
 

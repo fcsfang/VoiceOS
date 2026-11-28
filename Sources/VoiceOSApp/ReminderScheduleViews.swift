@@ -27,9 +27,7 @@ struct ActionScheduleEditor: View {
             case .none: initialMode = "none"
             case let .dateOnly(text, identifier):
                 zone = identifier.flatMap(TimeZone.init(identifier:)) ?? zone
-                let formatter = DateFormatter(); formatter.calendar = Calendar(identifier: .gregorian)
-                formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = zone; formatter.dateFormat = "yyyy-MM-dd"
-                initialDate = formatter.date(from: text) ?? initialDate
+                initialDate = TimestampFormatting.dayDate(text, timeZone: zone, calendar: Calendar(identifier: .gregorian)) ?? initialDate
             case let .instant(utc, identifier):
                 zone = TimeZone(identifier: identifier) ?? zone
                 initialDate = TimestampFormatting.isoFractional.date(from: utc) ?? initialDate; initialMode = "time"

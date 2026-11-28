@@ -37,10 +37,8 @@ public struct ReminderFields: Codable, Sendable, Equatable {
         let day = calendar.startOfDay(for: instant)
         // The user's spoken day ends at 04:00; retain the actual recording timestamp separately.
         let anchor = calendar.component(.hour, from: instant) < 4 ? calendar.date(byAdding: .day, value: -1, to: day)! : day
-        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = zone; formatter.dateFormat = "yyyy-MM-dd"
         return Dictionary(uniqueKeysWithValues: [("前天", -2), ("昨天", -1), ("今天", 0), ("今日", 0), ("今晚", 0), ("明天", 1), ("明早", 1), ("明晚", 1), ("后天", 2), ("大后天", 3)].map {
-            ($0.0, formatter.string(from: calendar.date(byAdding: .day, value: $0.1, to: anchor)!))
+            ($0.0, TimestampFormatting.dayString(calendar.date(byAdding: .day, value: $0.1, to: anchor)!, timeZone: zone))
         })
     }
     public func validate(allowingAlertsWithoutDue: Bool = false) throws {

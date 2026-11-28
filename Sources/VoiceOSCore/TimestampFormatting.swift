@@ -22,14 +22,30 @@ public enum TimestampFormatting {
         formatter.timeZone = timeZone
         return formatter.string(from: date)
     }
-    public static let dayKey: DateFormatter = {
+    public static let dayKey: DateFormatter = dayFormatter(timeZone: .current, calendar: Calendar(identifier: .gregorian))
+    private static let dayFormatters = NSCache<NSString, DateFormatter>()
+    /// Day-key strings ("yyyy-MM-dd") for a given zone and calendar. One
+    /// implementation serves scheduling, monitoring and reminder dates; the
+    /// formatter is cached per zone and calendar identifier.
+    public static func dayString(_ date: Date, timeZone: TimeZone = .current,
+                                 calendar: Calendar = .current) -> String {
+        dayFormatter(timeZone: timeZone, calendar: calendar).string(from: date)
+    }
+    public static func dayDate(_ text: String, timeZone: TimeZone = .current,
+                               calendar: Calendar = .current) -> Date? {
+        dayFormatter(timeZone: timeZone, calendar: calendar).date(from: text)
+    }
+    private static func dayFormatter(timeZone: TimeZone, calendar: Calendar) -> DateFormatter {
+        let key = "\(calendar.identifier)|\(timeZone.identifier)" as NSString
+        if let cached = dayFormatters.object(forKey: key) { return cached }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .current
+        formatter.calendar = calendar
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
+        dayFormatters.setObject(formatter, forKey: key)
         return formatter
-    }()
+    }
     public static func parse(_ text: String) -> Date? {
         isoFractional.date(from: text) ?? iso.date(from: text)
     }

@@ -41,11 +41,6 @@ private enum ActionDateFormatting {
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
-    static let dayOnly: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
 }
 
 struct WorkspaceDeliveryView: View {
@@ -1497,10 +1492,7 @@ struct WorkspaceTaskView: View {
         case let .dateOnly(localDate, zone):
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = zone.flatMap(TimeZone.init(identifier:)) ?? .current
-            let formatter = ActionDateFormatting.dayOnly
-            formatter.calendar = calendar
-            formatter.timeZone = calendar.timeZone
-            return localDate < formatter.string(from: Date())
+            return localDate < TimestampFormatting.dayString(Date(), timeZone: calendar.timeZone, calendar: calendar)
         }
     }
 }

@@ -25,12 +25,7 @@ public enum RecurrencePeriod: String, Codable, Sendable, CaseIterable, Equatable
         let parts = localDate.split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
         guard parts.count == 3, let start = calendar.date(from: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: parts[0], month: parts[1], day: parts[2], hour: 12)),
               let next = period.advanced(start, calendar: calendar) else { return localDate }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: next)
+        return TimestampFormatting.dayString(next, timeZone: calendar.timeZone, calendar: Calendar(identifier: .gregorian))
     }
 }
 
