@@ -67,12 +67,19 @@ extension CoreFlowTests {
         let id = try await dictation(store)
         try await store.processTranscriptions(using: SilentSpeech())
         try await store.retryTranscription(sourceID: id)
+        let other = try await dictation(store)
         let text = "重新转写得到的文字。"
-        try await store.processTranscriptions(using: SpeakingSpeech(text: text))
+        try await store.processTranscriptions(using: SpeakingSpeech(text: text), sourceIDs: [])
+        let stillQueued = try await sourceRecord(store, id: id)
+        XCTAssertEqual(stillQueued.jobState, "queued")
+        try await store.processTranscriptions(using: SpeakingSpeech(text: text), sourceIDs: [id, id])
         let record = try await sourceRecord(store, id: id)
+        let unrelated = try await sourceRecord(store, id: other)
         XCTAssertEqual(record.jobState, "completed")
         XCTAssertEqual(record.transcript, text)
         XCTAssertFalse(record.needsEmptyTranscriptionReview)
+        XCTAssertEqual(unrelated.jobState, "queued")
+        XCTAssertNil(unrelated.transcript)
     }
 
     func testHistoricalCompletedEmptyTranscriptIsIdentifiedAndReplaced() async throws {

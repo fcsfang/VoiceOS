@@ -357,12 +357,16 @@ public actor VoiceOSStore {
         guard ready, !processing else { return }
         let backend = speech.backendIdentity
         guard !backend.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, backend.utf8.count <= 160, !backend.contains("\n"), !backend.contains("\r") else { throw VoiceOSError("转写端口身份无效") }
+        guard sourceIDs?.isEmpty != true else { return }
+        let scope = sourceIDs == nil ? "" : " AND j.source_id IN (SELECT value FROM json_each(?))"
+        let bindings = try sourceIDs.map { [try Self.relevanceJSON($0)] } ?? []
         processing = true
         defer { processing = false }
         while let row = try db.query("""
-        SELECT j.*,s.asset_id,s.relative_path FROM jobs j JOIN sources s ON s.id=j.source_id
-        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id ORDER BY s.created_at
-        """).first(where: { sourceIDs?.contains($0["source_id"]!) ?? true }) {
+        SELECT j.id,j.source_id,j.input_version_id,s.asset_id FROM jobs j JOIN sources s ON s.id=j.source_id
+        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id\(scope)
+        ORDER BY s.created_at,j.rowid LIMIT 1
+        """, bindings).first {
             let job = row["id"]!; let source = row["source_id"]!; let lease = UUID().uuidString
             try db.execute("UPDATE jobs SET state='running',config=?,lease_token=?,attempts=attempts+1 WHERE id=?", [backend,lease,job])
             do {
