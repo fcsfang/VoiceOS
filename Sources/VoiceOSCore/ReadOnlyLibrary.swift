@@ -111,6 +111,32 @@ public struct ReadOnlyActionDetail: Codable, Sendable, Equatable {
     public let feedback: [ReadOnlyFeedback]?
     public let source: ReadOnlySource?
     public let topics: [ReadOnlyTopic]?
+    fileprivate init(summary: ReadOnlyActionRow, note: String?, schedule: ReadOnlySchedule?,
+                     reminder: ReadOnlyReminder?, revisions: [ReadOnlyRevision], feedback: [ReadOnlyFeedback]?,
+                     source: ReadOnlySource?, topics: [ReadOnlyTopic]?) {
+        id = summary.id
+        title = summary.title
+        kind = summary.kind
+        state = summary.state
+        validity = summary.validity
+        nature = summary.nature
+        version = summary.version
+        parentID = summary.parentID
+        createdAt = summary.createdAt
+        completedAt = summary.completedAt
+        feedbackCount = summary.feedbackCount
+        lastFeedbackAt = summary.lastFeedbackAt
+        sourceTitle = summary.sourceTitle
+        reminderState = summary.reminderState
+        due = summary.due
+        self.note = note
+        self.schedule = schedule
+        self.reminder = reminder
+        self.revisions = revisions
+        self.feedback = feedback
+        self.source = source
+        self.topics = topics
+    }
 }
 
 public struct ReadOnlyStatus: Codable, Sendable, Equatable {
@@ -165,48 +191,27 @@ public struct ReadOnlyLibrary {
         if let kind { conditions.append("a.kind=?"); arguments.append(kind) }
         arguments.append(String(max(1, min(limit, 1000))))
         arguments.append(String(max(0, offset)))
-        let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+        let filter = conditions.joined(separator: " AND ")
         let rows = try connection.query("""
-        SELECT a.id,COALESCE(a.edited_title,a.title) AS title,a.kind,a.state,a.validity,a.nature,a.version,a.parent_id,a.created_at,
-         (SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at,
-         (SELECT COUNT(*) FROM action_feedback f WHERE f.action_id=a.id) AS feedback_count,
-         (SELECT MAX(f.created_at) FROM action_feedback f WHERE f.action_id=a.id) AS last_feedback_at,
-         c.refs_json AS claim_refs,
-         (SELECT l.state FROM reminder_links l WHERE l.action_id=a.id) AS reminder_state
-        FROM actions a JOIN claims c ON c.id=a.claim_id
-        \(whereClause) ORDER BY a.created_at,a.id LIMIT ? OFFSET ?
+        SELECT \(Self.actionColumns)
+        \(Self.actionTables)
+        WHERE \(filter) ORDER BY a.created_at,a.id LIMIT ? OFFSET ?
         """, arguments)
         return try rows.map { row in
-            let actionID = row["id"] ?? ""
             let source = try sourceRecord(refsJSON: row["claim_refs"])
-            return ReadOnlyActionRow(id: actionID,
-                                     title: row["title"] ?? "",
-                                     kind: row["kind"] ?? "",
-                                     state: row["state"] ?? "",
-                                     validity: row["validity"] ?? "",
-                                     nature: row["nature"] ?? "unknown",
-                                     version: Int(row["version"] ?? "1") ?? 1,
-                                     parentID: row["parent_id"],
-                                     createdAt: row["created_at"] ?? "",
-                                     completedAt: row["completed_at"],
-                                     feedbackCount: Int(row["feedback_count"] ?? "0") ?? 0,
-                                     lastFeedbackAt: row["last_feedback_at"],
-                                     sourceTitle: source?.title,
-                                     reminderState: row["reminder_state"],
-                                     due: try resolvedDue(actionID: actionID))
+            return Self.actionSummary(row, sourceTitle: source?.title, now: Date())
         }
     }
 
     public func action(id: String, includeFeedback: Bool = false, includeFeedbackText: Bool = false,
                        includeNote: Bool = false, includeTopics: Bool = false) throws -> ReadOnlyActionDetail? {
+        let noteColumn = includeNote ? ",COALESCE(a.edited_note,a.note) AS note" : ""
         guard let row = try connection.query("""
-        SELECT a.id,COALESCE(a.edited_title,a.title) AS title,a.kind,a.state,a.validity,a.nature,a.version,a.parent_id,a.created_at,COALESCE(a.edited_note,a.note) AS note,
-         (SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at,
-         (SELECT COUNT(*) FROM action_feedback f WHERE f.action_id=a.id) AS feedback_count,
-         (SELECT MAX(f.created_at) FROM action_feedback f WHERE f.action_id=a.id) AS last_feedback_at,
-         c.refs_json AS claim_refs,
-         (SELECT l.state FROM reminder_links l WHERE l.action_id=a.id) AS reminder_state
-        FROM actions a JOIN claims c ON c.id=a.claim_id WHERE a.id=? AND a.removed=0
+        SELECT \(Self.actionColumns),s.authority,s.actor,s.raw_expression,s.anchor_event_time,s.anchor_time_zone,
+               s.validity AS schedule_validity,o.completed AS reminder_completed,o.created_at AS reminder_observed_at
+               \(noteColumn)
+        \(Self.actionTables)
+        WHERE a.id=? AND a.removed=0
         """, [id]).first else { return nil }
         let revisions = try connection.query("""
         SELECT version,state,actor,created_at FROM action_revisions WHERE action_id=? ORDER BY version DESC
@@ -215,28 +220,61 @@ public struct ReadOnlyLibrary {
                              actor: $0["actor"] ?? "", createdAt: $0["created_at"] ?? "")
         }
         let source = try sourceRecord(refsJSON: row["claim_refs"])
-        return ReadOnlyActionDetail(id: id,
-                                    title: row["title"] ?? "",
-                                    kind: row["kind"] ?? "",
-                                    state: row["state"] ?? "",
-                                    validity: row["validity"] ?? "",
-                                    nature: row["nature"] ?? "unknown",
-                                    version: Int(row["version"] ?? "1") ?? 1,
-                                    parentID: row["parent_id"],
-                                    createdAt: row["created_at"] ?? "",
-                                    completedAt: row["completed_at"],
-                                    feedbackCount: Int(row["feedback_count"] ?? "0") ?? 0,
-                                    lastFeedbackAt: row["last_feedback_at"],
-                                    sourceTitle: source?.title,
-                                    reminderState: row["reminder_state"],
-                                    due: try resolvedDue(actionID: id),
-                                    note: includeNote ? row["note"] : nil,
-                                    schedule: try scheduleRecord(actionID: id),
-                                    reminder: try reminderRecord(actionID: id),
+        let now = Date()
+        let summary = Self.actionSummary(row, sourceTitle: source?.title, now: now)
+        let schedule = row["schedule_version"].map { version in
+            ReadOnlySchedule(version: Int(version) ?? 0, due: summary.due,
+                             authority: row["authority"] ?? "", actor: row["actor"] ?? "",
+                             rawExpression: row["raw_expression"] ?? "", anchorEventTime: row["anchor_event_time"] ?? "",
+                             anchorTimeZone: row["anchor_time_zone"] ?? "", validity: row["schedule_validity"] ?? "")
+        }
+        let reminder = row["reminder_state"].map { state in
+            ReadOnlyReminder(state: state, completed: row["reminder_completed"].map { $0 == "1" },
+                             observedAt: row["reminder_observed_at"],
+                             due: schedule == nil ? summary.due :
+                                Self.dueValue(json: row["reminder_due_json"], source: "reminderObservation", now: now))
+        }
+        return ReadOnlyActionDetail(summary: summary, note: row["note"], schedule: schedule, reminder: reminder,
                                     revisions: revisions,
                                     feedback: includeFeedback ? try feedbackRecords(actionID: id, includeText: includeFeedbackText) : nil,
-                                    source: source,
-                                    topics: includeTopics ? try topicRecords(actionID: id) : nil)
+                                    source: source, topics: includeTopics ? topicRecords(actionID: id) : nil)
+    }
+
+    private static let actionColumns = """
+    a.id,COALESCE(a.edited_title,a.title) AS title,a.kind,a.state,a.validity,a.nature,a.version,a.parent_id,a.created_at,
+    (SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at,
+    (SELECT COUNT(*) FROM action_feedback f WHERE f.action_id=a.id) AS feedback_count,
+    (SELECT MAX(f.created_at) FROM action_feedback f WHERE f.action_id=a.id) AS last_feedback_at,
+    c.refs_json AS claim_refs,l.state AS reminder_state,s.schedule_version,s.due_json AS local_due_json,
+    t.due_json AS reminder_due_json
+    """
+
+    private static let actionTables = """
+    FROM actions a JOIN claims c ON c.id=a.claim_id
+    LEFT JOIN action_schedule_intents s ON s.id=(
+        SELECT id FROM action_schedule_intents WHERE action_id=a.id AND validity='current'
+        ORDER BY schedule_version DESC LIMIT 1
+    )
+    LEFT JOIN reminder_links l ON l.action_id=a.id
+    LEFT JOIN reminder_observations o ON o.id=(
+        SELECT id FROM reminder_observations WHERE link_id=l.id ORDER BY sequence DESC LIMIT 1
+    )
+    LEFT JOIN reminder_time_observations t ON t.id=o.id
+    """
+
+    private static func actionSummary(_ row: [String: String], sourceTitle: String?, now: Date) -> ReadOnlyActionRow {
+        // A current schedule is authoritative even when its due date is explicitly absent.
+        // This CLI continues to expose the latest reminder observation regardless of link state.
+        let due = row["schedule_version"] != nil
+            ? dueValue(json: row["local_due_json"], source: "localSchedule", now: now)
+            : dueValue(json: row["reminder_due_json"], source: "reminderObservation", now: now)
+        return ReadOnlyActionRow(id: row["id"] ?? "", title: row["title"] ?? "", kind: row["kind"] ?? "",
+                                 state: row["state"] ?? "", validity: row["validity"] ?? "",
+                                 nature: row["nature"] ?? "unknown", version: Int(row["version"] ?? "1") ?? 1,
+                                 parentID: row["parent_id"], createdAt: row["created_at"] ?? "",
+                                 completedAt: row["completed_at"], feedbackCount: Int(row["feedback_count"] ?? "0") ?? 0,
+                                 lastFeedbackAt: row["last_feedback_at"], sourceTitle: sourceTitle,
+                                 reminderState: row["reminder_state"], due: due)
     }
 
     public func status() throws -> ReadOnlyStatus {
@@ -263,63 +301,11 @@ public struct ReadOnlyLibrary {
                               topics: try count("SELECT COUNT(*) AS n FROM reflection_questions"))
     }
 
-    // Mirrors ActionTimeSurface: the newest current local schedule wins even
-    // when it has no date; only an action without one reads its newest
-    // reminder observation, and `.none` never counts as a date.
-    private func resolvedDue(actionID: String, now: Date = Date()) throws -> ReadOnlyDue? {
-        if let schedule = try scheduleRow(actionID: actionID) {
-            return Self.dueValue(json: schedule["due_json"], source: "localSchedule", now: now)
-        }
-        let observation = try connection.query("""
-        SELECT t.due_json FROM reminder_observations o
-        JOIN reminder_links l ON l.id=o.link_id
-        LEFT JOIN reminder_time_observations t ON t.id=o.id
-        WHERE l.action_id=? ORDER BY o.sequence DESC LIMIT 1
-        """, [actionID]).first
-        return Self.dueValue(json: observation?["due_json"], source: "reminderObservation", now: now)
-    }
-
-    private func scheduleRow(actionID: String) throws -> [String: String]? {
-        try connection.query("""
-        SELECT schedule_version,due_json,authority,actor,raw_expression,anchor_event_time,anchor_time_zone,validity
-        FROM action_schedule_intents WHERE action_id=? AND validity='current'
-        ORDER BY schedule_version DESC LIMIT 1
-        """, [actionID]).first
-    }
-
-    private func scheduleRecord(actionID: String, now: Date = Date()) throws -> ReadOnlySchedule? {
-        guard let row = try scheduleRow(actionID: actionID) else { return nil }
-        return ReadOnlySchedule(version: Int(row["schedule_version"] ?? "0") ?? 0,
-                                due: Self.dueValue(json: row["due_json"], source: "localSchedule", now: now),
-                                authority: row["authority"] ?? "",
-                                actor: row["actor"] ?? "",
-                                rawExpression: row["raw_expression"] ?? "",
-                                anchorEventTime: row["anchor_event_time"] ?? "",
-                                anchorTimeZone: row["anchor_time_zone"] ?? "",
-                                validity: row["validity"] ?? "")
-    }
-
-    private func reminderRecord(actionID: String, now: Date = Date()) throws -> ReadOnlyReminder? {
-        guard let link = try connection.query("SELECT state FROM reminder_links WHERE action_id=?", [actionID]).first else {
-            return nil
-        }
-        let observation = try connection.query("""
-        SELECT o.completed,o.created_at,t.due_json FROM reminder_observations o
-        LEFT JOIN reminder_time_observations t ON t.id=o.id
-        WHERE o.link_id=(SELECT id FROM reminder_links WHERE action_id=?)
-        ORDER BY o.sequence DESC LIMIT 1
-        """, [actionID]).first
-        return ReadOnlyReminder(state: link["state"] ?? "",
-                                completed: observation?["completed"].map { $0 == "1" },
-                                observedAt: observation?["created_at"],
-                                due: Self.dueValue(json: observation?["due_json"], source: "reminderObservation", now: now))
-    }
-
     // LEFT JOINs: a feedback row without a current transcript must still list,
     // and its text stays out of the default output.
     private func feedbackRecords(actionID: String, includeText: Bool) throws -> [ReadOnlyFeedback] {
         let rows = try connection.query("""
-        SELECT f.id,f.kind,f.created_at,s.feedback_json,v.text
+        SELECT f.id,f.kind,f.created_at,s.feedback_json\(includeText ? ",v.text" : "")
         FROM action_feedback f JOIN sources s ON s.id=f.source_id
         LEFT JOIN transcripts t ON t.source_id=s.id
         LEFT JOIN transcript_versions v ON v.id=t.current_version_id
@@ -331,7 +317,7 @@ public struct ReadOnlyLibrary {
             return ReadOnlyFeedback(id: row["id"] ?? "", kind: kind,
                                     label: ActionFeedbackLabel.text(relation: relation, kind: kind),
                                     createdAt: row["created_at"] ?? "",
-                                    text: includeText ? row["text"] : nil)
+                                    text: row["text"])
         }
     }
 
