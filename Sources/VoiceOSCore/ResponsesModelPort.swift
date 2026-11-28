@@ -204,9 +204,7 @@ public struct ResponsesModelPort: ModelPort {
         return try Self.parse(reply.body, requireContentKind: true)
     }
     func makeRequest(_ request: ModelRequest) throws -> URLRequest {
-        guard request.configuration.provider == configuration.provider, request.configuration.model == configuration.model,
-              request.configuration.promptVersion == configuration.promptVersion, request.configuration.schemaVersion == configuration.schemaVersion,
-              request.configuration.destination == .cloud, !request.context.sources.isEmpty,
+        guard configuration.accepts(request.configuration), !request.context.sources.isEmpty,
               request.context.sources.allSatisfy({ !$0.localOnly }),
               request.context.scalarBudget > 0,
               request.context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= request.context.scalarBudget else {

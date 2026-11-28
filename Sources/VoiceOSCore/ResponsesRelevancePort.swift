@@ -19,9 +19,7 @@ public struct ResponsesRelevancePort: RelevanceModelPort {
     }
     func makeRequest(_ request: RelevanceModelRequest) throws -> URLRequest {
         let s = request.snapshot, c = request.configuration
-        guard c.provider == configuration.provider, c.model == configuration.model,
-              c.promptVersion == configuration.promptVersion, c.schemaVersion == configuration.schemaVersion,
-              c.destination == .cloud, s.destination == .cloud, s.cloudQueryAllowed,
+        guard configuration.accepts(c), s.destination == .cloud, s.cloudQueryAllowed,
               UUID(uuidString: s.id) != nil, !s.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               s.query.unicodeScalars.count <= 512, (1...8).contains(s.candidates.count),
               Set(s.candidates.map(\.id)).count == s.candidates.count,

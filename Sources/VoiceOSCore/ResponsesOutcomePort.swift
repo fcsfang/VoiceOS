@@ -18,7 +18,7 @@ public struct ResponsesOutcomePort:ConversationOutcomePort {
     }
     func makeRequest(_ request:ConversationOutcomeRequest) throws -> URLRequest {
         let s=request.snapshot,c=request.configuration
-        guard c.provider == configuration.provider,c.model == configuration.model,c.promptVersion == configuration.promptVersion,c.schemaVersion == configuration.schemaVersion,c.destination == .cloud,
+        guard configuration.accepts(c),
               UUID(uuidString:request.attemptID) != nil,s.input.destination == .cloud,s.sessionState == "ended",!s.input.userTurns.isEmpty,
               s.input.conversationVersion == s.input.userTurns.count+2,!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
               let plan=s.reusePlan,plan.conversationID == s.input.conversationID,plan.conversationVersion == s.input.conversationVersion,

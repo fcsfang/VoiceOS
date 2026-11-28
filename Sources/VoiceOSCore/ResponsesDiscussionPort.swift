@@ -18,8 +18,7 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
     }
     func makeRequest(_ request:DiscussionModelRequest) throws -> URLRequest {
         let s=request.snapshot,c=request.configuration
-        guard c.provider == configuration.provider,c.model == configuration.model,c.promptVersion == configuration.promptVersion,c.schemaVersion == configuration.schemaVersion,
-              c.destination == .cloud,s.input.destination == .cloud,UUID(uuidString:request.attemptID) != nil,
+        guard configuration.accepts(c),s.input.destination == .cloud,UUID(uuidString:request.attemptID) != nil,
               !s.input.userTurns.isEmpty,s.input.conversationVersion == s.input.userTurns.count+1,
               s.context.scalarBudget > 0,!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
               Set(s.context.sources.map(\.sourceID)).count == s.context.sources.count else { throw ModelPortFailure.rejected("讨论请求身份、授权或预算不符") }

@@ -19,8 +19,7 @@ public struct ResponsesExpressionAssociationPort: ExpressionAssociationPort {
     func makeRequest(_ request: ExpressionAssociationRequest) throws -> URLRequest {
         let s = request.snapshot, c = request.configuration
         guard UUID(uuidString: request.attemptID) != nil, s.destination == .cloud, !s.candidates.isEmpty,
-              c.destination == .cloud, c.provider == configuration.provider, c.model == configuration.model,
-              c.promptVersion == configuration.promptVersion, c.schemaVersion == configuration.schemaVersion else { throw ModelPortFailure.rejected("关联请求身份或目的地不符") }
+              configuration.accepts(c) else { throw ModelPortFailure.rejected("关联请求身份或目的地不符") }
         try VoiceOSStore.validateExpressionAssociationProposals([], snapshot: s)
         let source = s.current.sources[0]
         let current: [String: Any] = ["sourceID": source.sourceID, "transcriptVersionID": source.transcriptVersionID, "origin": source.origin, "speaker": source.speaker, "text": source.text, "spans": source.spans.map { ["spanID": $0.id, "textStart": $0.textStart, "textEnd": $0.textEnd] as [String: Any] }]

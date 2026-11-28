@@ -53,6 +53,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A11 · 已统一行动时间与只读投影 | 部分搜索、外部 CLI、工作区和详情各自读取行动与材料；日期、展示标题和有效性已部分有共享解析。只读 CLI 的列表与详情曾各自重复行动 SQL、到期/计划/提醒查询。 | 从同一个材料或行动沿正常入口核对重复投影，避免把分页与轻量快照强行合并。CLI 列表与详情共用一份投影，隐私字段按需投影。unknown 链接语义待确认。 |
 | A12 · 已核对入口分工并加钥匙串边界检查 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 已确认一个打包入口（`build.py` 内联运行 `check_architecture.py`），预览启动器与重启闸门各司其职，未发现重复打包路径。新增 SecItem 只允许在 `KeychainCredential` 与 `NoteHistoryMemory` 的机器检查。 |
 | A13 · 已统一时间戳格式与解析 | 分数秒 ISO 8601 格式器在 17 个文件手写构造；`ActionTimeFormatting`、`ActionDateFormatting`、`MaterialNaming`、`ReminderSchedule`、`ReminderFields`、`MonitorSourceConfig` 各有一套时间戳实现。 | 归一为 `TimestampFormatting`（fractional/plain/parse/dayKey），迁移全部调用方并删除旧载体；`check_architecture.py` 限制 `formatOptions` 只在权威文件出现。真实副本 553 条列表与完整详情 JSON 逐字一致。 |
+| A14 · 已统一端口身份校验 | 六个 Responses 端口各自比较 provider/model/promptVersion/schemaVersion 与 destination，同一规则六份实现。 | 归一到 `ModelConfiguration.accepts(_:)`；端口自有身份与请求身份都必须是云端且四字段一致。错误文案与各端口的其余校验保持原样。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -136,6 +137,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A08 抽查了两个最像重复的测试文件，确认场景不同、共享的只是样板；三处 makeStore 各五行的样板合并会引入跨套件依赖，按删除检验不值得。测试层的重复不再收敛，覆盖差异改由上方覆盖表记录。
 
 - A13 用探针确认 `withInternetDateTime` 输出不受 `timeZone` 设置影响、分数秒格式不解析无分数时间戳，再归一为单一 `TimestampFormatting`：格式按分数秒与纯秒两档，解析按分数秒→纯秒回退（与原 `MaterialNaming`/`ReflectionTimeline` 的宽容解析一致，`ReminderFields.date` 保持分数秒严格语义）。删除 `ActionTimeFormatting`、`ActionDateFormatting` 的 ISO 对、`MaterialNaming` 静态对、`ReminderSchedule.instantFormatter` 等五套载体，17 个文件净删 69 行。真实副本列表与完整详情 JSON 逐字一致。
+
+- A14 六个端口的身份校验比较过保留、抽自由函数、放到 `ModelConfiguration` 上。采用方法形式，因为规则读的是两个配置值的全部身份字段，且端口配置都由云端目的地构造；`accepts` 同时表达「双方都面向云端」，调用方只保留各自其余校验与错误文案。
 
 ## 待确认的兼容性取舍
 

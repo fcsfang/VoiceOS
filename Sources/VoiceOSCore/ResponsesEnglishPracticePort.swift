@@ -39,9 +39,7 @@ public struct ResponsesEnglishPracticePort: EnglishPracticeModelPort {
         let s = request.snapshot
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let sourceDigest = try VoiceOSStore.relevanceHash(encoder.encode(s.context.sources))
-        guard request.configuration.provider == configuration.provider, request.configuration.model == configuration.model,
-              request.configuration.promptVersion == configuration.promptVersion, request.configuration.schemaVersion == configuration.schemaVersion,
-              request.configuration.destination == .cloud, s.destination == .cloud, UUID(uuidString: request.attemptID) != nil,
+        guard configuration.accepts(request.configuration), s.destination == .cloud, UUID(uuidString: request.attemptID) != nil,
               s.context.sources.map(\.sourceID) == [s.currentSourceID] + s.priorSourceIDs,
               s.context.sources.allSatisfy({ $0.origin == "user" && $0.speaker == "user" && !$0.localOnly }),
               s.context.contentDigest == sourceDigest else {

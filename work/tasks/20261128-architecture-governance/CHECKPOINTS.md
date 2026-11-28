@@ -97,3 +97,9 @@
 - 完成：A13 时间戳归一。新增 `TimestampFormatting`（fractional/plain/parse/dayKey），迁移 17 个文件的全部调用方，删除 5 套旧载体（净删 69 行）；`check_architecture.py` 新增 formatOptions 边界规则。
 - 证据：592 项 Swift 测试通过；边界检查 0 违规；真实副本 553 条列表与完整详情 JSON 与改前逐字一致。
 - 下一步：第二轮扫描继续（UI 间距与图标尺寸待先定规则，列为待确认）。
+
+## 2026-11-28T04:13:26Z
+
+- 完成：A14 端口身份校验归一。`ModelConfiguration.accepts(_:)` 表达「四字段一致且双方面向云端」，替换六个端口的重复校验。
+- 证据：592 项 Swift 测试通过；边界检查 0 违规；无 `== configuration.provider` 残留。
+- 下一步：第二轮扫描继续。
