@@ -313,13 +313,7 @@ public struct MessageMonitorRunner: Sendable {
         return config
     }
 
-    static func dateKey(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
-    }
+    static func dateKey(_ date: Date) -> String { TimestampFormatting.dayString(date) }
 
     static func isoString(_ date: Date) -> String { TimestampFormatting.iso.string(from: date) }
 

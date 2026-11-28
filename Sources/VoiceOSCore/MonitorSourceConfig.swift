@@ -73,11 +73,7 @@ public enum MonitorSourceConfigParser {
     }
 
     public static func dayString(_ date: Date, calendar: Calendar = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        TimestampFormatting.dayString(date, timeZone: calendar.timeZone)
     }
 
     public static func timestampString(_ date: Date) -> String { TimestampFormatting.iso.string(from: date) }
@@ -85,11 +81,10 @@ public enum MonitorSourceConfigParser {
     public static func parseStart(_ text: String?, calendar: Calendar = .current) -> Date? {
         guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         if let date = TimestampFormatting.iso.date(from: text) { return date }
+        if let date = TimestampFormatting.dayDate(text, timeZone: calendar.timeZone) { return date }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        if let date = formatter.date(from: text) { return date }
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter.date(from: text)
     }

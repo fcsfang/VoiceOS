@@ -29,11 +29,7 @@ public struct MonitorScheduleDecision: Sendable, Equatable {
 /// touches QQ, the network or the model, so a ten-minute check stays cheap.
 public enum MonitorSchedule {
     public static func dateKey(_ date: Date, calendar: Calendar = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        TimestampFormatting.dayString(date, timeZone: calendar.timeZone)
     }
 
     public static func runTimeToday(now: Date, settings: MonitorScheduleSettings, calendar: Calendar = .current) -> Date? {

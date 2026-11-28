@@ -28,8 +28,7 @@ struct ReminderSettingsView: View {
         return calendar
     }
     private var dateOnlyDue: ReminderDueDate {
-        let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = zone
-        let day = formatter.string(from: due)
+        let day = TimestampFormatting.dayString(due, timeZone: zone)
         if case let .dateOnly(originalDay, originalZone) = snapshot.fields?.due, originalDay == day {
             return .dateOnly(localDate: day, timeZone: originalZone)
         }
@@ -163,8 +162,7 @@ struct ReminderSettingsView: View {
         switch fields.due {
         case .none: break
         case let .dateOnly(text, _):
-            let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = zone
-            if let date = formatter.date(from: text) { due = date; hasDate = true }
+            if let date = TimestampFormatting.dayDate(text, timeZone: zone) { due = date; hasDate = true }
         case let .instant(utc, _):
             if let date = ReminderFields.date(utc) { due = date; hasDate = true; hasTime = true }
         }
