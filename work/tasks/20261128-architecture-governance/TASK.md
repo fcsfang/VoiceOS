@@ -22,11 +22,11 @@ owner: codex
 
 ## 当前状态
 
-存储、模型请求与配置、工作区快照、界面、行动日期、只读 CLI 投影及错误渠道已形成十一个独立提交，留在架构治理分支。全库治理仍在进行，待核对的模块与下一步见架构任务池。
+存储、模型请求与配置、工作区快照、界面、行动日期、只读 CLI 投影、错误渠道及凭据存储已形成十二个独立提交，留在架构治理分支。全库治理仍在进行，待核对的模块与下一步见架构任务池。
 
 ## 下一步
 
-推进 A09：盘点 Apple 权限、云端文字处理许可、模型密钥、记忆身份与消息凭据的写端、读端与恢复入口，只统一实现方式相同的能力；涉及保存范围或默认许可的变更单列待确认。
+推进 A12：核对构建、验证与运维入口的重叠（SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli`、重启脚本），保持一个产品打包入口，按执行路径找重叠；随后做 A08 的测试与验证入口收敛。
 
 ## 验证
 
@@ -53,3 +53,5 @@ A11 到期时间：592 项 Swift 测试通过。应用及 CLI 共享日期解析
 A11 投影：592 项 Swift 测试通过。同一真实副本上，改前与改后的 `voiceos-cli actions list`（553 条）和 `actions show` 详情（含 `--include-note/--include-feedback/--include-feedback-text/--topics`）JSON 逐字一致；不带隐私开关的详情不含 note 与 feedback 字段，反馈正文只在请求时投影。证据在 /tmp/voiceos-gov-a11.M4US9H。
 
 A10 错误渠道：592 项 Swift 测试通过。五类输出渠道与三类重试语义已成图（见 ARCHITECTURE.md），没有合并语义不同的分类；无读端的 `ModelHTTPDiagnostics` 及传输层计时已删除。
+
+A09 授权与凭据：592 项 Swift 测试通过。模型密钥与推送地址两份手写 SecItem CRUD 归一为 `KeychainCredential`，钥匙串服务名、账户名、可访问性与错误文案保持原样；`NoteHistoryMemory` 的外部只读凭据不并入。未对真实钥匙串执行写入实测，避免改动日常凭据。

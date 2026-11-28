@@ -48,7 +48,7 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A06 · 已统一资料库路径和模型套件 | `voiceos.sqlite`、应用数据根目录默认值、模型默认 effort 分散在应用、工具、备份和脚本。 | 先处理同一语言内的权威来源。既有启动环境变量和参数是外部契约，应保留。 |
 | A07 · 已统一模型请求退避 | 模型同时使用非流式 HTTP、SSE、Python 全文整理及 Hindsight；多处重复错误摘要与重试逻辑。 | 逐一识别同协议同语义的重复。保留传输差异、模型结果未知和可重试的区别，保持凭据和个人正文不进入诊断。 |
 | A08 | Swift tests 已有 121 个文件，另有 Python 流程测试、真实 CLI 验证配方和应用打包脚本；README 的部分架构与行为基线已滞后。 | 先证明正常入口覆盖及兼容性，再收敛重复验证；把新确立的边界检查接入现有本地打包入口。 |
-| A09 | Apple 权限、云端文字处理许可、模型密钥、记忆身份和消息凭据的合法使用条件分别落在系统、业务状态或单独配置文件。 | 核对各授权的写端、读端与恢复入口；只统一实现方式相同的能力。涉及保存范围或默认许可变更时单列待确认。 |
+| A09 · 已建立授权与凭据地图，归一钥匙串实现 | Apple 权限、云端文字处理许可、模型密钥、记忆身份和消息凭据的合法使用条件分别落在系统、业务状态或单独配置文件。模型密钥与推送地址各写了一份钥匙串 CRUD。 | 核对各授权的写端、读端与恢复入口；两份手写钥匙串 CRUD 归一为 `KeychainCredential`；`NoteHistoryMemory` 只读外部凭据，不并入。云端许可的权威是材料 `local_only` 字段与修订账本。保存范围或默认许可不变。 |
 | A10 · 已建立渠道地图并删除无读端诊断 | 启动/HTTP 诊断、持久化业务错误和用户提示各有写端；监测、整理、备份的错误分类缺少同处的调用方地图。`ModelHTTPDiagnostics` 只有写端，没有读者。 | 已核对五类渠道与三类重试语义，未发现可安全合并的重复分类；无读端的 `ModelHTTPDiagnostics` 连同传输层计时一起删除。字符串分类点与子进程错误载体记录在下方地图。 |
 | A11 · 已统一行动时间与只读投影 | 部分搜索、外部 CLI、工作区和详情各自读取行动与材料；日期、展示标题和有效性已部分有共享解析。只读 CLI 的列表与详情曾各自重复行动 SQL、到期/计划/提醒查询。 | 从同一个材料或行动沿正常入口核对重复投影，避免把分页与轻量快照强行合并。CLI 列表与详情共用一份投影，隐私字段按需投影。unknown 链接语义待确认。 |
 | A12 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 保持一个产品打包入口，核对资产与运行脚本的来源，按执行路径找重叠；现有隔离库和启动安全验证一并保留。 |
@@ -68,6 +68,21 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - 同一请求的线级重试：`ResponsesRetry` 负责 429/502/503/504 与瞬时连接错误的 5s/15s 退避，最多三次；写端为 `ResponsesModelPort` 与 `ResponsesRecordingFollowupPort`（后者因结构修复会更换 payload，保留自有循环并复用同一延迟与预算）。
 - 操作级结果分类：录音入口把错误归为 deferred/retryableFailure/needsAttention；401/403 需用户处理，408/429/5xx 可重试。错误只在子进程消息边界上可见，`HTTP (\d{3})` 是唯一的字符串解析点（记录在案；升级为结构化载体属于跨 Python/Swift 变更，单列候选）。
 - 推送投递：`MonitorPushComposer.validateResponse` 把非 2xx 视为可稍后重试，`MonitorPush` 负责网络错误文案；投递失败由监测循环重投，与模型重试语义不同，保留。
+
+## 授权与凭据（A09）
+
+| 能力 | 权威写端 | 读端 | 恢复与引导入口 | 存储 |
+| --- | --- | --- | --- | --- |
+| 麦克风 | `NativeDictation.requestPermission()` | `NativeDictation.authorizationStatus()` → `ControlCenter`、引导页 | 引导页与设置「系统权限」；系统设置 | TCC |
+| 提醒事项 | `NativeReminders.request()` | `NativeReminders.authorizationStatus()` → 设置、引导、任务页 | `requestFullAccessToReminders()`；系统设置 | TCC / EventKit |
+| 系统通知 | `ensureNotifications`（VoiceOSApp） | `notificationSettings().authorizationStatus` → 设置状态行 | `requestAuthorization`；系统设置 | TCC |
+| 完全磁盘访问（QQ） | 无程序化请求，TCC 不提供 API | `QQMonitorHelper` 探测可读性 → 处理/监测提示 | 系统设置 → 隐私与安全性；改签名后需重新授权 | TCC |
+| 云端文字许可 | `ModelPort` 的策略命令与录音处理许可命令（都写 `source_policy_revisions` 账本） | 各出站调用前的统一校验（`destination != .cloud || 全部 !localOnly`） | 材料详情「允许云端处理」；监测设置开关 | SQLite `sources.local_only` 与修订账本 |
+| 模型密钥 | `TextModelKeychain`（现由 `KeychainCredential` 承载） | 模型套件构造时读取 | 设置页模型配置保存/清除 | 钥匙串 `local.voiceos.textmodel` / `apiKey` |
+| 历史批注身份 | 外部写入（用户在钥匙串中创建） | `NoteHistoryMemory` 只读 | 钥匙串访问授权；缺失时提示 | 钥匙串 `VoiceOS Hindsight Cloud` / `VoiceOS` |
+| 消息推送凭据 | `MonitorCredentialStore`（现由 `KeychainCredential` 承载） | 监测推送发送时读取 | 设置页填写/清除 webhook | 钥匙串 `local.voiceos.app.monitor` / `push.webhook` |
+
+要点：模型密钥与推送地址这两份手写 SecItem CRUD 归一到 `KeychainCredential`（钥匙串服务名、账户名、可访问性与错误文案保持原样）。`NoteHistoryMemory` 读取的是外部创建的凭据且无写路径，不并入通用实现。云端许可的权威写入只有策略命令与录音许可命令，二者都留修订账本；界面各处只经由这些命令改动。
 
 ## 决策记录
 
@@ -90,6 +105,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A11 只读 CLI 的列表与详情原各自拼一份行动 SQL，详情再逐项查计划、提醒与到期。改为共享 `actionColumns`/`actionTables` 与 `actionSummary`，一次 JOIN 取齐，详情从同一行构造；删除 `resolvedDue`、`scheduleRow`、`scheduleRecord`、`reminderRecord`。隐私选项由「先查后裁」改为「按需投影列」。用真实副本逐字对照列表与三种详情组合的 JSON，确认对外契约不变；unknown 链接语义继续留在待确认。
 
 - A10 盘点五类输出渠道后发现 `ModelHTTPDiagnostics` 只有写端、没有读者，连同传输层的计时变量一起删除。三类重试语义（同请求线级、操作级结果、推送投递）比较过合并，因预算、payload 与呈现不同而保留分离；子进程字符串分类点记录为后续候选，不在本批改动。
+
+- A09 比较过保留两份钥匙串实现、把模型密钥也搬进 App、以及抽一个低层 `KeychainCredential`。采用低层结构体：两份 CRUD 的 SecItem 形态相同，而服务名、可访问性、错误文案属于各自凭据的契约，留在调用方。`NoteHistoryMemory` 只读外部凭据不并入；三种 Apple 权限各自只有一处请求与状态读取，未发现平行实现，不需要改代码。
 
 ## 待确认的兼容性取舍
 
