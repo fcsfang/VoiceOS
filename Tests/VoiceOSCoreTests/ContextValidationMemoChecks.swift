@@ -21,22 +21,25 @@ final class ContextValidationMemoChecks: XCTestCase {
         _ = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: 1, localOnly: false)
     }
 
-    private func seedTask(_ store: VoiceOSStore, text: String, title: String) async throws {
+    @discardableResult
+    private func seedTask(_ store: VoiceOSStore, text: String, title: String, sharedSourceID: String? = nil) async throws -> String {
         let sourceID = try await store.recordUserExpression(text)
         try await allowCloud(store, sourceID)
-        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [sourceID])
-        let item = try XCTUnwrap(context.sources.first)
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [sourceID, sharedSourceID].compactMap { $0 })
+        let item = try XCTUnwrap(context.sources.first { $0.sourceID == sourceID })
         _ = try await store.importOrganizedClaims(context: context, proposals: [
             .init(statement: text, ownership: .userTentative,
                   references: [.init(sourceID: sourceID, transcriptVersionID: item.transcriptVersionID, spanID: item.spans[0].id)],
                   action: .init(title: title, kind: .task, quote: text))
         ], commandID: "context-memo-" + sourceID)
+        return sourceID
     }
 
     func testRepeatedSnapshotsValidateEachContextOnceUntilWrite() async throws {
         let store = try await openStore()
-        try await seedTask(store, text: "第一份整理材料。", title: "整理一")
+        let originalSourceID = try await seedTask(store, text: "第一份整理材料。", title: "整理一")
         try await seedTask(store, text: "第二份整理材料。", title: "整理二")
+        try await seedTask(store, text: "引用第一份材料。", title: "再次整理", sharedSourceID: originalSourceID)
 
         let first = try await store.workspaceSnapshot(.full)
         let firstBytes = await store.contextSnapshotDecodeBytes
@@ -63,13 +66,17 @@ final class ContextValidationMemoChecks: XCTestCase {
         XCTAssertGreaterThan(afterWritePasses - beforeWritePasses, 0, "写入后必须重新校验上下文")
 
         let task = try XCTUnwrap(first.actions.first { $0.title == "整理一" })
-        let source = try XCTUnwrap(first.sources.first { $0.transcript == "第一份整理材料。" })
-        let original = try await store.playableURL(sourceID: source.id)
+        let linked = try XCTUnwrap(first.actions.first { $0.title == "再次整理" })
+        let unrelated = try XCTUnwrap(first.actions.first { $0.title == "整理二" })
+        let original = try await store.playableURL(sourceID: originalSourceID)
         try Data("外部写入改变了文件".utf8).write(to: original)
 
         let historical = try await store.action(id: task.id, includeHistory: true)
+        let afterChange = try await store.actions(includeHistory: true)
         let current = try await store.action(id: task.id)
         XCTAssertEqual(historical?.validity, "frozen")
+        XCTAssertEqual(afterChange.first { $0.id == linked.id }?.validity, "frozen")
+        XCTAssertEqual(afterChange.first { $0.id == unrelated.id }?.validity, "current")
         XCTAssertNil(current)
     }
 }

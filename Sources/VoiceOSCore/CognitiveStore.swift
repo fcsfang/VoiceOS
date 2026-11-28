@@ -120,12 +120,22 @@ extension VoiceOSStore {
         return id
     }
     public func localContext(id: String) throws -> LocalTranscriptContext {
+        try readContext(id: id)
+    }
+
+    private func readContext(id: String, stamp suppliedStamp: ContextValidationStamp? = nil) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND state='current'", [id]).first else { throw VoiceOSError("上下文已失效或不存在") }
         let snapshot = row["snapshot_json"]!
         let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(snapshot.utf8))
         contextSnapshotDecodeBytes += snapshot.utf8.count
         if !contextValidationSuspended {
-            let stamp = try contextValidationStamp(id: id, digest: row["digest"]!)
+            let digest = row["digest"]!
+            let stamp: ContextValidationStamp
+            if let suppliedStamp, suppliedStamp.generation == db.writeGeneration, suppliedStamp.digest == digest {
+                stamp = suppliedStamp
+            } else {
+                stamp = try contextValidationStamp(id: id, digest: digest)
+            }
             if contextValidationStamps[id] != stamp {
                 do {
                     contextValidationPasses += 1
@@ -139,25 +149,28 @@ extension VoiceOSStore {
         }
         return context
     }
+
+    private static let contextOriginalJoin = "LEFT JOIN sources s ON s.id=i.source_id AND s.state='saved'"
+
     /// Validation re-derives from database rows and from the originals on disk;
-    /// the stamp pins both, so a hit costs one small query and a stat per source.
+    /// each stamp samples the originals when its context is checked.
     private func contextValidationStamp(id: String, digest: String) throws -> ContextValidationStamp {
+        let inputs = try db.query("""
+            SELECT i.source_id,s.relative_path FROM context_inputs i
+            \(Self.contextOriginalJoin) WHERE i.context_id=?
+            """, [id])
+        return contextValidationStamp(digest: digest, inputs: inputs)
+    }
+
+    private func contextValidationStamp(digest: String, inputs: [[String: String]]) -> ContextValidationStamp {
         var files: [String: DurableFiles.Fingerprint] = [:]
-        for row in try db.query("SELECT i.source_id,s.state,s.relative_path FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=?", [id]) {
-            guard row["state"] == "saved", let relative = row["relative_path"],
+        for row in inputs {
+            guard let relative = row["relative_path"],
                   let url = try? assetURL(relativePath: relative),
                   let fingerprint = try? DurableFiles.fingerprint(url) else { continue }
             files[row["source_id"]!] = fingerprint
         }
         return ContextValidationStamp(digest: digest, generation: db.writeGeneration, files: files)
-    }
-    /// Claim listing needs the verdict, not the snapshot; a row whose stamp still
-    /// matches has no new database or file inputs to check.
-    private func validateContextRow(id: String, digest: String) throws {
-        guard !contextValidationSuspended else { return }
-        let stamp = try contextValidationStamp(id: id, digest: digest)
-        if contextValidationStamps[id] == stamp { return }
-        _ = try localContext(id: id)
     }
     /// This slice only supports local fixtures. A reservation is durable before work;
     /// it is not a cloud grant and there is no automatic resend after interruption.
@@ -252,12 +265,37 @@ extension VoiceOSStore {
         return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause)\(selection) ORDER BY c.created_at,c.id", arguments)
     }
 
-    func validateClaimContexts(matching selection: String = "", arguments: [String] = []) throws {
+    func validateClaimContexts() throws {
+        try validateClaimContexts(matching: "", arguments: [])
+    }
+
+    private func validateClaimContexts(matching selection: String, arguments: [String]) throws {
         guard !contextValidationSuspended else { return }
-        // Dynamic read checks also catch an original that changed outside the app.
-        for row in try db.query("SELECT DISTINCT x.id,x.digest FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
-            do { try validateContextRow(id: row["id"]!, digest: row["digest"]!) }
-            catch { try db.transaction { try freezeContext(row["id"]!) } }
+        let rows = try db.query("""
+            SELECT selected.id,selected.digest,i.source_id,s.relative_path
+            FROM (
+                SELECT DISTINCT x.id,x.digest
+                FROM contexts x JOIN model_attempts a ON a.context_id=x.id
+                JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)
+            ) selected
+            LEFT JOIN context_inputs i ON i.context_id=selected.id
+            \(Self.contextOriginalJoin)
+            """, arguments)
+        let generation = db.writeGeneration
+        var inputsByContext = Dictionary(grouping: rows) { $0["id"]! }
+        for row in rows {
+            let id = row["id"]!, digest = row["digest"]!
+            guard let inputs = inputsByContext.removeValue(forKey: id) else { continue }
+            do {
+                // A freeze can affect later contexts. After a write, read from the
+                // updated database; always sample original files at the point of use.
+                let stamp = generation == db.writeGeneration
+                    ? contextValidationStamp(digest: digest, inputs: inputs)
+                    : try contextValidationStamp(id: id, digest: digest)
+                if contextValidationStamps[id] != stamp {
+                    _ = try readContext(id: id, stamp: stamp)
+                }
+            } catch { try db.transaction { try freezeContext(id) } }
         }
     }
 
