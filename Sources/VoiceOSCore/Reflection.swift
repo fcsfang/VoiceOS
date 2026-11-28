@@ -178,32 +178,52 @@ extension VoiceOSStore {
     // somebody happens to open the original review conversation.
     func validateReflectionBasis(_ focus: ConversationReflectionFocus) throws {
         if let question = focus.question { try validateReflectionQuestionContext(question) }
-        for thought in focus.thoughts {
-            guard let row = try db.query("""
-            SELECT c.review_version,c.validity,c.statement,c.ownership,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision,x.state
-            FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id
-            LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version WHERE c.id=?
-            """, [thought.claimID]).first,
+        if !focus.thoughts.isEmpty {
+            let ids = try Self.relevanceJSON(focus.thoughts.map(\.claimID))
+            let rows = try db.query("""
+                SELECT c.id,c.review_version,c.validity,c.statement,c.ownership,
+                       r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision,x.state
+                FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id
+                LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version
+                WHERE c.id IN (SELECT value FROM json_each(?))
+                """, [ids])
+            let claims = Dictionary(uniqueKeysWithValues: rows.map { ($0["id"]!, $0) })
+            for thought in focus.thoughts {
+                guard let row = claims[thought.claimID],
                   row["validity"] == "current", row["state"] == "current", row["decision"] != "rejected",
                   row["review_version"] == String(thought.reviewVersion),
                   (row["reviewed_statement"] ?? row["statement"]) == thought.summary,
                   (row["reviewed_ownership"] ?? row["ownership"]) == thought.ownership else { throw VoiceOSError("回顾观点已变化，请重新进入这个周期") }
+            }
         }
-        for task in focus.tasks {
-            guard let row = try db.query("SELECT * FROM actions WHERE id=?", [task.actionID]).first,
-                  row["validity"] == "current", row["version"] == String(task.version), row["state"] == task.state,
-                  row["title"] == task.title, row["claim_id"] == task.claimID else { throw VoiceOSError("回顾任务已变化，请重新进入这个周期") }
-            let actual = try db.query("""
-            SELECT f.*,s.state AS source_state,s.feedback_json,v.text
+        guard !focus.tasks.isEmpty else { return }
+        let ids = try Self.relevanceJSON(focus.tasks.map(\.actionID))
+        let taskRows = try db.query("""
+            SELECT id,validity,version,state,title,claim_id FROM actions
+            WHERE id IN (SELECT value FROM json_each(?))
+            """, [ids])
+        let tasks = Dictionary(uniqueKeysWithValues: taskRows.map { ($0["id"]!, $0) })
+        let feedbackRows = try db.query("""
+            SELECT f.*,s.state AS source_state,s.feedback_json,v.text,c.validity AS organized_claim_validity
             FROM action_feedback f JOIN sources s ON s.id=f.source_id
             \(ActionFeedbackRecord.textJoin)
-            WHERE f.action_id=? AND s.state IN ('saved','reference_only') ORDER BY f.created_at,f.sequence
-            """, [task.actionID]).compactMap { row -> ActionFeedbackRecord? in
+            LEFT JOIN claims c ON c.id=CASE WHEN json_valid(s.feedback_json)
+                                            THEN json_extract(s.feedback_json,'$.organizedClaimID') END
+            WHERE f.action_id IN (SELECT value FROM json_each(?)) AND s.state IN ('saved','reference_only')
+            ORDER BY f.action_id,f.created_at,f.sequence
+            """, [ids])
+        let actualByTask = Dictionary(grouping: feedbackRows) { $0["action_id"]! }
+        let capturedByTask = Dictionary(grouping: focus.outcomes, by: \.actionID)
+        for task in focus.tasks {
+            guard let row = tasks[task.actionID],
+                  row["validity"] == "current", row["version"] == String(task.version), row["state"] == task.state,
+                  row["title"] == task.title, row["claim_id"] == task.claimID else { throw VoiceOSError("回顾任务已变化，请重新进入这个周期") }
+            let actual = try (actualByTask[task.actionID] ?? []).compactMap { row -> ActionFeedbackRecord? in
                 let intent = try Self.feedbackIntent(row["feedback_json"])
-                if let id = intent?.organizedClaimID, try db.query("SELECT validity FROM claims WHERE id=?", [id]).first?["validity"] != "current" { return nil }
+                if intent?.organizedClaimID != nil, row["organized_claim_validity"] != "current" { return nil }
                 return ActionFeedbackRecord.read(row, intent: intent)
             }
-            guard Self.matchesSavedFeedback(actual, captured: focus.outcomes.filter { $0.actionID == task.actionID }) else { throw VoiceOSError("回顾结果已变化，请重新进入这个周期") }
+            guard Self.matchesSavedFeedback(actual, captured: capturedByTask[task.actionID] ?? []) else { throw VoiceOSError("回顾结果已变化，请重新进入这个周期") }
         }
     }
 
