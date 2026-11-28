@@ -52,9 +52,12 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A10 · 已建立渠道地图并删除无读端诊断 | 启动/HTTP 诊断、持久化业务错误和用户提示各有写端；监测、整理、备份的错误分类缺少同处的调用方地图。`ModelHTTPDiagnostics` 只有写端，没有读者。 | 已核对五类渠道与三类重试语义，未发现可安全合并的重复分类；无读端的 `ModelHTTPDiagnostics` 连同传输层计时一起删除。字符串分类点与子进程错误载体记录在下方地图。 |
 | A11 · 已统一行动时间与只读投影 | 部分搜索、外部 CLI、工作区和详情各自读取行动与材料；日期、展示标题和有效性已部分有共享解析。只读 CLI 的列表与详情曾各自重复行动 SQL、到期/计划/提醒查询。 | 从同一个材料或行动沿正常入口核对重复投影，避免把分页与轻量快照强行合并。CLI 列表与详情共用一份投影，隐私字段按需投影。unknown 链接语义待确认。 |
 | A12 · 已核对入口分工并加钥匙串边界检查 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 已确认一个打包入口（`build.py` 内联运行 `check_architecture.py`），预览启动器与重启闸门各司其职，未发现重复打包路径。新增 SecItem 只允许在 `KeychainCredential` 与 `NoteHistoryMemory` 的机器检查。 |
-| A13 · 已统一时间戳格式与解析 | 分数秒 ISO 8601 格式器在 17 个文件手写构造；`ActionTimeFormatting`、`ActionDateFormatting`、`MaterialNaming`、`ReminderSchedule`、`ReminderFields`、`MonitorSourceConfig` 各有一套时间戳实现。 | 归一为 `TimestampFormatting`（fractional/plain/parse/dayKey），迁移全部调用方并删除旧载体；`check_architecture.py` 限制 `formatOptions` 只在权威文件出现。真实副本 553 条列表与完整详情 JSON 逐字一致。 |
+| A13 · 已统一时间戳格式与解析 | 分数秒 ISO 8601 格式器在 17 个文件手写构造；`ActionTimeFormatting`、`ActionDateFormatting`、`MaterialNaming`、`ReminderSchedule`、`ReminderFields`、`MonitorSourceConfig` 各有一套时间戳实现。 | 归一为 `TimestampFormatting`（isoFractional/iso/parse/dayKey），迁移全部调用方并删除旧载体；`check_architecture.py` 限制 `formatOptions` 只在权威文件出现。真实副本 553 条列表与完整详情 JSON 逐字一致。 |
 | A14 · 已统一端口身份校验 | 六个 Responses 端口各自比较 provider/model/promptVersion/schemaVersion 与 destination，同一规则六份实现。 | 归一到 `ModelConfiguration.accepts(_:)`；端口自有身份与请求身份都必须是云端且四字段一致。错误文案与各端口的其余校验保持原样。 |
 | A15 · 已删除未使用的 Apple 转写后端 | `NativeSpeechPort`（Apple SpeechAnalyzer）无任何构造点；应用与工具只使用 `LocalQwenSpeechPort`，多处类型判断只认后者。 | 删除该结构体与仅它使用的 `import Speech`。若未来恢复，需先有真实的转写后端选择路径，而不是留着无调用方的实现。 |
+| A16 · 已统一应用包发布 | 签名前直接改写旧包，失败后可能留下不完整产物。 | 候选包在同卷组装、严格验证签名后交换目录，发布完成才登记到 LaunchServices。 |
+| A17 · 已归一资料权限修订 | 材料详情与录音请求各自插入授权修订和更新资料权限。五处恢复校验各自回查旧权限，凭据指纹在两个入口重复编码。 | `SourcePolicy.swift` 承载修订写入、收据指纹和历史版本核对。原有事务调用方继续决定各自的派生状态失效和提交检查点。边界检查拒绝把这些 SQL 写回其他模块。 |
+| A18 · 已识别，待建立基线 | 连续表达有效性分散在 `recordingExpressions()`、`SourceRecord.recordingExpression(in:)` 和 `recordingExpressionIssue(in:)`。节目版本与许可的判断重复。存储路径核对分组 ID、版本和保存状态，阅读路径核对每段自己的有效性及分组摘要。 | 先对比现有资料及改稿、权限撤回、缺失片段、转写核对中的行为；同条件由同一个校验提供结论和原因。把后续整理资格、界面展示与已有分组身份单独核对，避免把现有差异一律当作重复。 |
 
 ## 错误分类与输出渠道（A10）
 
@@ -80,12 +83,12 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | 提醒事项 | `NativeReminders.request()` | `NativeReminders.authorizationStatus()` → 设置、引导、任务页 | `requestFullAccessToReminders()`；系统设置 | TCC / EventKit |
 | 系统通知 | `ensureNotifications`（VoiceOSApp） | `notificationSettings().authorizationStatus` → 设置状态行 | `requestAuthorization`；系统设置 | TCC |
 | 完全磁盘访问（QQ） | 无程序化请求，TCC 不提供 API | `QQMonitorHelper` 探测可读性 → 处理/监测提示 | 系统设置 → 隐私与安全性；改签名后需重新授权 | TCC |
-| 云端文字许可 | `ModelPort` 的策略命令与录音处理许可命令（都写 `source_policy_revisions` 账本） | 各出站调用前的统一校验（`destination != .cloud || 全部 !localOnly`） | 材料详情「允许云端处理」；监测设置开关 | SQLite `sources.local_only` 与修订账本 |
+| 云端文字许可 | 材料策略命令和录音请求通过 `SourcePolicy` 写修订账本 | 各出站调用前的统一校验（`destination != .cloud || 全部 !localOnly`） | 材料详情「允许云端处理」；监测设置开关 | SQLite `sources.local_only` 与修订账本 |
 | 模型密钥 | `TextModelKeychain`（现由 `KeychainCredential` 承载） | 模型套件构造时读取 | 设置页模型配置保存/清除 | 钥匙串 `local.voiceos.textmodel` / `apiKey` |
 | 历史批注身份 | 外部写入（用户在钥匙串中创建） | `NoteHistoryMemory` 只读 | 钥匙串访问授权；缺失时提示 | 钥匙串 `VoiceOS Hindsight Cloud` / `VoiceOS` |
 | 消息推送凭据 | `MonitorCredentialStore`（现由 `KeychainCredential` 承载） | 监测推送发送时读取 | 设置页填写/清除 webhook | 钥匙串 `local.voiceos.app.monitor` / `push.webhook` |
 
-要点：模型密钥与推送地址这两份手写 SecItem CRUD 归一到 `KeychainCredential`（钥匙串服务名、账户名、可访问性与错误文案保持原样）。`NoteHistoryMemory` 读取的是外部创建的凭据且无写路径，不并入通用实现。云端许可的权威写入只有策略命令与录音许可命令，二者都留修订账本；界面各处只经由这些命令改动。
+要点：模型密钥与推送地址这两份手写 SecItem CRUD 归一到 `KeychainCredential`（钥匙串服务名、账户名、可访问性与错误文案保持原样）。`NoteHistoryMemory` 读取的是外部创建的凭据且无写路径，不并入通用实现。材料策略命令与录音许可命令共用授权修订写入与指纹。历史问题、关联、相关性、整理意图与分段批次通过同一个查询核对当时的权限，调用方仍保留各自的身份校验与领域错误。
 
 ## 构建、验证与运维入口（A12）
 

@@ -158,8 +158,8 @@ extension VoiceOSStore {
                     (row["text"] == source.text && relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data(row["spans_json"]!.utf8))) == relevanceJSON(source.spans)),
                   let policy = policies[source.sourceID], policy > 0, policy <= Int(row["policy_version"]!)! else { throw VoiceOSError("问题原话版本不一致") }
             try SpeechText(text: source.text, spans: source.spans).validate(duration: row["duration"].flatMap(Double.init))
-            let local = row["policy_version"] == String(policy) ? row["local_only"] : try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [source.sourceID, String(policy)]).first?["from_local_only"]
-            guard local == (source.localOnly ? "1" : "0") else { throw VoiceOSError("问题历史权限不一致") }
+            guard try historicalSourcePolicyMatches(db, source: row, sourceID: source.sourceID,
+                                                    version: policy, localOnly: source.localOnly) else { throw VoiceOSError("问题历史权限不一致") }
         }
     }
 }

@@ -34,6 +34,16 @@ RULES = (
         re.compile(r"\.formatOptions\s*=\s*\[\.withInternetDateTime"),
         "ISO 8601 formatOptions belong in",
     ),
+    (
+        (Path("Sources/VoiceOSCore/SourcePolicy.swift"),),
+        re.compile(
+            r"\b(?:INSERT\s+INTO\s+source_policy_revisions|"
+            r"UPDATE\s+sources\s+SET\s+local_only|"
+            r"SELECT\s+from_local_only\s+FROM\s+source_policy_revisions)\b",
+            re.IGNORECASE,
+        ),
+        "Source policy writes and historical permission lookup belong in",
+    ),
 )
 
 

@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 public struct RecordingProcessingRequest: Identifiable, Sendable {
     public let id: String
@@ -28,14 +27,16 @@ extension VoiceOSStore {
         guard try db.query("SELECT id FROM sources WHERE command_id=?", [commandID]).isEmpty else { throw VoiceOSError("普通录制不能升级为自动处理请求") }
         let intent = try db.transaction {
             let intent = try beginDictation(commandID: commandID)
+            let initialPolicy = try sourcePolicy(sourceID: intent.sourceID)
             guard try db.query("SELECT id FROM recording_processing_requests WHERE source_id=?", [intent.sourceID]).isEmpty,
-                  try sourcePolicy(sourceID: intent.sourceID).version == 1 else { throw VoiceOSError("录制命令不能改变既有处理范围") }
-            // New source only, inside this transaction; no derived cognition exists yet.
-            let policyVersion = c.destination == .cloud ? 2 : 1
+                  initialPolicy.version == 1 else { throw VoiceOSError("录制命令不能改变既有处理范围") }
+            // A new recording has no derived cognition to invalidate.
+            var policyVersion = initialPolicy.version
             if c.destination == .cloud {
-                let fingerprint = SHA256.hash(data: try JSONSerialization.data(withJSONObject: [intent.sourceID,"1","false"])).map { String(format:"%02x", $0) }.joined()
-                try db.execute("INSERT INTO source_policy_revisions(id,source_id,from_version,to_version,from_local_only,to_local_only,command_id,input_fingerprint,actor,created_at) VALUES(?,?,1,2,1,0,?,?,'user',?)", [UUID().uuidString,intent.sourceID,"record-consent:"+commandID,fingerprint,Self.processingNow()])
-                try db.execute("UPDATE sources SET local_only=0,policy_version=2 WHERE id=?", [intent.sourceID])
+                let fingerprint = try Self.sourcePolicyFingerprint(sourceID: intent.sourceID, version: initialPolicy.version, localOnly: false)
+                policyVersion = try recordSourcePolicyChange(sourceID: intent.sourceID, from: initialPolicy,
+                                                              localOnly: false, commandID: "record-consent:" + commandID,
+                                                              fingerprint: fingerprint)
             }
             let version = try db.query("SELECT version_id FROM sources WHERE id=?", [intent.sourceID]).first!["version_id"]!
             let now = Self.processingNow()
@@ -161,7 +162,7 @@ extension VoiceOSStore {
                 guard let grant = try db.query("SELECT * FROM source_policy_revisions WHERE source_id=? AND to_version=2", [row["source_id"]]).first,
                       grant["from_version"] == "1", grant["from_local_only"] == "1", grant["to_local_only"] == "0",
                       grant["command_id"] == "record-consent:"+row["command_id"]!, grant["actor"] == "user",
-                      grant["input_fingerprint"] == SHA256.hash(data:try JSONSerialization.data(withJSONObject:[row["source_id"]!,"1","false"])).map({String(format:"%02x",$0)}).joined() else { throw VoiceOSError("录音处理缺少明确的文本授权历史") }
+                      grant["input_fingerprint"] == (try sourcePolicyFingerprint(sourceID: row["source_id"]!, version: 1, localOnly: false)) else { throw VoiceOSError("录音处理缺少明确的文本授权历史") }
             }
             if let queueID = row["processing_intent_id"] {
                 guard let queue = try db.query("SELECT * FROM processing_intents WHERE id=?", [queueID]).first,

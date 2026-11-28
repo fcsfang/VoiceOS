@@ -155,8 +155,8 @@ extension VoiceOSStore {
                       isPrunedHistoricalTranscript(version, historical: row["validity"] == "frozen") ||
                         (d.textEnd <= scalars.count && spans.contains(where: { $0.id == d.spanID && $0.textStart <= d.textStart && $0.textEnd >= d.textEnd }) &&
                          String(String.UnicodeScalarView(scalars[d.textStart..<d.textEnd])) == d.text) else { throw VoiceOSError("相关性历史摘录不一致") }
-                let historicalLocal = d.policyVersion == Int(version["policy_version"]!)! ? version["local_only"] : try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [d.sourceID,String(d.policyVersion)]).first?["from_local_only"]
-                guard historicalLocal == (d.localOnly ? "1":"0") else { throw VoiceOSError("相关性历史权限不一致") }
+                guard try historicalSourcePolicyMatches(db, source: version, sourceID: d.sourceID,
+                                                        version: d.policyVersion, localOnly: d.localOnly) else { throw VoiceOSError("相关性历史权限不一致") }
             }
             if row["state"] == "completed" {
                 guard let text = row["selection_json"], row["result_digest"] == relevanceHash(Data(text.utf8)) else { throw VoiceOSError("相关性历史结果摘要不一致") }

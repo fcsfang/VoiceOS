@@ -171,8 +171,8 @@ extension VoiceOSStore {
     private static func validateAssociationPolicy(_ db: Database, sourceID: String, version: Int, localOnly: Bool) throws {
         guard let source = try db.query("SELECT policy_version,local_only FROM sources WHERE id=?", [sourceID]).first,
               version > 0, version <= Int(source["policy_version"]!)! else { throw VoiceOSError("关联历史授权身份无效") }
-        let local = source["policy_version"] == String(version) ? source["local_only"] : try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [sourceID, String(version)]).first?["from_local_only"]
-        guard local == (localOnly ? "1" : "0") else { throw VoiceOSError("关联历史授权不一致") }
+        guard try historicalSourcePolicyMatches(db, source: source, sourceID: sourceID,
+                                                version: version, localOnly: localOnly) else { throw VoiceOSError("关联历史授权不一致") }
     }
     private static func validateAssociationHistoricalHit(_ db: Database, hit: RetrievalHit) throws {
         let d = hit.document

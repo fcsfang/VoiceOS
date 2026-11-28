@@ -158,8 +158,7 @@ extension VoiceOSStore {
         try SpeechText(text:s.text,spans:s.spans).validate(duration:historical["duration"].flatMap(Double.init))
         let canonical = try segmentTranscript(s,policyVersion:p.policyVersion,scalarBudget:p.scalarBudget)
         guard try relevanceJSON(canonical) == relevanceJSON(p) else { throw VoiceOSError("分段批次的原话或引用不是规范计划") }
-        let local = historical["policy_version"] == String(p.policyVersion) ? historical["local_only"] :
-            try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?",[s.sourceID,String(p.policyVersion)]).first?["from_local_only"]
-        guard local == (s.localOnly ? "1":"0") else { throw VoiceOSError("分段批次授权历史不一致") }
+        guard try historicalSourcePolicyMatches(db, source: historical, sourceID: s.sourceID,
+                                                version: p.policyVersion, localOnly: s.localOnly) else { throw VoiceOSError("分段批次授权历史不一致") }
     }
 }
