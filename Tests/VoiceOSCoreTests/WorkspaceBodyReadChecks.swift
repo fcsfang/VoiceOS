@@ -154,12 +154,15 @@ final class WorkspaceBodyReadChecks: XCTestCase {
                                 expressions: index.expressionsBySourceID)
         }
 
-        let tabRows = page(materialFilters[0])
-        for filter in materialFilters {
-            let direct = directRows(filter)
+        let tabRows = MaterialReadingPage(records: records, filter: .daily, readingStates: readingStates,
+                                          catalog: catalog, expressions: index.expressionsBySourceID)
+        XCTAssertEqual(MaterialReadingFilter.allCases.map(\.rawValue), materialFilters)
+        for filter in MaterialReadingFilter.allCases {
+            let direct = directRows(filter.rawValue)
             XCTAssertEqual(tabRows.selecting(filter)?.rows.map(\.id), direct.map(\.id), "材料页 \(filter) 行顺序必须与直算一致")
-            XCTAssertEqual(tabRows.counts[filter], direct.count, "材料页 \(filter) 计数必须与直算一致")
+            XCTAssertEqual(tabRows.count(for: filter), direct.count, "材料页 \(filter) 计数必须与直算一致")
         }
+        XCTAssertEqual(page("旧筛选").rows.map(\.id), tabRows.rows.map(\.id))
         let personal = catalog["src-40"]!
         let programme = catalog["src-41"]!
         XCTAssertEqual(index.groupedMaterialRows(in: [personal, programme]).map(\.id), [personal.id])

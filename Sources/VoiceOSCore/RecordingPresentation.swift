@@ -473,6 +473,26 @@ public extension SourcePageIndex {
     }
 }
 
+/// Raw values are the material filter names stored in saved workspace views.
+public enum MaterialReadingFilter: String, CaseIterable, Sendable {
+    case daily = "日常材料"
+    case unread = "未读"
+    case reading = "在读"
+    case archived = "已归档"
+    case trash = "回收站"
+
+    func includes(_ source: SourceRecord, readingState: SourceReadingState) -> Bool {
+        switch self {
+        case .archived: return source.isArchived
+        case .trash: return source.isTrashed
+        case .daily, .unread, .reading:
+            guard !source.isArchived, !source.isTrashed else { return false }
+            return self == .daily || (self == .unread && readingState == .unread) ||
+                (self == .reading && readingState == .reading)
+        }
+    }
+}
+
 /// Rows and counts for all material filters in the current workspace snapshot.
 public struct MaterialReadingPage: Sendable {
     public var rows: [SourceRecord] { rowsByFilter[filter] ?? [] }
@@ -487,15 +507,8 @@ public struct MaterialReadingPage: Sendable {
         let projection = MaterialRowProjection(catalog: catalog, expressions: expressions)
         var byFilter: [String: [SourceRecord]] = [:]
         for name in Set(filters + [filter]) {
-            let selected = records.filter { source in
-                switch name {
-                case "回收站": return source.isTrashed
-                case "已归档": return source.isArchived
-                case "未读": return !source.isArchived && !source.isTrashed && (readingStates[source.id] ?? .unread) == .unread
-                case "在读": return !source.isArchived && !source.isTrashed && readingStates[source.id] == .reading
-                default: return !source.isArchived && !source.isTrashed
-                }
-            }
+            let selection = MaterialReadingFilter(rawValue: name) ?? .daily
+            let selected = records.filter { selection.includes($0, readingState: readingStates[$0.id] ?? .unread) }
             byFilter[name] = projection.rows(in: selected, grouping: .completeExpression, hidePairedContext: true)
                 .sorted { $0.date > $1.date }
                 .map(\.source)
@@ -503,6 +516,22 @@ public struct MaterialReadingPage: Sendable {
         self.filter = filter
         rowsByFilter = byFilter
         counts = byFilter.mapValues(\.count)
+    }
+
+    public init(records: [SourceRecord], filter: MaterialReadingFilter,
+                readingStates: [String: SourceReadingState] = [:],
+                catalog: [String: SourceRecord],
+                expressions: [String: RecordingExpression] = [:]) {
+        self.init(records: records, filter: filter.rawValue, filters: MaterialReadingFilter.allCases.map(\.rawValue),
+                  readingStates: readingStates, catalog: catalog, expressions: expressions)
+    }
+
+    public func count(for filter: MaterialReadingFilter) -> Int {
+        counts[filter.rawValue] ?? 0
+    }
+
+    public func selecting(_ filter: MaterialReadingFilter) -> Self? {
+        selecting(filter.rawValue)
     }
 
     public func selecting(_ filter: String) -> Self? {

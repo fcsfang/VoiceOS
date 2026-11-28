@@ -6,7 +6,7 @@ enum SavedViewPage: String, Codable {
 
     var filters: [String] {
         switch self {
-        case .materials: ["日常材料", "未读", "在读", "已归档", "回收站"]
+        case .materials: MaterialReadingFilter.allCases.map(\.rawValue)
         case .actions: ["全部", "我的待办", "AI 助理", "已完成", "问题", "目标", "待核对", "历史记录"]
         }
     }

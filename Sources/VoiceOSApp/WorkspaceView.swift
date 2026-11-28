@@ -432,7 +432,7 @@ struct WorkspaceView: View {
     @State private var discussionDrafts: [String: String] = [:]
     @State private var pendingURL: URL?
     @State private var showingOutcome = false
-    @State private var materialFilter = "日常材料"
+    @State private var materialFilter: MaterialReadingFilter = .daily
     @State private var actionFilter = "我的待办"
     @State private var savedViews: [SavedWorkspaceView] = []
     @State private var showingSaveView = false
@@ -881,7 +881,7 @@ struct WorkspaceView: View {
     private var sidebarSelection: Binding<String?> {
         Binding(get: {
             if let saved = savedViews.first(where: {
-                ($0.page == .materials && page == .materials && materialFilter == $0.filter) ||
+                ($0.page == .materials && page == .materials && materialFilter.rawValue == $0.filter) ||
                 ($0.page == .actions && page == .actions && actionFilter == $0.filter)
             }) { return saved.id }
             return section
@@ -1216,7 +1216,7 @@ struct WorkspaceView: View {
             topicTab: browsingTopics ? "" : topicTab,
             topicReadingMode: browsingTopics ? "" : topicReadingMode)
         switch page {
-        case .materials: entry.listFilter = materialFilter
+        case .materials: entry.listFilter = materialFilter.rawValue
         case .actions: entry.listFilter = actionFilter
         default: break
         }
@@ -1238,7 +1238,6 @@ struct WorkspaceView: View {
         let key = MaterialPageCache.Key(records: model.recordsRevision, states: readingStatesRevision)
         if materialPageCache.key == key, let page = materialPageCache.page?.selecting(materialFilter) { return page }
         let page = MaterialReadingPage(records: model.records, filter: materialFilter,
-                                       filters: SavedViewPage.materials.filters,
                                        readingStates: readingStates, catalog: recordCatalog,
                                        expressions: model.sourcePageIndex.expressionsBySourceID)
         materialPageCache.key = key
@@ -1270,10 +1269,10 @@ struct WorkspaceView: View {
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"材料") {
                 WorkspaceHeaderMenu {
-                    Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter) }
+                    Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter.rawValue) }
                 }
             }
-            if materialFilter == "日常材料", !todayReading.isEmpty {
+            if materialFilter == .daily, !todayReading.isEmpty {
                 WorkspaceListSection(title:"今日阅读",count:todayReading.count) {
                     VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                         ForEach(todayReading) { item in
@@ -1285,40 +1284,43 @@ struct WorkspaceView: View {
             }
             HStack {
                 Picker("阅读状态", selection: $materialFilter) {
-                    ForEach(["日常材料", "未读", "在读"], id: \.self) { filter in
-                        Text("\(filter)  \(page.counts[filter] ?? 0)").tag(filter)
+                    ForEach([MaterialReadingFilter.daily, .unread, .reading], id: \.self) { filter in
+                        Text("\(filter.rawValue)  \(page.count(for: filter))").tag(filter)
                     }
-                    if materialFilter == "已归档" || materialFilter == "回收站" {
-                        Text("\(materialFilter)  \(rows.count)").tag(materialFilter)
+                    if materialFilter == .archived || materialFilter == .trash {
+                        Text("\(materialFilter.rawValue)  \(rows.count)").tag(materialFilter)
                     }
                 }.pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer()
                 Menu {
-                    Button("已归档（\(page.counts["已归档"] ?? 0)）", systemImage:"archivebox") { materialFilter="已归档" }
-                    Button("回收站（\(page.counts["回收站"] ?? 0)）", systemImage:"trash") { materialFilter="回收站" }
+                    ForEach([MaterialReadingFilter.archived, .trash], id: \.self) { filter in
+                        Button("\(filter.rawValue)（\(page.count(for: filter))）", systemImage: filter == .trash ? "trash" : "archivebox") {
+                            materialFilter = filter
+                        }
+                    }
                 } label: {
                     Label("归档与回收站", systemImage:"archivebox")
                 }.fixedSize()
             }
-            if !rows.isEmpty, ["已归档","回收站"].contains(materialFilter) {
-                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            if !rows.isEmpty, [.archived, .trash].contains(materialFilter) {
+                Text(materialFilter == .archived ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             if rows.isEmpty {
-                if materialFilter == "日常材料" {
+                if materialFilter == .daily {
                     WorkspaceEmptyState(title: model.records.isEmpty ? "还没有材料" : "日常材料是空的", systemImage:"tray", description: model.records.isEmpty ? "可以先记录想法，或导入一段录音、视频。" : "其他材料在已归档或回收站里，可以切换查看。") {
                         Button("添加材料") { go(.capture) }.buttonStyle(.workspacePrimary)
                     }
-                } else if materialFilter == "未读" {
+                } else if materialFilter == .unread {
                     WorkspaceEmptyState(title:"没有未读材料",systemImage:"eye") {
-                        Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
+                        Button("查看日常材料") { materialFilter = .daily }.buttonStyle(.workspaceSecondary)
                     }
-                } else if materialFilter == "在读" {
+                } else if materialFilter == .reading {
                     WorkspaceEmptyState(title:"没有在读的材料",systemImage:"book") {
-                        Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
+                        Button("查看日常材料") { materialFilter = .daily }.buttonStyle(.workspaceSecondary)
                     }
                 } else {
-                    WorkspaceEmptyState(title:"这里暂时没有材料",systemImage:materialFilter == "回收站" ? "trash" : "archivebox",description:materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。") {
-                        Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
+                    WorkspaceEmptyState(title:"这里暂时没有材料",systemImage:materialFilter == .trash ? "trash" : "archivebox",description:materialFilter == .archived ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。") {
+                        Button("查看日常材料") { materialFilter = .daily }.buttonStyle(.workspaceSecondary)
                     }
                 }
             } else {
@@ -3539,7 +3541,7 @@ struct WorkspaceView: View {
         }
         return rows
     }
-    private func cycledFilter(_ current:String, over filters:[String], forward:Bool) -> String {
+    private func cycledFilter<Filter: Equatable>(_ current: Filter, over filters: [Filter], forward: Bool) -> Filter {
         guard !filters.isEmpty, let index=filters.firstIndex(of: current) else { return filters.first ?? current }
         return filters[(index + (forward ? 1 : -1) + filters.count) % filters.count]
     }
@@ -3621,7 +3623,7 @@ struct WorkspaceView: View {
             guard materialKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
             return .handled
         case .leftArrow, .rightArrow:
-            let next=cycledFilter(materialFilter, over: SavedViewPage.materials.filters, forward: press.key == .rightArrow)
+            let next=cycledFilter(materialFilter, over: MaterialReadingFilter.allCases, forward: press.key == .rightArrow)
             guard next != materialFilter else { return .ignored }
             materialFilter=next
             return .handled
@@ -4064,7 +4066,10 @@ struct WorkspaceView: View {
     private func openSavedView(_ view:SavedWorkspaceView) {
         path=[]
         switch view.page {
-        case .materials: materialFilter=view.filter;page = .materials
+        case .materials:
+            guard let filter = MaterialReadingFilter(rawValue: view.filter) else { return }
+            materialFilter = filter
+            page = .materials
         case .actions: actionFilter=view.filter;page = .actions
         }
         error=""
