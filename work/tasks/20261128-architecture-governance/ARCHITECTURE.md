@@ -1,6 +1,6 @@
 # VoiceOS 架构现状与任务池
 
-基线为日常版源码 `964c164`，依赖以 [Package.swift](../../../Package.swift) 为准。运行时职责以当前实现和正常调用入口为准。该文件随架构治理任务更新。
+基线为 `main` 的日常版源码（A16 起自 `964c164` 延续，2026-11-29 主线为 `59587e5`），依赖以 [Package.swift](../../../Package.swift) 为准。运行时职责以当前实现和正常调用入口为准。该文件随架构治理任务更新。
 
 ## 依赖方向
 
@@ -34,6 +34,10 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | 历史批注与记忆 | App 的 `NoteHistoryMemory` 适配 Hindsight，按库保存同步配置和批注文件，SwiftUI 用段落定位呈现。 | 笔记正文与历史批注独立。此前启用试点的库能继续读取已有配置。 |
 | 消息监测 | Core 的 `MessageMonitorRunner` 等处理工作与回执，Platform 运行网页及 QQ 采集，App 的 `MonitorCenter` 管启动、配置、凭据与状态展示。 | 来源各自保有读取和投递进度；网络错误及投递结果可区分。 |
 | 备份和跨库读取 | `DatabaseBackup` 管本机 SQLite 备份及原件检查，`PortablePackage` 管独立格式的导出与恢复，`ReadOnlyLibrary` 提供 CLI 的一致快照。 | 导出版本独立于 SQLite schema；只读 CLI 能在应用持有互斥锁时读取，写回仍由应用执行。 |
+| 云端处理许可 | `SourcePolicy` 是授权写入与历史版本核对的权威（A17）；各出站调用以「目的地非云端或全部来源非仅本地」守卫，出站身份由 `ModelConfiguration.accepts` 统一校验（A14）。 | 材料 `local_only`、修订账本与许可版本冻结；请求身份与端口一致。 |
+| 转写版本与当前指针 | `TranscriptRevision`（A33）独占创建版本、编号与当前指针写入；材料投影按来源与版本定向读取（A34–A44）。 | 版本归属与回执、旧任务兼容、单材料单投影。 |
+| 时间、摘要与稳定编码 | `TimestampFormatting`（UTC、本地偏移、日键三档）、`Digest`（SHA-256 十六进制）、`StableJSON`（sortedKeys 确定性编码）是唯一构造点，均由架构检查钉住（A13/A47/A49/A50/A51）。 | 存储与回执的字节格式；身份与摘要不变。 |
+| 钥匙串凭据 | `KeychainCredential` 是唯一 SecItem 实现（A09/A46）；模型密钥、推送地址与历史批注只读凭据共用它，各自保留服务名、可访问性与错误文案。 | 缺失与不可读可区分；应用层不直接使用 Security。 |
 | UI 样式 | `WorkspaceTheme` 提供颜色，`WorkspaceDesign` 提供通用布局和控件，具体页面持有交互语义。 | 已认可的阅读排版、视觉层级、批注、默认页和快捷操作。 |
 
 ## 技术方案与偏离

@@ -26,7 +26,7 @@ owner: claude
 
 ## 下一步
 
-继续扫描保存格式兼容读取与备份恢复路径；若无进一步安全项，收敛到待确认清单（UI 令牌化）。
+A54 刷新架构地图的基线与状态所有权（新权威所有者：SourcePolicy、TranscriptRevision、TimestampFormatting、Digest、StableJSON、KeychainCredential）。若无进一步安全项，收敛到待确认清单（UI 令牌化）。
 
 ## 验证
 
