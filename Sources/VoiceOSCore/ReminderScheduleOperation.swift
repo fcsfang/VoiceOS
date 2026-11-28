@@ -213,7 +213,7 @@ extension VoiceOSStore {
         return .init(id: row["external_id"]!, title: row["title"]!, completed: row["completed"] == "1", marker: marker, dueDate: due)
     }
     static func scheduleJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
     static func scheduleBefore(_ row: [String:String]) throws -> ReminderSnapshot {

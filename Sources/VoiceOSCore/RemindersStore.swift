@@ -331,7 +331,7 @@ extension VoiceOSStore {
             if changed || feedbackID != nil {
                 try db.execute("INSERT INTO reminder_observations(id,link_id,external_id,title,completed,marker_valid,feedback_revision_id,created_at,sequence) VALUES(?,?,?,?,?,?,?,?,?)", [observationID,linkID,remote.id,remote.title,remote.completed ? "1" : "0",validMarker ? "1" : "0",feedbackID,ISO8601DateFormatter().string(from: Date()),String(sequence)])
                 if let due = remote.dueDate {
-                    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                    let encoder = StableJSON.makeEncoder()
                     let json = String(decoding: try encoder.encode(due), as: UTF8.self)
                     try db.execute("INSERT INTO reminder_time_observations(id,due_json) VALUES(?,?)", [observationID,json])
                 }

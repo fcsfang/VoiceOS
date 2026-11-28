@@ -50,7 +50,7 @@ extension VoiceOSStore {
 
     func validateTaskContinuations(_ links: [OrganizedTaskContinuation], excludingSourceIDs: Set<String>) throws {
         let current = Dictionary(uniqueKeysWithValues: try existingRecordingTasks(excludingSourceIDs: excludingSourceIDs).map { ($0.id, $0) })
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         for link in links {
             guard ["repeat", "progress", "outcome"].contains(link.relation), let task = current[link.target.id],
                   try encoder.encode(task) == encoder.encode(link.target), link.relation != "repeat" || task.state == "open" else {

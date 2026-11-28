@@ -22,7 +22,7 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
               !s.input.userTurns.isEmpty,s.input.conversationVersion == s.input.userTurns.count+1,
               s.context.scalarBudget > 0,!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
               Set(s.context.sources.map(\.sourceID)).count == s.context.sources.count else { throw ModelPortFailure.rejected("讨论请求身份、授权或预算不符") }
-        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys];encoder.dateEncodingStrategy = .iso8601
+        let encoder = StableJSON.makeEncoder(dateEncodingStrategy: .iso8601)
         guard s.context.contentDigest == VoiceOSStore.relevanceHash(try encoder.encode(s.context.sources)) else { throw ModelPortFailure.rejected("讨论请求输入摘要不符") }
         try VoiceOSStore.validateDiscussionBudget(s)
         let sources=s.context.sources.map { source -> [String:Any] in

@@ -79,7 +79,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     guard !needsAPIReview || tasks.api_review_completed == true else { throw VoiceOSError("外部 API 意图核对尚未完成；没有接入初稿或写入提醒事项") }
     guard !needsAPIReview || tasks.continuations_checked == true else { throw VoiceOSError("已有任务接续核对尚未完成；没有接入初稿或写入提醒事项") }
     guard !needsAPIReview || ((tasks.intent_review_completed ?? tasks.independent_semantic_review_completed) == true && (tasks.transcription_review_completed ?? tasks.audio_review_completed) == true) else { throw VoiceOSError("意图核对或全文转写校正尚未完成；没有写入提醒事项") }
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    let encoder = StableJSON.makeEncoder()
     if allowReminderWrites {
         guard let access = try reminderAccess(), access.enabled, access.title == "VoiceOS" else { throw VoiceOSError("请先在应用中连接正式 VoiceOS 清单") }
     }
@@ -376,7 +376,7 @@ public func writeOrganizingInput(sourceID: String, to folder: URL, reviewTranscr
 
     let transcript = CompletedQwenTranscript(backend: backend, text: text, spans: record.spans,
                                            processed_chunks: nil, total_chunks: nil, complete: true, duration_seconds: duration, transcription_review: record.transcriptionReview)
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    let encoder = StableJSON.makeEncoder()
     let transcriptURL = folder.appendingPathComponent("Qwen完整逐字稿.json")
     let userCorrected = try db.query("SELECT id FROM transcript_versions WHERE id=? AND reason='transcription_error' AND actor='user'", [version]).first != nil
     if FileManager.default.fileExists(atPath: transcriptURL.path) {
@@ -404,7 +404,7 @@ public func applyTranscriptQualityResult(sourceID: String, expectedVersionID: St
           source.transcriptionBackend == original.backend, reviewed.backend == original.backend,
           let review = reviewed.transcription_review, review.isCompleteFullTextReview,
           !review.response_id.isEmpty else { throw VoiceOSError("转写校正期间原话或许可已变化，未覆盖当前内容") }
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    let encoder = StableJSON.makeEncoder()
     if FileManager.default.fileExists(atPath: legacy.path) {
         guard try encoder.encode(source.spans) == encoder.encode(original.spans) else { throw VoiceOSError("转写校正依据的音频范围已变化") }
     } else {

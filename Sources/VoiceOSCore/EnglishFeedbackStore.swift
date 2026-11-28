@@ -117,7 +117,7 @@ extension VoiceOSStore {
                   context["destination"] == snapshot.destination.rawValue,
                   context["digest"] == snapshot.context.contentDigest,
                   let contextJSON = context["snapshot_json"] else { throw VoiceOSError("英文反馈上下文或用量绑定不一致") }
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            let encoder = StableJSON.makeEncoder()
             guard try encoder.encode(JSONDecoder().decode(LocalTranscriptContext.self, from: Data(contextJSON.utf8))) == encoder.encode(snapshot.context) else { throw VoiceOSError("英文反馈上下文内容不一致") }
             if let usage = row["usage_json"] {
                 let values = try JSONDecoder().decode([String: Int].self, from: Data(usage.utf8))

@@ -306,3 +306,9 @@
 - 完成：A47 十六进制 SHA-256 归一。新增 `Digest.sha256(_:)` 与 `Digest.hex(of:)`，22 个文件的 30 处内联全部迁移，`%02x` 规则只在 `Digest.swift` 允许。
 - 证据：架构检查 0 违规；593 项 Swift 测试通过。摘要输出逐字节不变，身份与回执无需迁移。
 - 下一步：A48 核对 UserDefaults 键清单。
+
+## 2026-11-28T16:23:51Z
+
+- 完成：A48 判定不做 UserDefaults 全局注册表（就近所有权足够）。A49 新增 `StableJSON.makeEncoder()`，26 个文件的 33 处 sortedKeys 配置归一，`outputFormatting = [.sortedKeys]` 规则只允许工厂内出现。
+- 证据：架构检查 0 违规；593 项 Swift 测试通过。编码字节不变；四处不同格式（pretty、无斜杠转义、动态 pretty）保留原实现。
+- 下一步：扫描子进程、临时文件与文件读写工具层。

@@ -37,7 +37,7 @@ public struct ResponsesEnglishPracticePort: EnglishPracticeModelPort {
     }
     func makeRequest(_ request: EnglishPracticeRequest) throws -> URLRequest {
         let s = request.snapshot
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         let sourceDigest = try VoiceOSStore.relevanceHash(encoder.encode(s.context.sources))
         guard configuration.accepts(request.configuration), s.destination == .cloud, UUID(uuidString: request.attemptID) != nil,
               s.context.sources.map(\.sourceID) == [s.currentSourceID] + s.priorSourceIDs,

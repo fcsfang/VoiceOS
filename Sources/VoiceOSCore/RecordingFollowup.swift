@@ -184,7 +184,7 @@ private final class FollowupTranscriptScalars {
 
 extension VoiceOSStore {
     private func followupJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
     private func rememberedThought(_ claim: CandidateClaim, catalog: [String: SourceRecord], scalarsCache: FollowupTranscriptScalars? = nil) throws -> RememberedThought? {

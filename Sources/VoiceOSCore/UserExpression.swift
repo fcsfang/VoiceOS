@@ -23,7 +23,7 @@ extension VoiceOSStore {
             guard let action = try db.query("SELECT version FROM actions WHERE id=?", [feedback.actionID]).first,
                   action["version"] == String(feedback.actionVersion) else { throw VoiceOSError("行动版本已变化，请重新核对反馈关联") }
         }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         let recipe = try feedback.map { String(decoding:try encoder.encode($0),as:UTF8.self) }
         let id = UUID().uuidString, asset = UUID().uuidString, version = UUID().uuidString
         let relative = "assets/\(asset).txt"

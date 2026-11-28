@@ -141,7 +141,7 @@ extension VoiceOSStore {
         return text
     }
     private static func scheduleDueJSON(_ due: ReminderDueDate) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(due), as: UTF8.self)
     }
     private static func scheduleIntent(_ row: [String: String], baseOperationID: String? = nil, eligible: Bool) throws -> ActionScheduleIntent {

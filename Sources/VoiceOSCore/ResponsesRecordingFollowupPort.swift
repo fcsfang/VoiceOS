@@ -82,7 +82,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
                       currentUnderstanding: input.currentUnderstanding, feedbackActionID: input.feedbackActionID,continuousExpression:input.continuousExpression)
     }
     private func selectHistory(_ input: RecordingFollowupInput, evidence: inout RunEvidence) async throws -> RelatedHistory {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         func value<T: Encodable>(_ item: T) throws -> Any { try JSONSerialization.jsonObject(with: encoder.encode(item)) }
         // The directory has every item, without transcript excerpts or item-count cutoffs.
         let payload: [String: Any] = ["current": try value(input.current), "continuousExpression":try input.continuousExpression.map { try value($0) } ?? NSNull(), "currentUnderstanding": input.currentUnderstanding ?? [],
@@ -98,7 +98,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
             name: "voiceos_followup_history", stage: .selectHistory, evidence: &evidence) { _ in }
     }
     private func call(_ input: RecordingFollowupInput, evidence: inout RunEvidence) async throws -> RecordingFollowupResult {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         let payloadInput: [String: Any] = ["recording": try JSONSerialization.jsonObject(with: encoder.encode(input))]
         let instructions = Self.instructions + "\ncontinuousExpression提供同一次表达按顺序排列的本人录音，以及origin=external的配对节目全文。外部内容仅作背景，不是用户观点或承诺，个人转述不等于认同；必须结合跨段补充、条件与后文修正理解current；不能孤立解释当前片段。引用与当前练习建议仍定位于current中的原话，不把另段原话冒充本段。"
         return try await request(payloadInput, instructions: instructions, schema: Self.schema,

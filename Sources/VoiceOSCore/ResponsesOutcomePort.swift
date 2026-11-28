@@ -23,7 +23,7 @@ public struct ResponsesOutcomePort:ConversationOutcomePort {
               s.input.conversationVersion == s.input.userTurns.count+2,!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
               let plan=s.reusePlan,plan.conversationID == s.input.conversationID,plan.conversationVersion == s.input.conversationVersion,
               plan.personalTargets.allSatisfy({ s.input.userTurns.contains($0) }) else { throw ModelPortFailure.rejected("成果请求身份、结束范围、许可或复用输入不符") }
-        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         guard s.context.contentDigest == VoiceOSStore.relevanceHash(try encoder.encode(s.context.sources)),Set(s.context.sources.map(\.sourceID)).count == s.context.sources.count else { throw ModelPortFailure.rejected("成果来源摘要或目录不符") }
         try VoiceOSStore.validateOutcomeBudget(s.context,s.replies)
         var expected=s.input.historySourceIDs,seen:Set<String>=[],timeline:[[String:Any]]=[]

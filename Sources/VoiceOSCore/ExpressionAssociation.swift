@@ -63,7 +63,7 @@ extension VoiceOSStore {
             let preferenceMode: CognitiveFeedbackMode
             let scalarBudget: Int
         }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return relevanceHash(try encoder.encode(Payload(current: snapshot.current, policyVersion: snapshot.policyVersion, destination: snapshot.destination, candidates: snapshot.candidates, preferenceVersion: snapshot.preferenceVersion, preferenceMode: snapshot.preferenceMode, scalarBudget: snapshot.scalarBudget)))
     }
     /// Completed receipts survive presentation preference changes; provenance must remain current.
@@ -81,7 +81,7 @@ extension VoiceOSStore {
               try expressionAssociationDigest(snapshot) == snapshot.contentDigest,
               proposals.count <= (snapshot.preferenceMode == .reduced ? 1 : 3) else { throw VoiceOSError("关联提案快照或数量不符") }
         let source = snapshot.current.sources[0]
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         guard UUID(uuidString: snapshot.id) != nil, snapshot.policyVersion > 0, snapshot.preferenceVersion >= 0,
               (1...8000).contains(snapshot.scalarBudget), snapshot.current.scalarBudget == snapshot.scalarBudget,
               source.origin == "user", source.speaker == "user", !source.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

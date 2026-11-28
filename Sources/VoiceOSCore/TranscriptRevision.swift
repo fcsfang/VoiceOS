@@ -57,7 +57,7 @@ extension VoiceOSStore {
     public func applyReviewedQwenTranscript(sourceID: String, expectedVersionID: String, speech: SpeechText, responseID: String) throws -> String {
         guard !responseID.isEmpty else { throw VoiceOSError("转写核对缺少回执") }
         return try db.transaction {
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            let encoder = StableJSON.makeEncoder()
             // A failed import can retry after the transcript was already saved.
             if let current = try db.query("SELECT v.* FROM transcript_versions v JOIN transcripts t ON t.current_version_id=v.id WHERE t.source_id=?", [sourceID]).first,
                current["reason"] == "ai_corrected", current["text"] == speech.text,
