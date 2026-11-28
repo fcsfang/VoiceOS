@@ -32,12 +32,12 @@ extension VoiceOSStore {
         guard let access = try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
         let linked = Set(try reminderLinks().map(\.actionID))
-        let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
         // Historical model batches remain auditable, but only claims from the
         // newest completed producer for each source may create new external
         // tasks.  Otherwise an old, previously unlinked task could reappear
         // after reprocessing and become a duplicate reminder.
-        let currentClaimIDs = Set(try latestCandidateClaimsBySource().values.flatMap { $0.map(\.id) })
+        let latestClaims = try latestCandidateClaimsBySource()
+        let claims = Dictionary(latestClaims.values.joined().map { ($0.id, $0) }, uniquingKeysWith: { claim, _ in claim })
         // A fresh understanding of the same source may add distinct task
         // identities. Keep a title barrier only within that source; identical
         // titles in separate recordings remain independent user tasks.
@@ -48,21 +48,21 @@ extension VoiceOSStore {
             for ref in refs { linkedTitleSources.insert(title + "|" + ref.sourceID) }
         }
         let pending = try actions().filter { action in
-            guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id), currentClaimIDs.contains(action.claimID), let claim = claims[action.claimID] else { return false }
+            guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id), let claim = claims[action.claimID] else { return false }
             guard !requireReviewedFields || action.intent?.reminderFields?.desired != nil else { return false }
             guard VoiceOSStore.bypassesLinkedTitleBarrier(commandID: action.commandID) || !claim.references.contains(where: { linkedTitleSources.contains(action.title + "|" + $0.sourceID) }) else { return false }
             // P01 grants the assistant autonomy for user-owned task actions.
             // The model may conservatively set autoSend=false; that flag is
             // advisory here. Ambiguous material remains an opportunity and is
             // therefore excluded by kind before reaching this path.
-            return claims[action.claimID]?.ownership == CandidateOwnership.userTentative.rawValue
+            return claim.ownership == CandidateOwnership.userTentative.rawValue
         }
         var failures = 0
         for action in pending {
             try Task.checkCancellation()
             try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
             // Do not let a local-only source block unrelated authorized tasks.
-            let claim = try candidateClaims().first { $0.id == action.claimID }
+            let claim = try refreshedCandidateClaim(id: action.claimID)
             guard let claim, try claim.references.allSatisfy({ try sourcePolicy(sourceID: $0.sourceID).localOnly == false }) else { continue }
             // An earlier task's await may let a newer batch supersede the
             // remaining snapshot. Skip it without starving unrelated sources.

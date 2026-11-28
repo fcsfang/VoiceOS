@@ -78,5 +78,17 @@ final class ContextValidationMemoChecks: XCTestCase {
         XCTAssertEqual(afterChange.first { $0.id == linked.id }?.validity, "frozen")
         XCTAssertEqual(afterChange.first { $0.id == unrelated.id }?.validity, "current")
         XCTAssertNil(current)
+
+        let staleSource = try await seedTask(store, text: "应用外改动的另一份材料。", title: "另外整理")
+        let staleOriginal = try await store.playableURL(sourceID: staleSource)
+        try Data("审阅期间变更了另一份原件".utf8).write(to: staleOriginal)
+        let frozenBeforeReview = await store.frozenContextCount
+        let revision = try await store.reviewClaim(claimID: unrelated.claimID, expectedVersion: unrelated.claimReviewVersion, action: .endorse)
+        let frozenAfterReview = await store.frozenContextCount
+        XCTAssertGreaterThan(frozenAfterReview, frozenBeforeReview)
+        XCTAssertEqual(revision, unrelated.claimReviewVersion + 1)
+        let reviewed = try await store.refreshedCandidateClaim(id: unrelated.claimID)
+        XCTAssertEqual(reviewed?.reviewState, "endorsed")
+        XCTAssertEqual(reviewed?.reviewVersion, revision)
     }
 }

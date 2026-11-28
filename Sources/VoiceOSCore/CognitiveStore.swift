@@ -257,10 +257,20 @@ extension VoiceOSStore {
         try candidateClaimRows(includeFrozen: includeFrozen, claimID: id).first.map(decodeCandidateClaim)
     }
 
-    private func candidateClaimRows(includeFrozen: Bool, attemptID: String? = nil, claimID: String? = nil) throws -> [[String: String]] {
+    /// A discussion or an earlier outcome can invalidate another producer's
+    /// claim. Refresh those dependencies before returning one selected row.
+    public func refreshedCandidateClaim(id: String, includeFrozen: Bool = false) throws -> CandidateClaim? {
+        try candidateClaimRows(includeFrozen: includeFrozen, claimID: id, validatesAllContexts: true).first.map(decodeCandidateClaim)
+    }
+
+    private func candidateClaimRows(includeFrozen: Bool, attemptID: String? = nil, claimID: String? = nil, validatesAllContexts: Bool = false) throws -> [[String: String]] {
         let selection = (attemptID == nil ? "" : " AND a.id=?") + (claimID == nil ? "" : " AND c.id=?")
         let arguments = [attemptID, claimID].compactMap { $0 }
-        try validateClaimContexts(matching: selection, arguments: arguments)
+        if validatesAllContexts {
+            try validateClaimContexts()
+        } else {
+            try validateClaimContexts(matching: selection, arguments: arguments)
+        }
         let whereClause = includeFrozen ? "WHERE 1=1" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
         return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause)\(selection) ORDER BY c.created_at,c.id", arguments)
     }

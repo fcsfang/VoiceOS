@@ -21,7 +21,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一审阅命令不能更换内容") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try candidateClaims(includeFrozen: true).first(where: { $0.id == claimID }),
+        guard let current = try refreshedCandidateClaim(id: claimID, includeFrozen: true),
               current.validity == "current" else { throw VoiceOSError("候选依据或授权已失效，不能继续认可或更正") }
         guard current.reviewVersion == expectedVersion else { throw VoiceOSError("审阅已更新，请重新读取候选") }
         let text: String, owner: String, decision: String, reason: String

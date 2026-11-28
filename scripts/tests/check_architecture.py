@@ -49,6 +49,11 @@ RULES = (
         re.compile(r"\bprompt_version\s+NOT\s+IN\s*\(\s*'topic-", re.IGNORECASE),
         "Claim producer eligibility belongs in",
     ),
+    (
+        (),
+        re.compile(r"\bcandidateClaims\([^()]*\)\s*\.first\s*(?:\(where:\s*)?\{\s*\$0\.id\s*=="),
+        "Use a claim ID lookup from",
+    ),
 )
 
 
@@ -61,7 +66,7 @@ def main() -> int:
                 continue
             for owners, pattern, diagnostic in RULES:
                 if relative not in owners and pattern.search(line):
-                    allowed = " or ".join(str(owner) for owner in owners)
+                    allowed = " or ".join(str(owner) for owner in owners) or "VoiceOSStore"
                     violations.append(f"{relative}:{number}: {diagnostic} {allowed}")
     for violation in violations:
         print(violation, file=sys.stderr)
