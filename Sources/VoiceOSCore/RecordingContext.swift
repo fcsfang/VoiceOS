@@ -316,6 +316,15 @@ public struct SourcePageIndex: Sendable {
 }
 
 extension VoiceOSStore {
+    /// A recording's context can use only its directly paired programme.
+    func recordingContextCatalog(sourceIDs: [String]) throws -> [String: SourceRecord] {
+        let sources = try sourceRecords(ids: Array(Set(sourceIDs)))
+        let companionIDs = Set(sources.compactMap { $0.presentation?.recordingContext?.externalSourceID })
+            .subtracting(sources.map(\.id))
+        let companions = try sourceRecords(ids: Array(companionIDs))
+        return Dictionary(uniqueKeysWithValues: (sources + companions).map { ($0.id, $0) })
+    }
+
     public func attachRecordingContext(personalSourceID: String, externalSourceID: String, sessionID: String, offsetMS: Int = 0) throws {
         let catalog = Dictionary(try sourceRecords(ids: [personalSourceID, externalSourceID]).map { ($0.id, $0) },
                                  uniquingKeysWith: { first, _ in first })
@@ -331,7 +340,7 @@ extension VoiceOSStore {
         try saveExpressionPresentation(presentation,sourceID:personalSourceID)
     }
     public func recordingContext(sourceID: String) throws -> RecordingContext? {
-        try recordingContext(sourceID: sourceID, catalog: sourceCatalog())
+        try recordingContext(sourceID: sourceID, catalog: recordingContextCatalog(sourceIDs: [sourceID]))
     }
     public func recordingContext(sourceID: String, catalog:[String:SourceRecord]) throws -> RecordingContext? {
         guard let personal=catalog[sourceID],let pairing=personal.presentation?.recordingContext else { return nil }
@@ -342,7 +351,7 @@ extension VoiceOSStore {
         return pairing
     }
     public func recordingContextSourceIDs(sourceIDs: [String]) throws -> [String] {
-        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: sourceCatalog())
+        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: recordingContextCatalog(sourceIDs: sourceIDs))
     }
     public func recordingContextSourceIDs(sourceIDs: [String], catalog:[String:SourceRecord]) throws -> [String] {
         var result=sourceIDs,seen=Set(sourceIDs)
@@ -352,7 +361,7 @@ extension VoiceOSStore {
         return result
     }
     public func prepareRecordingContext(sourceID: String) throws -> RecordingContextSnapshot? {
-        try prepareRecordingContext(sourceID: sourceID, catalog: sourceCatalog())
+        try prepareRecordingContext(sourceID: sourceID, catalog: recordingContextCatalog(sourceIDs: [sourceID]))
     }
     func prepareRecordingContext(sourceID: String, catalog: [String: SourceRecord]) throws -> RecordingContextSnapshot? {
         guard let pairing=try recordingContext(sourceID:sourceID,catalog:catalog) else { return nil }
@@ -362,7 +371,7 @@ extension VoiceOSStore {
         return .init(pairing:pairing,context:context)
     }
     public func recordingContextLinks(sourceID: String) throws -> [RecordingContextLink] {
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog = try recordingContextCatalog(sourceIDs: [sourceID])
         return try recordingContextLinks(sourceIDs: [sourceID], catalog: catalog)
     }
     /// One catalog and one claim read serve every source on the page.

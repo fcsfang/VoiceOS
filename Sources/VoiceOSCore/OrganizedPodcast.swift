@@ -110,7 +110,6 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     let previousActions = try actions(includeHistory: true).filter { $0.validity == "current" }
     var reusedActions: [Int: ActionRecord] = [:]
     var sourceIDs: [String: String] = [:]
-    var budget = 1
     for (folder, original, transcript, manifest) in inputs {
         let name = folder.lastPathComponent
         let id: String
@@ -148,7 +147,6 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         }
         if let review = transcript.transcription_review { try saveTranscriptionReview(review, sourceID: id) }
         sourceIDs[name] = id
-        budget += transcript.text.unicodeScalars.count
     }
     // Full-text correction may have advanced only the personal version. Rebind
     // the same physical session after verifying programme and both permissions.
@@ -163,13 +161,13 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         try attachRecordingContext(personalSourceID:pairing.personalSourceID,externalSourceID:pairing.externalSourceID,sessionID:pairing.sessionID,offsetMS:pairing.offsetMS)
     }
     let personalIDs=tasks.source_folders.compactMap { sourceIDs[URL(fileURLWithPath:$0).lastPathComponent] }
-    let expectedSnapshots=try personalIDs.compactMap { try prepareRecordingContext(sourceID:$0) }
+    let catalog = try recordingContextCatalog(sourceIDs: personalIDs)
+    let expectedSnapshots = try personalIDs.compactMap { try prepareRecordingContext(sourceID: $0, catalog: catalog) }
     let providedSnapshots=tasks.recording_contexts ?? []
     guard Set(expectedSnapshots.map { $0.pairing.personalSourceID }) == Set(providedSnapshots.map { $0.pairing.personalSourceID }),
           Set(providedSnapshots.map { $0.pairing.personalSourceID }).count == providedSnapshots.count else { throw VoiceOSError("完整整理缺少本次配对的节目上下文") }
-    let expandedIDs=try recordingContextSourceIDs(sourceIDs:personalIDs)
-    let catalog=Dictionary(uniqueKeysWithValues:try sources().map { ($0.id,$0) })
-    budget=max(1,expandedIDs.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
+    let expandedIDs = try recordingContextSourceIDs(sourceIDs: personalIDs, catalog: catalog)
+    let budget = max(1, expandedIDs.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
     let context = try prepareLocalTranscriptContext(sourceIDs:expandedIDs,scalarBudget:budget)
     let listDigest = SHA256.hash(data: taskData).map { String(format: "%02x", $0) }.joined()
     let command = "podcast-comprehensive:" + context.contentDigest + ":" + listDigest

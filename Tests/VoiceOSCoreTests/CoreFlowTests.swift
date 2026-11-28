@@ -1335,9 +1335,23 @@ final class CoreFlowTests: XCTestCase {
         do { _ = try await dual.recordingContextLinks(sourceID:personalID);XCTFail("旧双轨关联不能绕过节目更正") } catch {}
         let correctionMembers=try await dual.queueCorrectedRecordingUnderstanding(sourceID:programmeID,previousActionIDs:[dualTask.id])
         XCTAssertEqual(correctionMembers,[personalID])
+        let scopedRecordings = try await dual.recordingContextCatalog(sourceIDs: correctionMembers)
+        XCTAssertEqual(Set(scopedRecordings.keys), [personalID, programmeID])
+        do {
+            try await dual.refreshCorrectedRecordingContexts(sourceIDs: correctionMembers + ["missing-recording"])
+            XCTFail("有成员未就绪时，整批配对保持旧版本")
+        } catch {
+            let current = try await dual.sourceRecord(id: personalID)
+            XCTAssertEqual(current?.presentation?.recordingContext?.externalVersionID, programmeBefore.transcriptVersionID)
+        }
         // Explicit user correction is authoritative text; do not invent new
         // audio alignment or run an AI transcription correction over it.
         try await dual.refreshCorrectedRecordingContexts(sourceIDs:correctionMembers)
+        let refreshedPair = try await dual.recordingContext(sourceID: personalID)
+        let revisedProgramme = try await dual.sourceRecord(id: programmeID)
+        XCTAssertNotEqual(refreshedPair?.externalVersionID, programmeBefore.transcriptVersionID)
+        XCTAssertEqual(refreshedPair?.externalVersionID, revisedProgramme?.transcriptVersionID)
+        XCTAssertEqual(refreshedPair?.offsetMS, 250)
         let repairedGroups=try await dual.connectRecordingExpressions(using:fixture)
         let repairedGroup=try XCTUnwrap(repairedGroups.first)
         XCTAssertTrue(repairedGroup.previousActionIDs.contains(dualTask.id))

@@ -129,7 +129,7 @@ extension VoiceOSStore {
     /// After the ordinary full-text checks finish, update saved physical pair
     /// versions. It cannot enrol sources or authorize an unavailable companion.
     public func refreshCorrectedRecordingContexts(sourceIDs: [String]) throws {
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog = try recordingContextCatalog(sourceIDs: sourceIDs)
         var pairs: [RecordingContext] = []
         for id in Set(sourceIDs) {
             guard let personal = catalog[id], personal.presentation?.correctedSourceIDs != nil,
