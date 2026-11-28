@@ -236,9 +236,16 @@ public actor VoiceOSStore {
             throw error
         }
     }
+    // A source is one material even if an older library stored several jobs for it.
+    // Keep a completed text visible while another job is queued. For competing
+    // texts, preserve the first job in the existing source/configuration index.
     private static let sourceTranscriptJoin = """
-        FROM sources s LEFT JOIN jobs j
-          ON j.source_id=s.id AND j.stage='transcription' AND j.input_version_id=s.version_id
+        FROM sources s LEFT JOIN jobs j ON j.id=(
+            SELECT candidate.id FROM jobs candidate
+            LEFT JOIN transcripts candidate_text ON candidate_text.job_id=candidate.id
+            WHERE candidate.source_id=s.id AND candidate.stage='transcription' AND candidate.input_version_id=s.version_id
+            ORDER BY candidate_text.current_version_id IS NULL,candidate.config LIMIT 1
+        )
         LEFT JOIN transcripts t ON t.job_id=j.id
         """
 
@@ -272,9 +279,9 @@ public actor VoiceOSStore {
             SELECT s.id,t.current_version_id,s.policy_version,s.local_only
             \(Self.sourceTranscriptJoin) WHERE s.id IN (\(marks))
             """, ids)
-        return Dictionary(rows.map { row in
+        return Dictionary(uniqueKeysWithValues: rows.map { row in
             (row["id"]!, (row["current_version_id"], Int(row["policy_version"]!)!, row["local_only"] != "0"))
-        }, uniquingKeysWith: { first, _ in first })
+        })
     }
     private static func sourceRecord(_ row: [String: String]) throws -> SourceRecord {
         let feedback = try feedbackIntent(row["feedback_json"])

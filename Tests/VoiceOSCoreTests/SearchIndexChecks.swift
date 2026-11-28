@@ -602,11 +602,25 @@ final class SearchIndexChecks: XCTestCase {
         presentation.automatic = RecordingTitleProposal(sourceID: material, title: "旧版本自动标题", summary: "摘要", quotes: [])
         presentation.transcriptVersionID = oldVersion
         try setPresentation(db, sourceID: material, presentation)
+        try db.execute("""
+            INSERT INTO jobs(id,source_id,input_version_id,stage,config,state)
+            VALUES('queued-material-retry',?,?,'transcription','000-pending','queued')
+            """, [material, "version:" + material])
+        let materialRows = try await store.sourceRecords(ids: [material])
+        XCTAssertEqual(materialRows.map(\.id), [material])
+        XCTAssertEqual(materialRows.first?.transcriptVersionID, oldVersion)
+        XCTAssertEqual(materialRows.first?.jobState, "completed")
+        let revisions = try await store.sourceTranscriptRevisions(ids: [material])
+        XCTAssertEqual(revisions[material]?.versionID, oldVersion)
+        let queued = try await store.queuedTranscriptionSourceIDs()
+        XCTAssertEqual(queued, [material])
         try await store.rebuildSearchIndex()
 
         let hits = try await store.search(query: "旧版本")
         XCTAssertEqual(hits.map(\.refID), [material])
         XCTAssertEqual(hits.first?.title, "旧版本自动标题")
+        let newTextHits = try await store.search(query: "新的正文")
+        XCTAssertEqual(newTextHits.map(\.refID), [material])
     }
 
     func testGenerateTitlesSurvivesDuplicateTranscriptionJobs() async throws {
