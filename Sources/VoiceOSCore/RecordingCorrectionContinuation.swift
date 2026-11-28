@@ -6,7 +6,7 @@ extension VoiceOSStore {
     /// current interpretation still requires normal independent model review.
     @discardableResult
     public func queueCorrectedRecordingUnderstanding(sourceID: String, previousActionIDs: [String]) throws -> [String] {
-        guard let corrected = try sources().first(where: { $0.id == sourceID }), ["audio", "video"].contains(corrected.kind),
+        guard let corrected = try sourceRecord(id: sourceID), ["audio", "video"].contains(corrected.kind),
               let version = corrected.transcriptVersionID,
               try db.query("SELECT id FROM transcript_versions WHERE id=? AND reason='transcription_error' AND actor='user'", [version]).first != nil else {
             throw VoiceOSError("当前录音没有可自动继续的本人明确更正，或文字处理权限已暂停")

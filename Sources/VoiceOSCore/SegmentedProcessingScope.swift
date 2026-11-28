@@ -21,7 +21,7 @@ extension VoiceOSStore {
         guard extractIdentity.isValid, aggregateIdentity.isValid,
               extraction.destination == aggregation.destination,
               (1...maxBudget).contains(evidenceScalarBudget),
-              let record = try sources().first(where: { $0.id == sourceID }),
+              let record = try sourceRecord(id: sourceID),
               ["user_text", "audio"].contains(record.kind), record.origin == "user", record.speaker == "user" else {
             throw VoiceOSError("分段处理范围需要明确的个人表达、有效的同目的地端口及证据预算")
         }

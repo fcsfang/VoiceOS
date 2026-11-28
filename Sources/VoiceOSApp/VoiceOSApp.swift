@@ -380,7 +380,7 @@ final class ControlCenter: ObservableObject {
     private func associateUnderstoodExpression(_ id: String, segmentedBatchID: String? = nil) async {
         guard let store else { return }
         do {
-            guard let source = try await store.sources().first(where: { $0.id == id }), source.origin == "user", source.speaker == "user" else { return }
+            guard let source = try await store.sourceRecord(id: id), source.origin == "user", source.speaker == "user" else { return }
             associationStatuses[id] = "正在本机寻找授权历史；关联判断最多发送一次文字请求。"
             let local: any LocalRetrievalPort
             if let semanticRetrieval { local = semanticRetrieval } else { local = retrieval }
@@ -629,7 +629,7 @@ final class ControlCenter: ObservableObject {
         defer { initiationBusy = false }
         do {
             let chosenID = try await initiationSource(for: trimmed, preferred: sourceID, store: store)
-            if let source = try await store.sources().first(where: { $0.id == chosenID }), source.localOnly {
+            if let source = try await store.sourceRecord(id: chosenID), source.localOnly {
                 _ = try await store.setSourceLocalOnly(sourceID: chosenID, expectedVersion: source.policyVersion, localOnly: false)
             }
             let input = try await store.taskInitiationInput(sourceID: chosenID, mode: mode)
@@ -653,7 +653,7 @@ final class ControlCenter: ObservableObject {
         }
     }
     private func initiationSource(for text: String, preferred: String?, store: VoiceOSStore) async throws -> String {
-        if let preferred, let source = try await store.sources().first(where: { $0.id == preferred }),
+        if let preferred, let source = try await store.sourceRecord(id: preferred),
            source.origin == "user", source.speaker == "user", ["saved", "reference_only"].contains(source.state),
            source.transcript == text {
             return source.id
@@ -2059,7 +2059,7 @@ final class ControlCenter: ObservableObject {
         var externalSpeech=speech;externalSpeech.progressLog=log;fullRecordingLog=log
         setFullRecordingStatus("正在本机完整转写节目音轨，保留外部来源…")
         try await store.processTranscriptions(using:externalSpeech,sourceIDs:[externalID])
-        guard let external=try await store.sources().first(where: { $0.id == externalID }),external.jobState == "completed" else { throw VoiceOSError("节目完整转写尚未完成，保留本人转写等待续作") }
+        guard let external=try await store.sourceRecord(id: externalID),external.jobState == "completed" else { throw VoiceOSError("节目完整转写尚未完成，保留本人转写等待续作") }
         fullRecordingLog=nil
         // A genuinely silent system track is valid input, not a broken personal
         // recording. Keep its original without inventing programme context.
@@ -2124,7 +2124,7 @@ final class ControlCenter: ObservableObject {
                         guard try await !store.sourcePolicy(sourceID:id).localOnly else { throw VoiceOSError("这份录音已改为仅本地，自动合并停止") }
                         setFullRecordingStatus("正在完整转写新录音，随后自动判断连续表达…")
                         try await store.processTranscriptions(using:speech,sourceIDs:[id])
-                        guard let record=try await store.sources().first(where: { $0.id == id }),record.jobState == "completed",let version=record.transcriptVersionID else { throw VoiceOSError("完整录音转写尚未完成") }
+                        guard let record=try await store.sourceRecord(id: id),record.jobState == "completed",let version=record.transcriptVersionID else { throw VoiceOSError("完整录音转写尚未完成") }
                         let date=media.recordedAt ?? record.expressedDate?.ISO8601Format()
                         try await store.registerAutomaticRecording(sourceID:id,inbox:entry.inbox,recordedAt:date)
                         if record.needsTranscriptionReview {
@@ -2419,7 +2419,7 @@ final class ControlCenter: ObservableObject {
                     speech.progressLog = log
                     setFullRecordingStatus("Qwen 正在本地转写完整音轨…")
                     try await store.processTranscriptions(using: speech, sourceIDs: [id])
-                    if let failed = try await store.sources().first(where: { $0.id == id && $0.jobState == "failed" }) {
+                    if let failed = try await store.sourceRecord(id: id), failed.jobState == "failed" {
                         throw VoiceOSError(failed.error ?? "本地转写未完成；已保存的分段进度保留")
                     }
                 }
@@ -2542,7 +2542,7 @@ final class ControlCenter: ObservableObject {
             speech.progressLog = log; fullRecordingLog = log
             setFullRecordingStatus("Qwen 正在本地转写整段口述…")
             try await store.processTranscriptions(using: speech, sourceIDs: [sourceID])
-            if let failed = try await store.sources().first(where: { $0.id == sourceID && $0.jobState == "failed" }) {
+            if let failed = try await store.sourceRecord(id: sourceID), failed.jobState == "failed" {
                 throw VoiceOSError(failed.error ?? "本地转写未完成；已保存的分段进度保留")
             }
             try Task.checkCancellation()
@@ -2550,7 +2550,7 @@ final class ControlCenter: ObservableObject {
         try await completeFullOrganization(sourceID: sourceID, speech: speech, modelEnvironment: inputs.configuration, script: inputs.script)
     }
     private func completeFullOrganization(sourceID: String, speech: LocalQwenSpeechPort, modelEnvironment: [String: String], script: URL) async throws {
-        guard let store, let record = try await store.sources().first(where: { $0.id == sourceID }), let version = record.transcriptVersionID else { throw VoiceOSError("完整转写尚未保存") }
+        guard let store, let record = try await store.sourceRecord(id: sourceID), let version = record.transcriptVersionID else { throw VoiceOSError("完整转写尚未保存") }
         let policy = try await store.sourcePolicy(sourceID: sourceID)
         guard !policy.localOnly else { throw VoiceOSError("这份文字已限制为仅本机，完整整理已停止") }
         await refresh() // Transcription has completed; publish the durable stage once.
@@ -2772,7 +2772,7 @@ final class ControlCenter: ObservableObject {
         let task=Task {
             do {
                 try await ensureTranscriptReviewed(sourceID: record.id)
-                guard let current = try await store.sources().first(where: { $0.id == record.id }) else { throw VoiceOSError("资料已变化") }
+                guard let current = try await store.sourceRecord(id: record.id) else { throw VoiceOSError("资料已变化") }
                 // Model reconfiguration alone cannot regenerate this expression.
                 let batches=try await store.segmentedProcessingBatches()
                 let prior=batches.first { $0.scope.plan.source.sourceID == record.id && $0.scope.plan.source.transcriptVersionID == current.transcriptVersionID && $0.scope.plan.policyVersion == current.policyVersion }
@@ -2971,7 +2971,7 @@ final class ControlCenter: ObservableObject {
 
     private func reidentifySource(_ sourceID: String) async -> SourceReidentifyReceipt {
         guard let store else { return .failed("资料库尚未打开") }
-        guard let source = try? await store.sources().first(where: { $0.id == sourceID }) else { return .failed("材料已不存在") }
+        guard let source = try? await store.sourceRecord(id: sourceID) else { return .failed("材料已不存在") }
         guard let cognition = textModels?.cognition else { return .failed("需要先配置文本模型") }
         let localRetrieval: any LocalRetrievalPort
         if let semanticRetrieval { localRetrieval = semanticRetrieval } else { localRetrieval = retrieval }
@@ -3499,7 +3499,7 @@ final class ControlCenter: ObservableObject {
         guard let store else { return }
         do {
             try await store.validateTranscriptSegmentation(plan)
-            guard let record = try await store.sources().first(where: { $0.id == plan.source.sourceID }), record.state == "saved", let start = reference.containingSpanStartMS else { throw VoiceOSError("原片段时间未确认") }
+            guard let record = try await store.sourceRecord(id: plan.source.sourceID), record.state == "saved", let start = reference.containingSpanStartMS else { throw VoiceOSError("原片段时间未确认") }
             await playSpan(record,milliseconds:start)
         } catch { segmentationStatus = error.localizedDescription }
     }
@@ -5504,7 +5504,7 @@ extension ControlCenter {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
         try await store.renameReflectionQuestion(id: id, title: title)
         if let question = try await store.reflectionQuestions().first(where: { $0.id == id }),
-           let source = try await store.sources().first(where: { $0.id == question.sourceID }), source.localOnly == allowCloud {
+           let source = try await store.sourceRecord(id: question.sourceID), source.localOnly == allowCloud {
             _ = try await store.setSourceLocalOnly(sourceID: source.id, expectedVersion: source.policyVersion, localOnly: !allowCloud)
         }
         await refresh()
@@ -5800,7 +5800,7 @@ extension CognitiveContentKind {
 
 extension ControlCenter {
     func ensureTranscriptReviewed(sourceID: String, retry: Bool = false) async throws {
-        guard let store, let source = try await store.sources().first(where: { $0.id == sourceID }), source.needsTranscriptionReview else { return }
+        guard let store, let source = try await store.sourceRecord(id: sourceID), source.needsTranscriptionReview else { return }
         guard !source.localOnly, let version = source.transcriptVersionID,
               let speech = speechPort as? LocalQwenSpeechPort, let configuration = textModelOrganizerEnvironment,
               let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py") else {

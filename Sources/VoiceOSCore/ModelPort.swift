@@ -147,7 +147,7 @@ extension VoiceOSStore {
 // New source text or policy permits new work; reopening a window never resends old work.
 extension VoiceOSStore {
     public func understandSource(sourceID: String, using port: any ModelPort, retryKey: String? = nil) async throws -> [String] {
-        let source = try sources().first { $0.id == sourceID }
+        let source = try sourceRecord(id: sourceID)
         let budget = source?.kind == "external_text" ? max(1, source?.transcript?.unicodeScalars.count ?? 0) : 4000
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: budget)
         guard try db.query("""

@@ -62,7 +62,7 @@ extension VoiceOSStore {
             """, [sourceID]).first,
               let saved = row["snapshot_json"],
               let previous = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(saved.utf8)).sources.first(where: { $0.sourceID == sourceID }),
-              let source = try sources().first(where: { $0.id == sourceID }) else {
+              let source = try sourceRecord(id: sourceID) else {
             return UnderstandingPause(summary: "应用暂停了之前提取的观点和任务，但没有保存具体原因。", policyChange: nil)
         }
         if source.state == "quarantined" { return UnderstandingPause(summary: "保存的原件未通过完整性检查。请先恢复可用原件，暂时不能重新识别。", policyChange: nil) }

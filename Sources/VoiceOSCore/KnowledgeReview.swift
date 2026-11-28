@@ -209,7 +209,7 @@ extension KnowledgeReviewSourceSignature {
 extension VoiceOSStore {
     public func prepareKnowledgeReview(sourceID: String) throws -> KnowledgeReviewInput {
         knowledgeReviewPreparations += 1
-        guard ready, let source = try sources().first(where: { $0.id == sourceID }),source.origin == "user",source.speaker == "user",!source.needsTranscriptionReview,let text = source.transcript,!text.isEmpty,let version = source.transcriptVersionID else { throw VoiceOSError("知识核查只接受已有完整原话的个人资料") }
+        guard ready, let source = try sourceRecord(id: sourceID),source.origin == "user",source.speaker == "user",!source.needsTranscriptionReview,let text = source.transcript,!text.isEmpty,let version = source.transcriptVersionID else { throw VoiceOSError("知识核查只接受已有完整原话的个人资料") }
         let claims = try latestCandidateClaims(for: sourceID)
         guard !claims.isEmpty else { throw VoiceOSError("请先完成这份原话的理解，再进行知识核查") }
         let context = try prepareLocalTranscriptContext(sourceIDs:[sourceID],scalarBudget:max(1,text.unicodeScalars.count))

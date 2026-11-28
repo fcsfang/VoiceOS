@@ -12,7 +12,7 @@ extension VoiceOSStore {
     /// an unknown request. Long/continuous recordings keep their full-recording route.
     @discardableResult
     public func enqueueCorrectedSourceUnderstanding(sourceID: String, cognition: ModelConfiguration, association: ModelConfiguration) throws -> ExpressionProcessingIntentRecord {
-        guard let source = try sources().first(where: { $0.id == sourceID }),
+        guard let source = try sourceRecord(id: sourceID),
               let version = source.transcriptVersionID,
               try db.query("SELECT id FROM transcript_versions WHERE id=? AND reason='transcription_error' AND actor='user'", [version]).first != nil else {
             throw VoiceOSError("没有需要继续处理的当前原文更正")
@@ -33,7 +33,7 @@ extension VoiceOSStore {
     public func continueSourceUnderstanding(sourceID: String, using port: any ModelPort, retryKey: String? = nil) async throws -> SourceUnderstandingContinuation {
         try Task.checkCancellation()
         try requireReviewedTranscriptions(sourceIDs:[sourceID],destination:port.configuration.destination)
-        let source = try sources().first { $0.id == sourceID }
+        let source = try sourceRecord(id: sourceID)
         let budget = source?.kind == "external_text" ? max(1, source?.transcript?.unicodeScalars.count ?? 0) : 4000
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: budget)
         let policy = try sourcePolicy(sourceID: sourceID)

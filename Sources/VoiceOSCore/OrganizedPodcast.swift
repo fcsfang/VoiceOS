@@ -115,7 +115,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         let name = folder.lastPathComponent
         let id: String
         if let existingID = manifest.voiceos_source_id {
-            guard let existing = try sources().first(where: { $0.id == existingID }),
+            guard let existing = try sourceRecord(id: existingID),
                   existing.origin == "user",existing.speaker == "user",
                   existing.transcriptionBackend == original.backend, let originalVersion = manifest.voiceos_transcript_version_id else { throw VoiceOSError("完整整理的原话版本已变化，请重新整理") }
             guard !existing.localOnly else { throw VoiceOSError("这份文字已限制为仅本机，完整整理结果暂未接回；原件和逐字稿保留") }
@@ -137,7 +137,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
             id = try await importPersonalAudio(namedAudio, commandID: "podcast-full-qwen:" + name)
             try await processTranscriptions(using: original, sourceIDs: [id])
             if let review = transcript.transcription_review, review.completed, review.changed,
-               let version = try sources().first(where: { $0.id == id })?.transcriptVersionID {
+               let version = try sourceRecord(id: id)?.transcriptVersionID {
                 _ = try applyReviewedQwenTranscript(sourceID: id, expectedVersionID: version,
                                                    speech: SpeechText(text: transcript.text, spans: transcript.spans), responseID: review.response_id)
             }
@@ -154,8 +154,8 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     // the same physical session after verifying programme and both permissions.
     for snapshot in tasks.recording_contexts ?? [] {
         let pairing=snapshot.pairing
-        guard let personal=try sources().first(where: { $0.id == pairing.personalSourceID }),
-              let external=try sources().first(where: { $0.id == pairing.externalSourceID }),
+        guard let personal=try sourceRecord(id: pairing.personalSourceID),
+              let external=try sourceRecord(id: pairing.externalSourceID),
               personal.policyVersion == pairing.personalPolicyVersion,external.policyVersion == pairing.externalPolicyVersion,
               external.transcriptVersionID == pairing.externalVersionID,
               let currentPair=personal.presentation?.recordingContext,
@@ -301,7 +301,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
             bySource[link.personalSourceID,default:[]].append(.init(personalClaimID:claimIDs[taskIndex],externalClaimID:claimIDs[personalProposalCount+index],relation:link.relation,explanation:link.explanation,personalQuote:link.personalQuote,externalQuote:link.externalQuote,pairing:linkPairings[index],responseIDs:contextReceipts,personalReviewVersion:savedClaims[claimIDs[taskIndex]]?.reviewVersion,externalReviewVersion:savedClaims[claimIDs[personalProposalCount+index]]?.reviewVersion))
         }
         for id in personalIDs {
-            guard let source=try sources().first(where: { $0.id == id }) else { continue }
+            guard let source=try sourceRecord(id: id) else { continue }
             var presentation=source.presentation ?? RecordingPresentation()
             presentation.contextLinks=bySource[id] ?? []
             try saveExpressionPresentation(presentation,sourceID:id)
@@ -331,7 +331,7 @@ private func finishTranscriptImport(folders: [String], writeReadableCopy: Bool =
         let manifestURL = folder.appendingPathComponent("source.json")
         var sourceName = folder.lastPathComponent
         if let data = try? Data(contentsOf: manifestURL), var manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let id = manifest["voiceos_source_id"] as? String, let current = try sources().first(where: { $0.id == id })?.transcriptVersionID {
+           let id = manifest["voiceos_source_id"] as? String, let current = try sourceRecord(id: id)?.transcriptVersionID {
             sourceName = manifest["source_name"] as? String ?? sourceName
             manifest["voiceos_transcript_version_id"] = current
             try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]).write(to: manifestURL, options: .atomic)
@@ -364,7 +364,7 @@ private func finishTranscriptImport(folders: [String], writeReadableCopy: Bool =
     }
 }
 public func writeOrganizingInput(sourceID: String, to folder: URL, reviewTranscriptOnly: Bool = false) throws -> LocalTranscriptContext {
-    guard let record = try sources().first(where: { $0.id == sourceID }), reviewTranscriptOnly || (record.origin == "user" && record.speaker == "user"),
+    guard let record = try sourceRecord(id: sourceID), reviewTranscriptOnly || (record.origin == "user" && record.speaker == "user"),
           record.jobState == "completed", let text = record.transcript, !text.isEmpty,
           let backend = record.transcriptionBackend, backend.hasPrefix("Qwen3-ASR"), let duration = record.duration,
           let version = record.transcriptVersionID else { throw VoiceOSError("请先完成本人音轨的 Qwen 转写") }
@@ -400,7 +400,7 @@ public func applyTranscriptQualityResult(sourceID: String, expectedVersionID: St
     let legacy = folder.appendingPathComponent("Qwen核对逐字稿.json")
     let reviewed = FileManager.default.fileExists(atPath: legacy.path) ? try JSONDecoder().decode(CompletedQwenTranscript.self, from: Data(contentsOf: legacy)) : original
     let manifest = try JSONDecoder().decode(OrganizedSource.self, from: Data(contentsOf: folder.appendingPathComponent("source.json")))
-    guard let source = try sources().first(where: { $0.id == sourceID }), !source.localOnly,
+    guard let source = try sourceRecord(id: sourceID), !source.localOnly,
           source.transcriptVersionID == expectedVersionID,
           source.transcript == original.text || manifest.transcription_input_sha256 == transcriptInputDigest(source.transcript ?? ""),
           source.transcriptionBackend == original.backend, reviewed.backend == original.backend,

@@ -64,7 +64,7 @@ extension VoiceOSStore {
         expression.reminderUpdates?.removeAll { $0 == actionID }
         try db.transaction {
             for id in expression.sourceIDs {
-                guard var presentation=try sources().first(where: { $0.id == id })?.presentation else { throw VoiceOSError("连续表达来源缺失") }
+                guard var presentation=try sourceRecord(id: id)?.presentation else { throw VoiceOSError("连续表达来源缺失") }
                 presentation.expression=expression;try saveExpressionPresentation(presentation,sourceID:id)
             }
         }

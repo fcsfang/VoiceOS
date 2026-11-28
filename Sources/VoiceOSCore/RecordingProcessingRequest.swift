@@ -111,7 +111,7 @@ extension VoiceOSStore {
                       try Self.relevanceJSON(snapshot.association) == row["association_json"] else { throw VoiceOSError("录音队列归属或处理范围不符") }
                 try setRecordingRequest(id, state: "enqueued", queueID:queue["id"]); continue
             }
-            guard let current = try sources().first(where: {$0.id == source}) else { throw VoiceOSError("录音来源不存在") }
+            guard let current = try sourceRecord(id: source) else { throw VoiceOSError("录音来源不存在") }
             let sourceVersion = try db.query("SELECT version_id FROM sources WHERE id=?", [source]).first?["version_id"]
             guard sourceVersion == row["source_version_id"], current.policyVersion == Int(row["policy_version"]!),
                   current.origin == "user", current.speaker == "user" else {

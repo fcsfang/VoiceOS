@@ -272,6 +272,10 @@ public actor VoiceOSStore {
         return try db.query(Self.sourceSelect + " WHERE s.id IN (\(marks))", ids).map(Self.sourceRecord)
     }
 
+    public func sourceRecord(id: String) throws -> SourceRecord? {
+        try sourceRecords(ids: [id]).first
+    }
+
     func sourceTranscriptRevisions(ids: [String]) throws -> [String: (versionID: String?, policyVersion: Int, localOnly: Bool)] {
         guard !ids.isEmpty else { return [:] }
         let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")

@@ -200,7 +200,7 @@ public extension SourceRecord {
 }
 extension VoiceOSStore {
     func saveTranscriptionReview(_ review: TranscriptionReview, sourceID: String) throws {
-        guard let source = try sources().first(where: { $0.id == sourceID }), let version = source.transcriptVersionID,
+        guard let source = try sourceRecord(id: sourceID), let version = source.transcriptVersionID,
               review.completed, !review.response_id.isEmpty else { throw VoiceOSError("转写核对缺少当前版本或回执") }
         var saved = source.presentation ?? RecordingPresentation(), current = review
         current.transcriptVersionID = version
@@ -371,7 +371,7 @@ public extension SourceRecord {
 
 extension VoiceOSStore {
     public func recordTranscriptionReviewFailure(sourceID: String, reason: String) throws {
-        guard let source = try sources().first(where: { $0.id == sourceID }), let version = source.transcriptVersionID else {
+        guard let source = try sourceRecord(id: sourceID), let version = source.transcriptVersionID else {
             throw VoiceOSError("转写核对失败无法留存：缺少当前文字版本")
         }
         let clean = reason.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -385,7 +385,7 @@ extension VoiceOSStore {
         try savePresentation(saved, sourceID: sourceID)
     }
     public func clearTranscriptionReviewFailure(sourceID: String) throws {
-        guard let source = try sources().first(where: { $0.id == sourceID }), var saved = source.presentation,
+        guard let source = try sourceRecord(id: sourceID), var saved = source.presentation,
               saved.transcriptionReviewFailure != nil else { return }
         saved.transcriptionReviewFailure = nil
         try savePresentation(saved, sourceID: sourceID)

@@ -55,6 +55,11 @@ RULES = (
         "Use a claim ID lookup from",
     ),
     (
+        (),
+        re.compile(r"\bsources\(\)\s*\.first\s*(?:\(where:\s*)?\{\s*\$0\.id\s*=="),
+        "Use a material ID lookup from",
+    ),
+    (
         (Path("Sources/VoiceOSCore/TranscriptRevision.swift"),),
         re.compile(
             r"\b(?:INSERT\s+INTO\s+(?:transcripts|transcript_versions)\b|"

@@ -16,7 +16,7 @@ extension VoiceOSStore {
         guard let model else { return .init(state: .modelUnavailable, attempt: nil) }
         let policy = try sourcePolicy(sourceID: sourceID)
         if model.configuration.destination == .cloud && policy.localOnly { return .init(state: .localOnly, attempt: nil) }
-        guard let text = try sources().first(where: { $0.id == sourceID })?.transcript else { throw VoiceOSError("表达没有当前逐字稿") }
+        guard let text = try sourceRecord(id: sourceID)?.transcript else { throw VoiceOSError("表达没有当前逐字稿") }
         if text.unicodeScalars.count >= 8000 { return .init(state: .budgetExceeded, attempt: nil) }
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: 8000)
         let current = context.sources[0]
