@@ -24,8 +24,7 @@ RULES = (
         "Library path construction belongs in",
     ),
     (
-        (Path("Sources/VoiceOSPlatform/KeychainCredential.swift"),
-         Path("Sources/VoiceOSApp/NoteHistoryMemory.swift")),
+        (Path("Sources/VoiceOSPlatform/KeychainCredential.swift"),),
         re.compile(r"\bSecItem(?:Add|Update|Delete|CopyMatching)\b"),
         "Keychain access belongs in",
     ),
