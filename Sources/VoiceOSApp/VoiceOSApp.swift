@@ -1659,7 +1659,7 @@ final class ControlCenter: ObservableObject {
         homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords,
                                                        overrides: [], reviewRequiredActionIDs: reviewed)
     }
-    private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot, reminderAnomalies: ReminderSyncAnomalySummary = .empty) {
+    private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot) {
         records = snapshot.sources
         recordsRevision &+= 1
         claims = snapshot.claims
@@ -1683,7 +1683,7 @@ final class ControlCenter: ObservableObject {
         compensationGrants = snapshot.compensationGrants
         compensationOperations = snapshot.compensationOperations
         reminderLinks = snapshot.reminderLinks
-        reminderSyncAnomalies = reminderAnomalies
+        reminderSyncAnomalies = snapshot.reminderSyncAnomalies
         reminderAccess = snapshot.reminderAccess
         reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
         if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
@@ -1711,11 +1711,20 @@ final class ControlCenter: ObservableObject {
         StartupTrace.mark("secondary.followups=\(recordingFollowups.count)")
         secondaryRevision &+= 1
     }
-    private func applyAssistantSnapshot(_ snapshot: WorkspaceSnapshot) {
+    private func refreshAssistantSnapshot(from store: VoiceOSStore) async throws -> WorkspaceSnapshot {
+        let snapshot = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
         assistantExecutions = snapshot.assistantExecutions
         assistantAssessmentIssues = snapshot.assistantAssessmentIssues
         StartupTrace.mark("secondary.assistant=\(assistantExecutions.count) issues=\(assistantAssessmentIssues.count)")
         secondaryRevision &+= 1
+        StartupTrace.mark("reload.assistantPublished")
+        return snapshot
+    }
+
+    private func refreshKnowledgeSnapshot(from store: VoiceOSStore) async throws {
+        let snapshot = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
+        knowledgeReviews = snapshot.knowledgeReviews
+        StartupTrace.mark("reload.knowledgePublished")
     }
     @discardableResult
     private func reloadWorkspace(_ plan: RefreshPlan) async -> Bool {
@@ -1743,7 +1752,7 @@ final class ControlCenter: ObservableObject {
             if workspaceLastErrorRetry == .reload { clearWorkspaceError() }
             latestClaimsBySource = snapshot.currentClaimsBySource
             // Publish the core lists together, without awaits between related data sets.
-            applyCoreSnapshot(snapshot, reminderAnomalies: try await store.reminderSyncAnomalies())
+            applyCoreSnapshot(snapshot)
             coreSnapshotApplied = true
             StartupTrace.mark("reload.published")
             await validateCoreSelection(store: store)
@@ -1757,11 +1766,9 @@ final class ControlCenter: ObservableObject {
             contextsFroze = light.contextValidityChanged
             StartupTrace.mark("reload.secondaryPublished")
             try? await Task.yield()
-            let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
-            applyAssistantSnapshot(assistant)
+            let assistant = try await refreshAssistantSnapshot(from: store)
             assistantSnapshot = assistant
             contextsFroze = contextsFroze || assistant.contextValidityChanged
-            StartupTrace.mark("reload.assistantPublished")
             try? await Task.yield()
             followupValidity = try await StartupTrace.measureAsync("reload.followupValidity") {
                 try await store.recordingFollowupValidities(recordingFollowups,
@@ -1771,16 +1778,14 @@ final class ControlCenter: ObservableObject {
                     latest: coreSnapshotApplied && !contextsFroze ? latestClaimsBySource : nil)
             }
             StartupTrace.mark("reload.validityPublished")
-            let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
-            knowledgeReviews = knowledge.knowledgeReviews
-            StartupTrace.mark("reload.knowledgePublished")
+            try await refreshKnowledgeSnapshot(from: store)
             stalledOutcomes = try await StartupTrace.measureAsync("reload.stalledOutcomes") { (try? await store.stalledOutcomes()) ?? [] }
             englishAttempts = try await StartupTrace.measureAsync("reload.englishAttempts") { try await store.englishFeedbackAttempts() }
             await StartupTrace.measureAsync("reload.relevanceValidate") { await relevance.validate(store:store) }
             await StartupTrace.measureAsync("reload.quietFeedback") { await refreshQuietFeedback() }
             await StartupTrace.measureAsync("reload.sourceDiscussions") { await refreshSourceDiscussions() }
             if contextsFroze {
-                applyCoreSnapshot(try await store.workspaceSnapshot(.core), reminderAnomalies: try await store.reminderSyncAnomalies())
+                applyCoreSnapshot(try await store.workspaceSnapshot(.core))
                 StartupTrace.mark("reload.coreRepublished")
             }
         }
@@ -1797,7 +1802,7 @@ final class ControlCenter: ObservableObject {
         if plan.coreSecondary {
             do {
                 let snapshot = try await StartupTrace.measureAsync("reload.coreSecondarySnapshot") { try await store.workspaceSnapshot(.coreSecondary) }
-                applyCoreSnapshot(snapshot, reminderAnomalies: try await store.reminderSyncAnomalies())
+                applyCoreSnapshot(snapshot)
                 workspaceLoaded = true
                 StartupTrace.mark("reload.firstScreen")
                 await validateCoreSelection(store: store)
@@ -1808,18 +1813,14 @@ final class ControlCenter: ObservableObject {
         }
         if plan.assistant {
             do {
-                let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
-                applyAssistantSnapshot(assistant)
+                let assistant = try await refreshAssistantSnapshot(from: store)
                 contextsFroze = contextsFroze || assistant.contextValidityChanged
-                StartupTrace.mark("reload.assistantPublished")
                 resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistant)
             } catch { status = error.localizedDescription }
         }
         if plan.knowledge {
             do {
-                let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
-                knowledgeReviews = knowledge.knowledgeReviews
-                StartupTrace.mark("reload.knowledgePublished")
+                try await refreshKnowledgeSnapshot(from: store)
                 resumeKnowledgeReviews()
             } catch { status = error.localizedDescription }
         }

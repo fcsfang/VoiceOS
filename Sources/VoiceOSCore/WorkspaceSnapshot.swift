@@ -32,6 +32,7 @@ public struct WorkspaceSnapshot: Sendable {
     public var scheduleGrants: [ReminderScheduleGrant] = []
     public var schedulePreviews: [String: ReminderScheduleDecision] = [:]
     public var reminderLinks: [ReminderLink] = []
+    public var reminderSyncAnomalies: ReminderSyncAnomalySummary = .empty
     public var reminderAccess: ReminderAccess?
     public var topics: [ReflectionQuestion] = []
     public var topicSources: [String: [String]] = [:]
@@ -77,6 +78,7 @@ extension VoiceOSStore {
             result.compensationGrants = try StartupTrace.measure("snapshot.compensationGrants") { try reminderCompensationGrants() }
             result.compensationOperations = try StartupTrace.measure("snapshot.compensationOperations") { try reminderCompensationOperations() }
             result.reminderLinks = try StartupTrace.measure("snapshot.reminderLinks") { try reminderLinks() }
+            result.reminderSyncAnomalies = try StartupTrace.measure("snapshot.reminderSyncAnomalies") { try reminderSyncAnomalies() }
             result.reminderAccess = try StartupTrace.measure("snapshot.reminderAccess") { try reminderAccess() }
             result.topics = try StartupTrace.measure("snapshot.topics") { try reflectionQuestions() }
             result.topicSources = try StartupTrace.measure("snapshot.topicSources") { try reflectionQuestionSources() }
@@ -124,7 +126,7 @@ extension VoiceOSStore {
             result.scheduleIntents = try StartupTrace.measure("snapshot.scheduleIntents") { try actionScheduleIntents() }
             result.scheduleOperations = try StartupTrace.measure("snapshot.scheduleOperations") { try reminderScheduleOperations() }
             result.scheduleGrants = try StartupTrace.measure("snapshot.scheduleGrants") { try reminderScheduleGrants() }
-            result.reminderAccess = try reminderAccess()
+            if !wantsCore { result.reminderAccess = try reminderAccess() }
             if let access = result.reminderAccess, access.enabled {
                 for intent in result.scheduleIntents {
                     result.schedulePreviews[intent.id] = try? previewReminderSchedule(intentID: intent.id, expectedAccessVersion: access.version)
