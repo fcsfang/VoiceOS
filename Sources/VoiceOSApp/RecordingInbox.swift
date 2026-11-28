@@ -21,14 +21,6 @@ struct RecordingInboxInput {
     let inbox: String
 }
 
-enum RecordingInboxOutcome {
-    case completed
-    case retryableFailure(String)
-    /// 条件尚未就绪（等待配置、另一段整理占用、应用退出中断）：不计入三次自动重试预算。
-    case deferred(String)
-    case needsAttention(String)
-}
-
 struct RecordingInboxItem: Codable, Identifiable {
     enum State: String, Codable { case processing, retryScheduled, needsAttention }
     var id: String // Content hash is also the organizer import identity.

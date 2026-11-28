@@ -2138,7 +2138,7 @@ final class ControlCenter: ObservableObject {
                         try await prepareRecordingContext(input:entry.url,media:media,personalSourceID:id,personalTrack:track,staging:staging,speech:speech)
                         imported.append((entry.digest, id))
                     } catch {
-                        outcomes[entry.digest]=automaticRecordingFailure(error)
+                        outcomes[entry.digest]=RecordingInboxOutcome.failure(error, mode: .automatic)
                     }
                 }
                 await refresh()
@@ -2171,7 +2171,7 @@ final class ControlCenter: ObservableObject {
                         savedCount += 1
                         if fullRecordingCompletedSourceID == nil { fullRecordingCompletedSourceID = first.sourceID }
                     } catch {
-                        for entry in entries { outcomes[entry.digest] = automaticRecordingFailure(error) }
+                        for entry in entries { outcomes[entry.digest] = RecordingInboxOutcome.failure(error, mode: .automatic) }
                         if firstFailure == nil { firstFailure = error.localizedDescription }
                     }
                 }
@@ -2185,7 +2185,7 @@ final class ControlCenter: ObservableObject {
                 }
                 setFullRecordingStatus(firstFailure.map { "已保存 \(savedCount) 篇笔记，另有录音待处理：" + $0 } ?? "已保存 \(savedCount) 篇录音笔记")
             } catch {
-                let failure=automaticRecordingFailure(error)
+                let failure=RecordingInboxOutcome.failure(error, mode: .automatic)
                 for entry in batch where outcomes[entry.digest] == nil { outcomes[entry.digest]=failure }
                 setFullRecordingStatus(error.localizedDescription)
             }
@@ -2260,7 +2260,7 @@ final class ControlCenter: ObservableObject {
     private func understandPendingRecordingExpressions(store:VoiceOSStore,speech:LocalQwenSpeechPort,grouping:ResponsesRecordingExpressionPort,modelEnvironment:[String:String],script:URL) async throws {
         let root=await store.root
         let groups=try await store.recordingExpressions().filter { $0.state != "completed" }
-        var failures: [String] = []
+        var failures: [(title: String, error: Error)] = []
         for expression in groups {
             do {
                 try await understandRecordingExpression(expression, root: root, store: store, speech: speech, grouping: grouping, modelEnvironment: modelEnvironment, script: script)
@@ -2268,10 +2268,12 @@ final class ControlCenter: ObservableObject {
             catch {
                 let reason = error.localizedDescription
                 NSLog("VoiceOS recording recovery %@: %@", expression.id, reason)
-                failures.append(expression.title + "：" + reason)
+                failures.append((expression.title, error))
             }
         }
-        if !failures.isEmpty { throw VoiceOSError(failures.joined(separator: "\n")) }
+        if !failures.isEmpty {
+            throw RecordingInboxOutcome.aggregateUnderstandingFailures(failures)
+        }
     }
 
     private func understandRecordingExpression(_ expression: RecordingExpression, root: URL, store: VoiceOSStore, speech: LocalQwenSpeechPort, grouping: ResponsesRecordingExpressionPort, modelEnvironment: [String:String], script: URL) async throws {
@@ -2299,26 +2301,6 @@ final class ControlCenter: ObservableObject {
                 if !(try await store.latestCandidateClaims(for:id)).isEmpty { _ = try await store.enqueueKnowledgeReview(sourceID:id) }
             }
             await refresh()
-    }
-    private func automaticRecordingFailure(_ error:Error) -> RecordingInboxOutcome {
-        let message=error.localizedDescription
-        if error is CancellationError { return .deferred("处理被中断，将从已保存的转写与分组继续") }
-        // 按 HTTP 状态分类：408/429 与 5xx 是瞬时问题；401/403 是密钥或权限问题，需要用户处理。
-        if let status = Self.httpStatus(in: message) {
-            if status == 401 || status == 403 {
-                return .needsAttention("文本服务拒绝访问（HTTP \(status)）；请检查模型密钥与权限，重新保存后重试")
-            }
-            if status == 408 || status == 429 || (500...599).contains(status) {
-                return .retryableFailure(message)
-            }
-            return .needsAttention(message)
-        }
-        let temporary=["网络","timed out","connection","response.completed","本批录音","素材仍在更新","尚未完成","没有完成回执"]
-        return temporary.contains { message.localizedCaseInsensitiveContains($0) } ? .retryableFailure(message) : .needsAttention(message)
-    }
-    private static func httpStatus(in message:String) -> Int? {
-        guard let range=message.range(of: #"HTTP (\d{3})"#, options:.regularExpression) else { return nil }
-        return Int(message[range].dropFirst(5))
     }
     /// 完成面板的「打开这篇笔记」：收起面板并打开这次录音的材料页。
     func openCompletedFullRecording(_ sourceID: String) {
@@ -2430,12 +2412,10 @@ final class ControlCenter: ObservableObject {
                 success = true
             } catch is CancellationError {
                 setFullRecordingStatus("已停止；原件、逐字稿和已完成整理结果保留")
-                lastRecordingOutcome = .needsAttention("你已停止处理，点击重试后继续")
+                lastRecordingOutcome = RecordingInboxOutcome.failure(CancellationError(), mode: .manual)
             } catch {
                 setFullRecordingStatus(error.localizedDescription)
-                let text = error.localizedDescription
-                let temporary = ["HTTP 429", "HTTP 502", "HTTP 503", "HTTP 504", "网络", "timed out", "connection", "Incomplete text response", "response.completed", "temporarily unavailable", "server_error", "overloaded", "素材仍在更新"].contains { text.localizedCaseInsensitiveContains($0) }
-                lastRecordingOutcome = temporary ? .retryableFailure(text) : .needsAttention(text)
+                lastRecordingOutcome = RecordingInboxOutcome.failure(error, mode: .manual)
             }
             await refresh()
         }

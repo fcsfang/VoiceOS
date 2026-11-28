@@ -1,8 +1,14 @@
 import json
+import os
+import runpy
 import sys
 import tempfile
 import unittest
+import urllib.error
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import organizer_quality  # noqa: E402
@@ -39,6 +45,29 @@ class ReviewTranscriptFlowTests(unittest.TestCase):
             cache.write_text(json.dumps({"response_id": "resp-" + str(len(calls)), "result": result}, ensure_ascii=False))
             return result
         return ask, calls
+
+    def test_subprocess_failure_record_preserves_service_retries_and_diagnostics(self):
+        script = Path(__file__).resolve().parents[1] / "organize_podcast.py"
+        failure_file = self.folder / "failure.json"
+        opener = mock.Mock()
+        opener.open.side_effect = urllib.error.HTTPError("https://example.invalid/v1/responses", 503, "fixture", {}, None)
+        env = {
+            "VOICEOS_TEXT_BASE_URL": "https://example.invalid/v1",
+            "VOICEOS_TEXT_API_KEY": "fixture-key",
+            "VOICEOS_TEXT_MODEL": "fixture",
+            "VOICEOS_TEXT_EFFORT": "high",
+            "VOICEOS_ORGANIZER_FAILURE_FILE": str(failure_file),
+        }
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
+            sys, "argv", [str(script), str(self.folder), "--review-transcript-only"]
+        ), mock.patch("urllib.request.build_opener", return_value=opener), mock.patch(
+            "time.sleep"
+        ) as sleep, redirect_stdout(StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "^Text service HTTP 503; no response saved$"):
+                runpy.run_path(str(script), run_name="__main__")
+        self.assertEqual(sleep.call_args_list, [mock.call(5), mock.call(15)])
+        self.assertEqual(opener.open.call_count, 3)
+        self.assertEqual(json.loads(failure_file.read_text()), {"kind": "http", "status": 503})
 
     def test_receipt_path_follows_model_identity(self):
         first, first_calls = self.fake_ask([
