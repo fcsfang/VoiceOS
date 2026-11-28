@@ -69,19 +69,17 @@ extension ActionTimeSurface {
         var rows: [(entry: ActionTimeEntry, day: Date?, index: Int)] = []
         for (index, action) in actions.enumerated() {
             let readback = Self.meaningful(observed[action.id]?.remoteDueDate)
-            let readbackDate = readback.flatMap { Self.date($0, calendar: calendar) }
-            let linkedDate = Self.meaningful(linked[action.id]?.remoteDueDate).flatMap { Self.date($0, calendar: calendar) }
             let schedule = latestSchedules[action.id]
-            let local = Self.meaningful(schedule?.due)
-            let localDate = local.flatMap { Self.date($0, calendar: calendar) }
             let usesLocal = schedule != nil
-            let due = usesLocal ? local : readback
-            let day = usesLocal ? localDate : readbackDate
+            let due = usesLocal ? Self.meaningful(schedule?.due) : readback
+            let time = due?.actionTimeProjection(now: now, calendar: calendar)
+            let linkedTime = usesLocal
+                ? linked[action.id]?.remoteDueDate?.actionTimeProjection(now: now, calendar: calendar)
+                : nil
             let source: ActionTimeSource = usesLocal ? .localSchedule : (readback != nil ? .reminderReadback : .none)
-            let isOverdue = usesLocal ? Self.isPast(local, now: now, calendar: calendar) : Self.isPast(readback, now: now, calendar: calendar)
-            let entry = ActionTimeEntry(action: action, due: due, source: source, isOverdue: isOverdue,
-                                        needsLocalSyncLabel: usesLocal && localDate != linkedDate)
-            rows.append((entry, day.map { calendar.startOfDay(for: $0) }, index))
+            let entry = ActionTimeEntry(action: action, due: due, source: source, isOverdue: time?.isOverdue ?? false,
+                                        needsLocalSyncLabel: usesLocal && time?.date != linkedTime?.date)
+            rows.append((entry, time.map { calendar.startOfDay(for: $0.date) }, index))
         }
         func ordered(_ values: [(entry: ActionTimeEntry, day: Date?, index: Int)]) -> [ActionTimeEntry] {
             values.sorted { left, right in
@@ -99,32 +97,25 @@ extension ActionTimeSurface {
         guard let due, due != .none else { return nil }
         return due
     }
+}
 
-    private static func date(_ due: ReminderDueDate, calendar: Calendar) -> Date? {
-        switch due {
+extension ReminderDueDate {
+    /// A read projection for action lists. Date-only values keep the deadline's
+    /// time zone but are compared using the viewing calendar's day boundaries.
+    func actionTimeProjection(now: Date, calendar: Calendar) -> (date: Date, isOverdue: Bool)? {
+        switch self {
         case .none:
             return nil
         case let .dateOnly(localDate, zoneID):
             var zoneCalendar = Calendar(identifier: .gregorian)
             zoneCalendar.timeZone = zoneID.flatMap(TimeZone.init(identifier:)) ?? calendar.timeZone
             let parts = localDate.split(separator: "-").compactMap { Int($0) }
-            guard parts.count == 3 else { return nil }
-            return zoneCalendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+            guard parts.count == 3,
+                  let date = zoneCalendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else { return nil }
+            return (date, calendar.startOfDay(for: date) < calendar.startOfDay(for: now))
         case let .instant(utc, _):
-            if let date = ActionTimeFormatting.isoFractional.date(from: utc) { return date }
-            return ActionTimeFormatting.iso.date(from: utc)
-        }
-    }
-
-    private static func isPast(_ due: ReminderDueDate?, now: Date, calendar: Calendar) -> Bool {
-        guard let due, let date = date(due, calendar: calendar) else { return false }
-        switch due {
-        case .none:
-            return false
-        case .instant:
-            return date < now
-        case .dateOnly:
-            return calendar.startOfDay(for: date) < calendar.startOfDay(for: now)
+            guard let date = ActionTimeFormatting.isoFractional.date(from: utc) ?? ActionTimeFormatting.iso.date(from: utc) else { return nil }
+            return (date, date < now)
         }
     }
 }

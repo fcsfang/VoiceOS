@@ -393,43 +393,16 @@ public struct ReadOnlyLibrary {
         guard let json, let due = try? JSONDecoder().decode(ReminderDueDate.self, from: Data(json.utf8)) else {
             return nil
         }
+        let overdue = due.actionTimeProjection(now: now, calendar: .current)?.isOverdue ?? false
         switch due {
         case .none:
             return ReadOnlyDue(kind: "none", localDate: nil, utc: nil, timeZone: nil, source: source, isOverdue: false)
         case let .dateOnly(localDate, timeZone):
             return ReadOnlyDue(kind: "dateOnly", localDate: localDate, utc: nil, timeZone: timeZone,
-                               source: source, isOverdue: isOverdue(due, now: now))
+                               source: source, isOverdue: overdue)
         case let .instant(utc, timeZone):
             return ReadOnlyDue(kind: "instant", localDate: nil, utc: utc, timeZone: timeZone,
-                               source: source, isOverdue: isOverdue(due, now: now))
-        }
-    }
-
-    static func dueDate(_ due: ReminderDueDate) -> Date? {
-        switch due {
-        case .none:
-            return nil
-        case let .dateOnly(localDate, zoneID):
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = zoneID.flatMap(TimeZone.init(identifier:)) ?? .current
-            let parts = localDate.split(separator: "-").compactMap { Int($0) }
-            guard parts.count == 3 else { return nil }
-            return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
-        case let .instant(utc, _):
-            if let date = ActionTimeFormatting.isoFractional.date(from: utc) { return date }
-            return ActionTimeFormatting.iso.date(from: utc)
-        }
-    }
-
-    static func isOverdue(_ due: ReminderDueDate, now: Date) -> Bool {
-        guard let date = dueDate(due) else { return false }
-        switch due {
-        case .none:
-            return false
-        case .instant:
-            return date < now
-        case .dateOnly:
-            return Calendar.current.startOfDay(for: date) < Calendar.current.startOfDay(for: now)
+                               source: source, isOverdue: overdue)
         }
     }
 }

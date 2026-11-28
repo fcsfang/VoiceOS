@@ -55,3 +55,9 @@
 - 证据：592 项 Swift、19 项 Python 测试通过，调试应用签名验证通过；实际笔记历史批注、讨论和主题入口在 /tmp/voiceos-architecture-retired-ui.nvgpQx 验证。
 - 下一步：归一只读 CLI 和行动时间页的共同日期计算。
 - 待确认：unknown 链接的有效到期时间需要区分原始观察与对外计算结果。
+
+## 2026-11-28T02:52:06Z
+
+- 完成：统一行动界面和只读 CLI 的日期和逾期投影。
+- 证据：592 项 Swift 测试通过。真实副本 553 条行动和一条带截止日详情的 JSON 一致；「我的待办」分区界面与前版一致，见 /tmp/voiceos-architecture-action-time.zzQAmj。
+- 下一步：归一只读 CLI 列表和详情的行动基础字段，继续验证真实 JSON 与隐私选项。
