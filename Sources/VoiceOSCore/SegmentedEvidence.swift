@@ -48,14 +48,6 @@ extension VoiceOSStore {
         try validateSegmentedExpressionProcessingScope(batch.scope,extraction:extraction,aggregation:aggregation)
         return try Self.segmentedEvidenceLedger(batchID:batchID,scope:batch.scope,inputs:inputs)
     }
-    public func validateSegmentedEvidenceLedger(_ ledger: SegmentedEvidenceLedger, inputs: [SegmentEvidenceInput],
-        extraction: ModelConfiguration, aggregation: ModelConfiguration) throws {
-        let current = try prepareSegmentedEvidenceLedger(batchID:ledger.batchID,inputs:inputs,
-            extraction:extraction,aggregation:aggregation)
-        guard try Self.relevanceJSON(current) == Self.relevanceJSON(ledger) else {
-            throw VoiceOSError("整篇证据、覆盖范围或摘要已变化")
-        }
-    }
     static func validatedSegmentEvidence(scope: SegmentedExpressionProcessingScope, segment: TranscriptSegment,
         proposals: [SegmentEvidenceProposal]) throws -> [ValidatedSegmentEvidence] {
         let plan = scope.plan, scalars = Array(scope.plan.source.text.unicodeScalars)

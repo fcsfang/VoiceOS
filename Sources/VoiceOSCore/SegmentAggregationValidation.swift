@@ -30,11 +30,6 @@ public struct ValidatedSegmentAggregation: Sendable {
     public let contentDigest: String
 }
 extension VoiceOSStore {
-    public func validatePersistedSegmentAggregationReview(_ review: SegmentAggregationReview,
-        extraction: ModelConfiguration, aggregation: ModelConfiguration) throws -> ValidatedSegmentAggregation {
-        let ledger = try preparePersistedSegmentedEvidenceLedger(batchID:review.batchID,extraction:extraction,aggregation:aggregation)
-        return try Self.validateSegmentAggregationReview(review, ledger:ledger)
-    }
     static func validateSegmentAggregationReview(_ review: SegmentAggregationReview,
         ledger: SegmentedEvidenceLedger) throws -> ValidatedSegmentAggregation {
         guard review.batchID == ledger.batchID, review.ledgerDigest == ledger.contentDigest else {
