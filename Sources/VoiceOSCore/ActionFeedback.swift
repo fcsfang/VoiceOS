@@ -27,7 +27,7 @@ public enum ActionFeedbackLabel {
     }
 }
 
-public struct ActionFeedbackRecord: Identifiable, Codable, Sendable {
+public struct ActionFeedbackRecord: Identifiable, Codable, Sendable, Equatable {
     public let id: String
     public let actionID: String
     public let actionVersion: Int
@@ -40,6 +40,18 @@ public struct ActionFeedbackRecord: Identifiable, Codable, Sendable {
     public let relation: String?
     public var label: String { ActionFeedbackLabel.text(relation: relation, kind: kind) }
 }
+
+extension ActionFeedbackRecord {
+    static let textJoin = "JOIN transcript_versions v ON v.id=\(Database.latestTranscriptVersionForSource)"
+
+    static func read(_ row: [String: String], intent: FeedbackIntent?, sourceState: String? = nil) -> Self {
+        Self(id: row["id"]!, actionID: row["action_id"]!, actionVersion: Int(row["action_version"]!)!,
+             sourceID: row["source_id"]!, kind: row["kind"]!, text: row["text"]!,
+             sourceState: sourceState ?? row["source_state"]!, createdAt: row["created_at"]!,
+             recordingSourceID: intent?.recordingSourceID, relation: intent?.relation)
+    }
+}
+
 extension VoiceOSStore {
     /// Reuse the ordinary durable expression flow for explicitly authorized
     /// results, including after reopening or configuring a model later.
@@ -61,7 +73,7 @@ extension VoiceOSStore {
     public func actionFeedback(actionID: String) throws -> [ActionFeedbackRecord] {
         let rows = try db.query("""
         SELECT f.*,s.state AS source_state,s.feedback_json,v.text FROM action_feedback f JOIN sources s ON s.id=f.source_id
-        JOIN transcripts t ON t.source_id=s.id JOIN transcript_versions v ON v.id=t.current_version_id
+        \(ActionFeedbackRecord.textJoin)
         WHERE f.action_id=? ORDER BY f.sequence
         """, [actionID])
         let claimIDs = Set(try rows.compactMap { try Self.feedbackIntent($0["feedback_json"])?.organizedClaimID })
@@ -70,7 +82,7 @@ extension VoiceOSStore {
         return try rows.map {
             let intent = try Self.feedbackIntent($0["feedback_json"])
             let stale = intent?.organizedClaimID.map { claims[$0]?.validity != "current" } ?? false
-            return ActionFeedbackRecord(id:$0["id"]!, actionID:$0["action_id"]!, actionVersion:Int($0["action_version"]!)!, sourceID:$0["source_id"]!, kind:$0["kind"]!, text:$0["text"]!, sourceState:stale ? "frozen" : $0["source_state"]!, createdAt:$0["created_at"]!, recordingSourceID:intent?.recordingSourceID, relation:intent?.relation)
+            return ActionFeedbackRecord.read($0, intent: intent, sourceState: stale ? "frozen" : nil)
         }
     }
     static func feedbackIntent(_ text: String?) throws -> FeedbackIntent? {

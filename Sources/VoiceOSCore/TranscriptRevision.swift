@@ -2,6 +2,13 @@ import Foundation
 import CryptoKit
 
 extension Database {
+    // Feedback and the read-only library use the current revision of the latest
+    // transcription. The source in these projections is always aliased as s.
+    static let latestTranscriptVersionForSource = """
+        (SELECT t.current_version_id FROM transcripts t WHERE t.source_id=s.id
+         ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1)
+        """
+
     enum TranscriptRevisionReason: String {
         case original
         case manualCorrection = "transcription_error"

@@ -205,8 +205,7 @@ extension VoiceOSStore {
         let versions = Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0.version) })
         for row in try db.query("""
         SELECT f.action_id,f.action_version,s.id,s.state,s.feedback_json,v.text FROM action_feedback f
-        JOIN sources s ON s.id=f.source_id JOIN transcripts t ON t.source_id=s.id
-        JOIN transcript_versions v ON v.id=t.current_version_id ORDER BY f.sequence
+        JOIN sources s ON s.id=f.source_id \(ActionFeedbackRecord.textJoin) ORDER BY f.sequence
         """) {
             guard row["state"] == "saved", let sourceID = row["id"],catalog[sourceID]?.needsTranscriptionReview != true, let text = row["text"] else { continue }
             let intent = try Self.feedbackIntent(row["feedback_json"])
