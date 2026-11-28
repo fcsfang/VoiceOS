@@ -423,48 +423,93 @@ public extension SourceRecord {
     }
 }
 
-/// One materials-page body evaluation: rows for the selected filter and the
-/// tab counts for every filter. Grouping and expression dedupe run once per
-/// filter inside one construction, instead of once per tab plus once for rows.
+struct MaterialRowProjection {
+    enum Grouping {
+        // Compact lists can represent an expression by any member in their scope.
+        case firstVisibleMember
+        // Reading filters keep individual members visible until the group is fully in scope.
+        case completeExpression
+    }
+
+    let catalog: [String: SourceRecord]
+    let expressions: [String: RecordingExpression]
+
+    func rows(in sources: [SourceRecord], grouping: Grouping,
+              hidePairedContext: Bool) -> [(source: SourceRecord, date: String)] {
+        // A programme remains independent when its personal source is outside the list.
+        let attached = hidePairedContext ? Set(sources.compactMap { $0.pairedContextSourceID(in: catalog) }) : []
+        let selectedIDs = grouping == .completeExpression ? Set(sources.map(\.id)) : []
+        var represented = Set<String>()
+        return sources.compactMap { source in
+            guard !attached.contains(source.id) else { return nil }
+            guard let expression = expressions[source.id], expression.sourceIDs.count > 1 else {
+                return (source, source.createdAt)
+            }
+            switch grouping {
+            case .firstVisibleMember:
+                guard represented.insert(expression.id).inserted else { return nil }
+                return (source, source.createdAt)
+            case .completeExpression:
+                guard Set(expression.sourceIDs).isSubset(of: selectedIDs) else { return (source, source.createdAt) }
+                guard expression.sourceIDs.first == source.id else { return nil }
+                return (source, expression.sourceIDs.compactMap { catalog[$0]?.createdAt }.max() ?? source.createdAt)
+            }
+        }
+    }
+}
+
+public extension SourcePageIndex {
+    func groupedMaterialRows(in sources: [SourceRecord]) -> [SourceRecord] {
+        MaterialRowProjection(catalog: recordsByID, expressions: expressionsBySourceID)
+            .rows(in: sources, grouping: .firstVisibleMember, hidePairedContext: true)
+            .map(\.source)
+    }
+
+    func materialRailRows(in sources: [SourceRecord]) -> [SourceRecord] {
+        MaterialRowProjection(catalog: recordsByID, expressions: expressionsBySourceID)
+            .rows(in: sources, grouping: .firstVisibleMember, hidePairedContext: false)
+            .sorted { $0.date > $1.date }
+            .map(\.source)
+    }
+}
+
+/// Rows and counts for all material filters in the current workspace snapshot.
 public struct MaterialReadingPage: Sendable {
-    public let rows: [SourceRecord]
+    public var rows: [SourceRecord] { rowsByFilter[filter] ?? [] }
     public let counts: [String: Int]
+    private var filter: String
+    private let rowsByFilter: [String: [SourceRecord]]
+
     public init(records: [SourceRecord], filter: String, filters: [String],
                 readingStates: [String: SourceReadingState] = [:],
                 catalog: [String: SourceRecord],
                 expressions: [String: RecordingExpression] = [:]) {
+        let projection = MaterialRowProjection(catalog: catalog, expressions: expressions)
         var byFilter: [String: [SourceRecord]] = [:]
         for name in Set(filters + [filter]) {
-            byFilter[name] = Self.rows(records: records, filter: name, readingStates: readingStates,
-                                       catalog: catalog, expressions: expressions)
+            let selected = records.filter { source in
+                switch name {
+                case "回收站": return source.isTrashed
+                case "已归档": return source.isArchived
+                case "未读": return !source.isArchived && !source.isTrashed && (readingStates[source.id] ?? .unread) == .unread
+                case "在读": return !source.isArchived && !source.isTrashed && readingStates[source.id] == .reading
+                default: return !source.isArchived && !source.isTrashed
+                }
+            }
+            byFilter[name] = projection.rows(in: selected, grouping: .completeExpression, hidePairedContext: true)
+                .sorted { $0.date > $1.date }
+                .map(\.source)
         }
-        rows = byFilter[filter] ?? []
+        self.filter = filter
+        rowsByFilter = byFilter
         counts = byFilter.mapValues(\.count)
     }
-    private static func rows(records: [SourceRecord], filter: String,
-                             readingStates: [String: SourceReadingState],
-                             catalog: [String: SourceRecord],
-                             expressions: [String: RecordingExpression]) -> [SourceRecord] {
-        let selected = records.filter { source in
-            switch filter {
-            case "回收站": return source.isTrashed
-            case "已归档": return source.isArchived
-            case "未读": return !source.isArchived && !source.isTrashed && (readingStates[source.id] ?? .unread) == .unread
-            case "在读": return !source.isArchived && !source.isTrashed && readingStates[source.id] == .reading
-            default: return !source.isArchived && !source.isTrashed
-            }
-        }
-        let selectedIDs = Set(selected.map(\.id))
-        let attachedContextIDs = Set(selected.compactMap { $0.pairedContextSourceID(in: catalog) })
-            .intersection(selectedIDs)
-        let entries = selected.compactMap { source -> (SourceRecord, String)? in
-            guard !attachedContextIDs.contains(source.id) else { return nil }
-            guard let expression = expressions[source.id], expression.sourceIDs.count > 1,
-                  Set(expression.sourceIDs).isSubset(of: selectedIDs) else { return (source, source.createdAt) }
-            guard expression.sourceIDs.first == source.id else { return nil }
-            return (source, expression.sourceIDs.compactMap { catalog[$0]?.createdAt }.max() ?? source.createdAt)
-        }
-        return entries.sorted { $0.1 > $1.1 }.map(\.0)
+
+    public func selecting(_ filter: String) -> Self? {
+        guard rowsByFilter[filter] != nil else { return nil }
+        var selected = self
+        selected.filter = filter
+        return selected
     }
 }
 

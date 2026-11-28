@@ -357,7 +357,7 @@ private struct WorkspaceAttentionDot: View {
 private final class MaterialPageCache {
     struct Key: Equatable { let records: Int; let states: Int }
     var key: Key?
-    var pages: [String: MaterialReadingPage] = [:]
+    var page: MaterialReadingPage?
 }
 
 // Rebuilt only when records, secondary data, the minute or the filter change;
@@ -1233,29 +1233,16 @@ struct WorkspaceView: View {
             Button(actionTitle) { if let action { action() } else { go(.actions) } }.buttonStyle(.workspacePrimary)
         }.frame(maxWidth:.infinity)
     }
-    private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
-        let index=model.sourcePageIndex
-        let catalog=index.recordsByID
-        let attachedContextIDs=Set(sources.compactMap { $0.pairedContextSourceID(in: catalog) })
-        var seen=Set<String>()
-        return sources.filter { source in
-            // Keep a context recording independently reachable when its personal
-            // recording is outside this list, rather than hiding it globally.
-            guard !attachedContextIDs.contains(source.id) else { return false }
-            guard let expression=index.expression(for:source.id),expression.sourceIDs.count > 1 else { return true }
-            return seen.insert(expression.id).inserted
-        }
-    }
     private var readingMaterials: [SourceRecord] { materialPage.rows }
     private var materialPage: MaterialReadingPage {
         let key = MaterialPageCache.Key(records: model.recordsRevision, states: readingStatesRevision)
-        if materialPageCache.key != key { materialPageCache.key = key; materialPageCache.pages.removeAll() }
-        if let page = materialPageCache.pages[materialFilter] { return page }
+        if materialPageCache.key == key, let page = materialPageCache.page?.selecting(materialFilter) { return page }
         let page = MaterialReadingPage(records: model.records, filter: materialFilter,
                                        filters: SavedViewPage.materials.filters,
                                        readingStates: readingStates, catalog: recordCatalog,
                                        expressions: model.sourcePageIndex.expressionsBySourceID)
-        materialPageCache.pages[materialFilter] = page
+        materialPageCache.key = key
+        materialPageCache.page = page
         return page
     }
     private func materialDayGroups(_ sources: [SourceRecord]) -> [MaterialDayGroup] {
@@ -1403,7 +1390,7 @@ struct WorkspaceView: View {
 
     private var unlinkedTopicMaterials: [SourceRecord] {
         let linked = Set(model.workspaceTopicSources.values.flatMap { $0 })
-        return distinctExpressions(activeMaterials.filter { !linked.contains($0.id) })
+        return model.sourcePageIndex.groupedMaterialRows(in: activeMaterials.filter { !linked.contains($0.id) })
     }
     private var reviewInterval: DateInterval { reviewPeriod.interval(containing: reviewAnchor) }
     private func reviewSources(for reading: TopicReadingData) -> [SourceRecord] {
@@ -1617,7 +1604,7 @@ struct WorkspaceView: View {
         switch topicTab {
         case "材料":
             let catalog = recordCatalog
-            let expressions = distinctExpressions(reading.sources)
+            let expressions = model.sourcePageIndex.groupedMaterialRows(in: reading.sources)
             WorkspaceSection(title:"主题材料",count:reading.sources.count) {
                 VStack(spacing:0) {
                     ForEach(expressions) { source in
@@ -1674,7 +1661,7 @@ struct WorkspaceView: View {
             let interval=reviewInterval
             let sources=reviewSources(for: reading)
             let catalog=recordCatalog
-            let expressions=distinctExpressions(sources)
+            let expressions=model.sourcePageIndex.groupedMaterialRows(in: sources)
             VStack(spacing:0) {
                 ForEach(expressions) { source in
                     sourceRow(source,catalog:catalog)
@@ -2169,7 +2156,7 @@ struct WorkspaceView: View {
                         recentSearchChips
                     }
                 }
-                let sources=distinctExpressions(model.records.filter { !$0.isTrashed })
+                let sources=model.sourcePageIndex.groupedMaterialRows(in: model.records.filter { !$0.isTrashed })
                 if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
                 let catalog=recordCatalog
                 ForEach(sources) { source in
@@ -3179,7 +3166,7 @@ struct WorkspaceView: View {
     }
     private func unassignedTopicReasonSummary(_ sources:[SourceRecord],catalog:[String:SourceRecord]) -> String {
         var counts:[String:Int]=[:]
-        for source in distinctExpressions(sources) { counts[source.topicAssignmentReason(in:catalog),default:0] += 1 }
+        for source in model.sourcePageIndex.groupedMaterialRows(in: sources) { counts[source.topicAssignmentReason(in:catalog),default:0] += 1 }
         return counts.sorted { $0.value > $1.value }.prefix(3).map { "\($0.value) 份 · \($0.key)" }.joined(separator:"；")
     }
     private func splitMaterialExpression(_ ids:[String]) {
@@ -3722,7 +3709,7 @@ struct WorkspaceView: View {
         guard page == .themes, topic != nil, topicTab == "材料", topicMaterialListFocused,
               press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let ids=currentTopicReading.map { distinctExpressions($0.sources).map(\.id) } ?? []
+        let ids=currentTopicReading.map { model.sourcePageIndex.groupedMaterialRows(in: $0.sources).map(\.id) } ?? []
         switch press.key {
         case .downArrow, .upArrow:
             guard topicMaterialKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
@@ -3739,7 +3726,7 @@ struct WorkspaceView: View {
         guard page == .themes, topic != nil, topicTab == "认识与问题", topicReadingMode == "回顾", topicReviewListFocused,
               press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let ids=currentTopicReading.map { distinctExpressions(reviewSources(for: $0)).map(\.id) } ?? []
+        let ids=currentTopicReading.map { model.sourcePageIndex.groupedMaterialRows(in: reviewSources(for: $0)).map(\.id) } ?? []
         switch press.key {
         case .downArrow, .upArrow:
             guard topicReviewKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
@@ -3757,7 +3744,7 @@ struct WorkspaceView: View {
     private var searchKeyboardRows: [(id:String, open:()->Void)] {
         let term=query.trimmingCharacters(in:.whitespacesAndNewlines)
         if term.isEmpty {
-            return distinctExpressions(model.records.filter { !$0.isTrashed }).map { source in
+            return model.sourcePageIndex.groupedMaterialRows(in: model.records.filter { !$0.isTrashed }).map { source in
                 (id: "material:" + source.id, open: { go(.source(source.id)) })
             }
         }
@@ -3925,17 +3912,8 @@ struct WorkspaceView: View {
         } else { page = .notes }
         topicFocus=nil;error=""
     }
-    private var sourceRailRows: [SourceRecord] {
-        let index=model.sourcePageIndex
-        var seen=Set<String>()
-        return model.records.filter { source in
-            guard !source.isArchived,!source.isTrashed else { return false }
-            guard let expression=index.expression(for:source.id),expression.sourceIDs.count > 1 else { return true }
-            return seen.insert(expression.id).inserted
-        }.sorted { $0.createdAt > $1.createdAt }
-    }
     private func sourceRail(selectedID:String) -> some View {
-        let rows=sourceRailRows
+        let rows = model.sourcePageIndex.materialRailRows(in: activeMaterials)
         return VStack(alignment:.leading,spacing:0) {
             HStack(spacing:8) {
                 Text("材料").vosFont(WorkspaceText.meta.size, weight:.semibold).foregroundStyle(palette.secondaryText)
