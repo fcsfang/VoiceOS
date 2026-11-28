@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a local development app; no permissions request, install or daemon."""
 from pathlib import Path
-import argparse, hashlib, json, os, platform, plistlib, shutil, subprocess, sys, tempfile
+import argparse, ctypes, hashlib, json, os, platform, plistlib, shutil, subprocess, sys, tempfile
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser()
 parser.add_argument('--configuration', choices=['release', 'debug'], default='release', help='daily use defaults to optimized release; debug is opt-in')
@@ -25,6 +25,140 @@ else:
     if len(candidates) != 1:
         parser.error('Choose an existing --signing-identity for stable privacy permissions; --adhoc is only for disposable builds')
     signing_identity = candidates[0]
+
+def assemble_bundle(app, semantic_model, signing_identity):
+    organizer = app / 'Contents' / 'Resources' / 'organize_podcast.py'
+    organizer.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'scripts' / 'organize_podcast.py', organizer)
+    shutil.copy2(ROOT / 'scripts' / 'organizer_quality.py', organizer.with_name('organizer_quality.py'))
+    shutil.copy2(ROOT / 'scripts' / 'asr' / 'qwen-local.py', organizer.with_name('qwen-local.py'))
+    qqmonitor = app / 'Contents' / 'Resources' / 'qqmonitor'
+    qqmonitor.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / 'scripts' / 'qqmonitor' / 'qq_read_range.py', qqmonitor / 'qq_read_range.py')
+    resources = app / 'Contents' / 'Resources' / 'BGE'
+    if semantic_model:
+        source = semantic_model.resolve()
+        manifest = json.loads((source / 'manifest.json').read_text())
+        assert manifest['format'] == 'voiceos-bge-coreml-v1'
+        assert manifest['revision'] == '7999e1d3359715c523056ef9478215996d62a620'
+        resources.mkdir(parents=True)
+        for entry in manifest['files']:
+            relative = Path(entry['path'])
+            assert not relative.is_absolute() and '..' not in relative.parts
+            assert relative.parts[0] == 'Encoder.mlmodelc' or entry['path'] == 'vocab.txt'
+            file = source / relative
+            assert file.is_file() and not file.is_symlink() and file.resolve().is_relative_to(source)
+            data = file.read_bytes()
+            assert len(data) == entry['bytes'] and hashlib.sha256(data).hexdigest() == entry['sha256']
+            target = resources / relative; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(data)
+        shutil.copy2(source / 'manifest.json',resources / 'manifest.json')
+        notice = app / 'Contents' / 'Resources' / 'ThirdParty' / 'BGE-MIT.txt'
+        notice.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(ROOT / 'docs' / 'licenses' / 'BGE-MIT.txt',notice)
+    # Light and dark marks are supplied as full tiles. The bundle icon is the light
+    # tile for Finder; the app swaps the Dock icon at runtime with the same files.
+    light_logo = ROOT / 'logo' / 'voiceos-light.png'
+    dark_logo = ROOT / 'logo' / 'voiceos-dark.png'
+    for logo in (light_logo, dark_logo):
+        if not logo.is_file():
+            parser.error(f'Missing logo asset: {logo}')
+    bundle_resources = app / 'Contents' / 'Resources'
+    bundle_resources.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(light_logo, bundle_resources / 'VoiceOSLogoLight.png')
+    shutil.copy2(dark_logo, bundle_resources / 'VoiceOSLogoDark.png')
+    shutil.copy2(ROOT / 'Resources' / 'PrivacyInfo.xcprivacy', bundle_resources / 'PrivacyInfo.xcprivacy')
+    def generate_icon(scratch, output):
+        padded = Path(scratch) / 'IconMaster.png'
+        subprocess.run(['xcrun', 'swift', str(ROOT / 'scripts' / 'app' / 'pad_icon.swift'),
+                        str(light_logo), str(padded), '0.91'], check=True)
+        iconset = Path(scratch) / 'AppIcon.iconset'
+        iconset.mkdir()
+        for size in (16, 32, 128, 256, 512):
+            for suffix, pixels in (('', size), ('@2x', size * 2)):
+                subprocess.run(['sips', '-z', str(pixels), str(pixels), str(padded),
+                                '--out', str(iconset / f'icon_{size}x{size}{suffix}.png')],
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['iconutil', '-c', 'icns', str(iconset), '-o', str(output)], check=True)
+
+    # Keep derived artwork in the build cache; changes to the source or recipe invalidate it.
+    icon_digest = hashlib.sha256()
+    for path in (light_logo, ROOT / 'scripts/app/pad_icon.swift', Path(__file__)):
+        icon_digest.update(path.read_bytes())
+    icon_cache = ROOT / '.build' / 'icons'
+    icon_cache.mkdir(parents=True, exist_ok=True)
+    cached_icon = icon_cache / (icon_digest.hexdigest() + '.icns')
+    if not cached_icon.exists():
+        with tempfile.TemporaryDirectory(dir=icon_cache) as scratch:
+            generated_icon = Path(scratch) / 'AppIcon.icns'
+            generate_icon(scratch, generated_icon)
+            generated_icon.replace(cached_icon)
+    shutil.copy2(cached_icon, bundle_resources / 'AppIcon.icns')
+    info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundleIconFile='AppIcon', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
+    if (ROOT / '.env').is_file(): info['VoiceOSModelConfigurationPath'] = str(ROOT / '.env')
+    info['CFBundleURLTypes'] = [dict(CFBundleURLName='VoiceOS task', CFBundleURLSchemes=['voiceos'])]
+    info['NSServices'] = [
+        dict(NSMenuItem=dict(default='存入 VoiceOS（文字）'), NSMessage='captureText', NSPortName='VoiceOS', NSSendTypes=['NSStringPboardType', 'public.utf8-plain-text']),
+        dict(NSMenuItem=dict(default='存入 VoiceOS（文件）'), NSMessage='captureFile', NSPortName='VoiceOS', NSSendTypes=['NSFilenamesPboardType', 'public.file-url']),
+    ]
+    with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
+    # App Intents metadata: Shortcuts and Siri read Contents/Resources/Metadata.appintents.
+    # SwiftPM has no step for it, so replicate the compiler const-values pass and the processor.
+    # A metadata failure must not block signing or replace the previous good app with an unsigned one.
+    try:
+        target = bundle_resources / 'Metadata.appintents'
+        sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+        toolchain = subprocess.check_output(['xcode-select', '-p'], text=True).strip() + '/Toolchains/XcodeDefault.xctoolchain'
+        xcode_version = subprocess.check_output(['xcodebuild', '-version'], text=True).split()[1]
+        target_triple = platform.machine() + '-apple-macos26.0'
+        intents_source = ROOT / 'Sources' / 'VoiceOSApp' / 'AppIntents.swift'
+        with tempfile.TemporaryDirectory() as scratch:
+            protocols = Path(scratch) / 'protocols.json'
+            protocols.write_text(json.dumps(['AppIntent', 'AppShortcutsProvider', 'AppEntity', 'AppEnum']))
+            const_values = Path(scratch) / 'AppIntents.swiftconstvalues'
+            subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc', '-typecheck', '-module-name', 'VoiceOSApp',
+                            '-sdk', sdk, '-target', target_triple,
+                            '-Xfrontend', '-const-gather-protocols-file', '-Xfrontend', str(protocols),
+                            '-Xfrontend', '-emit-const-values-path', '-Xfrontend', str(const_values),
+                            str(intents_source)], check=True)
+            values_list = Path(scratch) / 'constvalues.txt'
+            values_list.write_text(str(const_values) + '\n')
+            sources_list = Path(scratch) / 'sources.txt'
+            sources_list.write_text(str(intents_source) + '\n')
+            output = Path(scratch) / 'Metadata'
+            subprocess.run(['xcrun', 'appintentsmetadataprocessor',
+                            '--output', str(output),
+                            '--toolchain-dir', toolchain,
+                            '--module-name', 'VoiceOSApp',
+                            '--sdk-root', sdk,
+                            '--xcode-version', xcode_version,
+                            '--platform-family', 'macos',
+                            '--deployment-target', '26.0',
+                            '--target-triple', target_triple,
+                            '--source-file-list', str(sources_list),
+                            '--swift-const-vals-list', str(values_list)], check=True)
+            shutil.copytree(output / 'Metadata.appintents', target)
+    except Exception as error:
+        shutil.rmtree(target, ignore_errors=True)
+        print(f'warning: App Intents metadata skipped: {error}')
+    subprocess.run(['codesign', '--force', '--sign', signing_identity, str(app)], check=True)
+    subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
+
+def publish_bundle(staged, destination):
+    if not destination.exists() and not destination.is_symlink():
+        staged.rename(destination)
+        return
+    if not destination.is_dir() or destination.is_symlink():
+        raise RuntimeError(f'Expected an app bundle directory at {destination}')
+    # macOS RENAME_SWAP publishes the signed tree and moves the previous tree
+    # into the staging directory in one operation on the same volume.
+    rename_swap = ctypes.CDLL(None, use_errno=True).renamex_np
+    rename_swap.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+    rename_swap.restype = ctypes.c_int
+    swap_flag = 0x00000002
+    if rename_swap(os.fsencode(staged), os.fsencode(destination), swap_flag) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), destination)
+
 env = dict(os.environ)
 env.pop('SDKROOT', None)
 # Release WMO compiles the whole app module in one frontend; peak RSS hit 30GB+
@@ -32,7 +166,9 @@ env.pop('SDKROOT', None)
 flags = ['-j', '4']
 if args.configuration == 'release':
     flags += ['-Xswiftc', '-no-whole-module-optimization', '-Xswiftc', '-incremental']
-# Serialize with every other swift build on this machine; 16GB cannot hold two.
+swift_build = ['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration]
+
+# Serialize builds with existing worktrees and keep the lock through publication.
 lock = Path('/tmp/voiceos-swift-build.lock')
 import time
 acquired = False
@@ -48,134 +184,19 @@ for _ in range(240):
 if not acquired:
     raise SystemExit('另一个 swift 构建长期占用 /tmp/voiceos-swift-build.lock；拒绝无锁构建')
 try:
-    subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, *flags, '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
+    subprocess.run([*swift_build, *flags, '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
+    bin_path = Path(subprocess.check_output([*swift_build, '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
+    app = ROOT / 'dist' / 'VoiceOS.app'
+    app.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.voiceos-build-', dir=app.parent) as staging:
+        staged = Path(staging) / app.name
+        executable = staged / 'Contents' / 'MacOS' / 'VoiceOS'
+        executable.parent.mkdir(parents=True)
+        shutil.copy2(bin_path / 'VoiceOS', executable)
+        assemble_bundle(staged, args.semantic_model, signing_identity)
+        publish_bundle(staged, app)
+    register = Path('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister')
+    if register.is_file(): subprocess.run([str(register), '-f', str(app)], check=True)
+    print(app)
 finally:
     lock.rmdir()
-bin_path = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
-app = ROOT / 'dist' / 'VoiceOS.app'
-mac = app / 'Contents' / 'MacOS'
-mac.mkdir(parents=True, exist_ok=True)
-shutil.copy2(bin_path / 'VoiceOS', mac / 'VoiceOS')
-organizer = app / 'Contents' / 'Resources' / 'organize_podcast.py'
-organizer.parent.mkdir(parents=True, exist_ok=True)
-shutil.copy2(ROOT / 'scripts' / 'organize_podcast.py', organizer)
-shutil.copy2(ROOT / 'scripts' / 'organizer_quality.py', organizer.with_name('organizer_quality.py'))
-shutil.copy2(ROOT / 'scripts' / 'asr' / 'qwen-local.py', organizer.with_name('qwen-local.py'))
-qqmonitor = app / 'Contents' / 'Resources' / 'qqmonitor'
-qqmonitor.mkdir(parents=True, exist_ok=True)
-shutil.copy2(ROOT / 'scripts' / 'qqmonitor' / 'qq_read_range.py', qqmonitor / 'qq_read_range.py')
-if (qqmonitor / '__pycache__').exists(): shutil.rmtree(qqmonitor / '__pycache__')
-bytecode = organizer.parent / '__pycache__'
-if bytecode.exists(): shutil.rmtree(bytecode)  # Generated Python cache must not alter the signed app.
-resources = app / 'Contents' / 'Resources' / 'BGE'
-if resources.exists(): shutil.rmtree(resources)  # Only generated build resources.
-if args.semantic_model:
-    source = args.semantic_model.resolve()
-    manifest = json.loads((source / 'manifest.json').read_text())
-    assert manifest['format'] == 'voiceos-bge-coreml-v1'
-    assert manifest['revision'] == '7999e1d3359715c523056ef9478215996d62a620'
-    resources.mkdir(parents=True)
-    for entry in manifest['files']:
-        relative = Path(entry['path'])
-        assert not relative.is_absolute() and '..' not in relative.parts
-        assert relative.parts[0] == 'Encoder.mlmodelc' or entry['path'] == 'vocab.txt'
-        file = source / relative
-        assert file.is_file() and not file.is_symlink() and file.resolve().is_relative_to(source)
-        data = file.read_bytes()
-        assert len(data) == entry['bytes'] and hashlib.sha256(data).hexdigest() == entry['sha256']
-        target = resources / relative; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(data)
-    shutil.copy2(source / 'manifest.json',resources / 'manifest.json')
-    notice = app / 'Contents' / 'Resources' / 'ThirdParty' / 'BGE-MIT.txt'
-    notice.parent.mkdir(parents=True,exist_ok=True)
-    shutil.copy2(ROOT / 'docs' / 'licenses' / 'BGE-MIT.txt',notice)
-# Light and dark marks are supplied as full tiles. The bundle icon is the light
-# tile for Finder; the app swaps the Dock icon at runtime with the same files.
-light_logo = ROOT / 'logo' / 'voiceos-light.png'
-dark_logo = ROOT / 'logo' / 'voiceos-dark.png'
-for logo in (light_logo, dark_logo):
-    if not logo.is_file():
-        parser.error(f'Missing logo asset: {logo}')
-bundle_resources = app / 'Contents' / 'Resources'
-bundle_resources.mkdir(parents=True, exist_ok=True)
-shutil.copy2(light_logo, bundle_resources / 'VoiceOSLogoLight.png')
-shutil.copy2(dark_logo, bundle_resources / 'VoiceOSLogoDark.png')
-shutil.copy2(ROOT / 'Resources' / 'PrivacyInfo.xcprivacy', bundle_resources / 'PrivacyInfo.xcprivacy')
-def generate_icon(scratch, output):
-    padded = Path(scratch) / 'IconMaster.png'
-    subprocess.run(['xcrun', 'swift', str(ROOT / 'scripts' / 'app' / 'pad_icon.swift'),
-                    str(light_logo), str(padded), '0.91'], check=True)
-    iconset = Path(scratch) / 'AppIcon.iconset'
-    iconset.mkdir()
-    for size in (16, 32, 128, 256, 512):
-        for suffix, pixels in (('', size), ('@2x', size * 2)):
-            subprocess.run(['sips', '-z', str(pixels), str(pixels), str(padded),
-                            '--out', str(iconset / f'icon_{size}x{size}{suffix}.png')],
-                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(['iconutil', '-c', 'icns', str(iconset), '-o', str(output)], check=True)
-
-# Keep derived artwork in the build cache; changes to the source or recipe invalidate it.
-icon_digest = hashlib.sha256()
-for path in (light_logo, ROOT / 'scripts/app/pad_icon.swift', Path(__file__)):
-    icon_digest.update(path.read_bytes())
-icon_cache = ROOT / '.build' / 'icons'
-icon_cache.mkdir(parents=True, exist_ok=True)
-cached_icon = icon_cache / (icon_digest.hexdigest() + '.icns')
-if not cached_icon.exists():
-    with tempfile.TemporaryDirectory(dir=icon_cache) as scratch:
-        generated_icon = Path(scratch) / 'AppIcon.icns'
-        generate_icon(scratch, generated_icon)
-        generated_icon.replace(cached_icon)
-shutil.copy2(cached_icon, bundle_resources / 'AppIcon.icns')
-info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundleIconFile='AppIcon', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
-if (ROOT / '.env').is_file(): info['VoiceOSModelConfigurationPath'] = str(ROOT / '.env')
-info['CFBundleURLTypes'] = [dict(CFBundleURLName='VoiceOS task', CFBundleURLSchemes=['voiceos'])]
-info['NSServices'] = [
-    dict(NSMenuItem=dict(default='存入 VoiceOS（文字）'), NSMessage='captureText', NSPortName='VoiceOS', NSSendTypes=['NSStringPboardType', 'public.utf8-plain-text']),
-    dict(NSMenuItem=dict(default='存入 VoiceOS（文件）'), NSMessage='captureFile', NSPortName='VoiceOS', NSSendTypes=['NSFilenamesPboardType', 'public.file-url']),
-]
-with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
-# App Intents metadata: Shortcuts and Siri read Contents/Resources/Metadata.appintents.
-# SwiftPM has no step for it, so replicate the compiler const-values pass and the processor.
-# A metadata failure must not block signing or replace the previous good app with an unsigned one.
-try:
-    # Remove stale metadata first so a failed pass cannot pair old metadata with the new binary.
-    target = bundle_resources / 'Metadata.appintents'
-    if target.exists(): shutil.rmtree(target)
-    sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
-    toolchain = subprocess.check_output(['xcode-select', '-p'], text=True).strip() + '/Toolchains/XcodeDefault.xctoolchain'
-    xcode_version = subprocess.check_output(['xcodebuild', '-version'], text=True).split()[1]
-    target_triple = platform.machine() + '-apple-macos26.0'
-    intents_source = ROOT / 'Sources' / 'VoiceOSApp' / 'AppIntents.swift'
-    with tempfile.TemporaryDirectory() as scratch:
-        protocols = Path(scratch) / 'protocols.json'
-        protocols.write_text(json.dumps(['AppIntent', 'AppShortcutsProvider', 'AppEntity', 'AppEnum']))
-        const_values = Path(scratch) / 'AppIntents.swiftconstvalues'
-        subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc', '-typecheck', '-module-name', 'VoiceOSApp',
-                        '-sdk', sdk, '-target', target_triple,
-                        '-Xfrontend', '-const-gather-protocols-file', '-Xfrontend', str(protocols),
-                        '-Xfrontend', '-emit-const-values-path', '-Xfrontend', str(const_values),
-                        str(intents_source)], check=True)
-        values_list = Path(scratch) / 'constvalues.txt'
-        values_list.write_text(str(const_values) + '\n')
-        sources_list = Path(scratch) / 'sources.txt'
-        sources_list.write_text(str(intents_source) + '\n')
-        output = Path(scratch) / 'Metadata'
-        subprocess.run(['xcrun', 'appintentsmetadataprocessor',
-                        '--output', str(output),
-                        '--toolchain-dir', toolchain,
-                        '--module-name', 'VoiceOSApp',
-                        '--sdk-root', sdk,
-                        '--xcode-version', xcode_version,
-                        '--platform-family', 'macos',
-                        '--deployment-target', '26.0',
-                        '--target-triple', target_triple,
-                        '--source-file-list', str(sources_list),
-                        '--swift-const-vals-list', str(values_list)], check=True)
-        shutil.copytree(output / 'Metadata.appintents', target)
-except Exception as error:
-    print(f'warning: App Intents metadata skipped: {error}')
-subprocess.run(['codesign', '--force', '--sign', signing_identity, str(app)], check=True)
-subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
-register = Path('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister')
-if register.is_file(): subprocess.run([str(register), '-f', str(app)], check=True)
-print(app)

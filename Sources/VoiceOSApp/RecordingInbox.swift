@@ -21,14 +21,6 @@ struct RecordingInboxInput {
     let inbox: String
 }
 
-enum RecordingInboxOutcome {
-    case completed
-    case retryableFailure(String)
-    /// 条件尚未就绪（等待配置、另一段整理占用、应用退出中断）：不计入三次自动重试预算。
-    case deferred(String)
-    case needsAttention(String)
-}
-
 struct RecordingInboxItem: Codable, Identifiable {
     enum State: String, Codable { case processing, retryScheduled, needsAttention }
     var id: String // Content hash is also the organizer import identity.
@@ -82,7 +74,7 @@ final class RecordingInbox: ObservableObject {
     }
     convenience init(libraryRoot:URL?) {
         if let libraryRoot {
-            let identity=SHA256.hash(data:Data(libraryRoot.standardizedFileURL.path.utf8)).map { String(format:"%02x",$0) }.joined()
+            let identity=Digest.sha256(Data(libraryRoot.standardizedFileURL.path.utf8))
             self.init(defaults:UserDefaults(suiteName:"voiceos.recordingInbox.library."+identity) ?? .standard)
         } else { self.init() }
     }
@@ -313,7 +305,7 @@ final class RecordingInbox: ObservableObject {
                     let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
                     var hash = SHA256()
                     while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
-                    return hash.finalize().map { String(format: "%02x", $0) }.joined()
+                    return Digest.hex(of: hash.finalize())
                 } catch { return nil }
             }.value
             guard let digest, digest != id, receipts.contains(digest),
@@ -457,7 +449,7 @@ final class RecordingInbox: ObservableObject {
                         let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
                         var hash = SHA256()
                         while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
-                        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+                        return Digest.hex(of: hash.finalize())
                     }.value
                         contentDigests[path] = (stamp, digest)
                     }

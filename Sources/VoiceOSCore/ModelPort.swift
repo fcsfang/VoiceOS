@@ -41,10 +41,6 @@ public protocol ModelPort: Sendable {
     var configuration: ModelConfiguration { get }
     func generate(_ request: ModelRequest) async throws -> ModelResponse
 }
-public struct SourcePolicy: Sendable {
-    public let localOnly: Bool
-    public let version: Int
-}
 extension VoiceOSStore {
     /// Cloud cognition must wait for the recording's full audio/context review.
     /// Local reading and local models remain available while that review is pending.
@@ -61,35 +57,6 @@ extension VoiceOSStore {
         }
         throw VoiceOSError("请先完成这份 Qwen 录音的全文转写校正，再进行云端理解或跟进")
     }
-    public func sourcePolicy(sourceID: String) throws -> SourcePolicy {
-        guard let row = try db.query("SELECT local_only,policy_version FROM sources WHERE id=?", [sourceID]).first else { throw VoiceOSError("来源不存在") }
-        guard let version = row["policy_version"].flatMap(Int.init), version > 0 else { throw VoiceOSError("来源授权版本无效") }
-        return SourcePolicy(localOnly: row["local_only"] != "0", version: version)
-    }
-    @discardableResult
-    public func setSourceLocalOnly(sourceID: String, expectedVersion: Int, localOnly: Bool, commandID: String = UUID().uuidString) throws -> Int {
-        if !localOnly {
-            guard try db.query("SELECT state FROM sources WHERE id=?", [sourceID]).first?["state"] != "trashed" else { throw VoiceOSError("请先从回收站恢复材料，再允许云端处理") }
-        }
-        let fingerprint = SHA256.hash(data: try JSONSerialization.data(withJSONObject: [sourceID,String(expectedVersion),String(localOnly)])).map { String(format: "%02x", $0) }.joined()
-        if let receipt = try db.query("SELECT * FROM source_policy_revisions WHERE command_id=?", [commandID]).first {
-            guard receipt["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一授权命令不能改变内容") }
-            return Int(receipt["to_version"]!)!
-        }
-        let result = try db.transaction {
-            let old = try sourcePolicy(sourceID: sourceID)
-            guard old.version == expectedVersion else { throw VoiceOSError("来源授权已经更新，请重新读取") }
-            guard old.localOnly != localOnly else { throw VoiceOSError("来源授权没有变化") }
-            let next = old.version + 1
-            try db.execute("INSERT INTO source_policy_revisions(id,source_id,from_version,to_version,from_local_only,to_local_only,command_id,input_fingerprint,actor,created_at) VALUES(?,?,?,?,?,?,?,?,'user',?)", [UUID().uuidString,sourceID,String(old.version),String(next),old.localOnly ? "1":"0",localOnly ? "1":"0",commandID,fingerprint,ISO8601DateFormatter().string(from: Date())])
-            try db.execute("UPDATE sources SET local_only=?,policy_version=? WHERE id=?", [localOnly ? "1":"0",String(next),sourceID])
-            try invalidateCognition(sourceID: sourceID)
-            try checkpoint(.policyUncommitted)
-            return next
-        }
-        try checkpoint(.policyCommitted)
-        return result
-    }
     public func generateClaims(contextID: String, using port: any ModelPort) async throws -> [String] {
         try Task.checkCancellation()
         let config = port.configuration
@@ -100,7 +67,7 @@ extension VoiceOSStore {
         try requireReviewedTranscriptions(sourceIDs:context.sources.map(\.sourceID),destination:config.destination)
         if config.destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源禁止云端发送") }
         let attempt = UUID().uuidString
-        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date()),try db.nextModelProducerSequence()])
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,TimestampFormatting.iso.string(from: Date()),try db.nextModelProducerSequence()])
         try checkpoint(.modelReserved)
         let response: ModelResponse
         do { response = try await port.generate(ModelRequest(attemptID: attempt, context: context, configuration: config)) }
@@ -180,7 +147,7 @@ extension VoiceOSStore {
 // New source text or policy permits new work; reopening a window never resends old work.
 extension VoiceOSStore {
     public func understandSource(sourceID: String, using port: any ModelPort, retryKey: String? = nil) async throws -> [String] {
-        let source = try sources().first { $0.id == sourceID }
+        let source = try sourceRecord(id: sourceID)
         let budget = source?.kind == "external_text" ? max(1, source?.transcript?.unicodeScalars.count ?? 0) : 4000
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: budget)
         guard try db.query("""
@@ -203,7 +170,7 @@ extension VoiceOSStore {
         }
         let config = port.configuration
         let identity = ["understand-v1", sourceID, context.contentDigest, String(policy.version), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]
-        let digest = SHA256.hash(data: try JSONSerialization.data(withJSONObject: identity)).map { String(format: "%02x", $0) }.joined()
+        let digest = Digest.sha256(try JSONSerialization.data(withJSONObject: identity))
         let commandID = retryKey.map { "understand-retry:" + $0 + ":" + digest } ?? "understand:" + digest
         let contextID = try persistLocalContext(context, commandID: commandID, destination: config.destination)
         guard try db.query("SELECT id FROM model_attempts WHERE context_id=?", [contextID]).isEmpty else {

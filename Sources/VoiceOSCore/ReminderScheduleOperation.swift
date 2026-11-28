@@ -69,7 +69,7 @@ extension VoiceOSStore {
             state,attempted,save_acknowledged,validity,reason,command_id,input_fingerprint,created_at,grant_id)
             VALUES(?,?,?,?,?,?,?,'reserved',0,0,'current','等待新鲜回读',?,?,?,?)
             """, [id,intentID,input.link.id,expectedObservationID,String(expectedAccessVersion),try Self.scheduleJSON(before),
-                    try Self.scheduleJSON(input.intent.due),commandID,hash,ISO8601DateFormatter().string(from: Date()),grantID])
+                    try Self.scheduleJSON(input.intent.due),commandID,hash,TimestampFormatting.iso.string(from: Date()),grantID])
         activeReminderLinks.insert(input.link.id); defer { activeReminderLinks.remove(input.link.id) }
         do {
             try checkpoint(.scheduleOperationReserved)
@@ -144,8 +144,8 @@ extension VoiceOSStore {
               link.state == "linked", link.remoteMarkerValid == true, link.remoteCompleted == false,
               link.lastObservationID == observationID,
               let raw = try db.query("SELECT * FROM reminder_links WHERE id=?", [link.id]).first,
-              let action = try actions().first(where: { $0.id == intent.actionID }),
-              try reminderSourceAllowed(action), try reminderCognitionIsLatest(action),
+              let action = try self.action(id: intent.actionID),
+              try eligibleReminderClaim(for: action) != nil,
               let grant = try db.query("SELECT access_version FROM action_schedule_intents WHERE id=?", [intentID]).first,
               grant["access_version"] == String(accessVersion) else { throw VoiceOSError("行动、排期版本、出处、外部基线或授权已变化，停止旧改期") }
         try checkReminderAccess(calendarID: link.calendarID, expectedVersion: accessVersion)
@@ -205,7 +205,7 @@ extension VoiceOSStore {
     }
     private func setScheduleOperation(_ id: String, state: ReminderScheduleOperationState, reason: String, observationID: String? = nil) throws {
         try db.execute("UPDATE reminder_schedule_operations SET state=?,reason=?,result_observation_id=?,checked_at=? WHERE id=?",
-                       [state.rawValue,reason,observationID,ISO8601DateFormatter().string(from: Date()),id])
+                       [state.rawValue,reason,observationID,TimestampFormatting.iso.string(from: Date()),id])
     }
     func scheduleObservationSnapshot(_ id: String, marker: String) throws -> ReminderSnapshot {
         guard let row = try db.query("SELECT * FROM reminder_observations WHERE id=?", [id]).first,
@@ -213,7 +213,7 @@ extension VoiceOSStore {
         return .init(id: row["external_id"]!, title: row["title"]!, completed: row["completed"] == "1", marker: marker, dueDate: due)
     }
     static func scheduleJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
     static func scheduleBefore(_ row: [String:String]) throws -> ReminderSnapshot {

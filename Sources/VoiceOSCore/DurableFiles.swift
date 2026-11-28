@@ -36,7 +36,7 @@ enum DurableFiles {
         defer { try? file.close() }
         var hasher = SHA256(); var bytes: Int64 = 0
         while let data = try file.read(upToCount: 1024 * 1024), !data.isEmpty { hasher.update(data: data); bytes += Int64(data.count) }
-        return (bytes, hasher.finalize().map { String(format: "%02x", $0) }.joined())
+        return (bytes, Digest.hex(of: hasher.finalize()))
     }
     static func syncDirectory(_ url: URL) throws {
         let fd = open(url.path, O_RDONLY)

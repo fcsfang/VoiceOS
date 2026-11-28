@@ -14,6 +14,14 @@ public enum TimestampFormatting {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
+    /// A wall-clock timestamp carrying the given zone's offset (for example
+    /// +08:00) instead of Z. Prompt context that states the user's local time
+    /// uses this variant; stored identities keep the UTC forms above.
+    public static func local(_ date: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = timeZone
+        return formatter.string(from: date)
+    }
     public static let dayKey: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

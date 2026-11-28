@@ -34,6 +34,80 @@ public struct RecordingExpression: Codable, Sendable, Identifiable {
     }
     public var digest: String { VoiceOSStore.relevanceHash(Data((sourceIDs.map { $0+":"+(versions[$0] ?? "") } + (externalVersions ?? [:]).keys.sorted().map { $0+":"+(externalVersions?[$0] ?? "") }).joined(separator:"\n").utf8)) }
 }
+enum RecordingExpressionInvalidity: Error {
+    case sourceChanged
+    case missingMember
+    case memberChanged
+    case pairedContextChanged
+    case externalChanged
+
+    var message: String {
+        switch self {
+        case .sourceChanged: "这段原文或文字授权已变化"
+        case .missingMember: "分组里有一段录音已不在资料库"
+        case .memberChanged: "分组里有一段的原文或文字授权已变化"
+        case .pairedContextChanged: "节目背景或原文授权已变化"
+        case .externalChanged: "节目原文或文字授权已变化"
+        }
+    }
+}
+
+extension RecordingSourceFacts {
+    var readableRecordingExpression: RecordingExpression? {
+        guard let expression = presentation?.expression, !localOnly, !needsTranscriptionReview,
+              expression.versions[id] == recordingTranscriptVersionID,
+              expression.policies[id] == policyVersion else { return nil }
+        return expression
+    }
+}
+
+extension RecordingExpression {
+    static func current(in catalog: [String: SourceRecord]) -> [RecordingExpression] {
+        var seen = Set<String>()
+        return catalog.values.compactMap { source in
+            guard let expression = source.presentation?.expression,
+                  seen.insert(expression.id).inserted,
+                  expression.invalidity(in: catalog, for: .workflow) == nil else { return nil }
+            return expression
+        }.sorted { $0.id < $1.id }
+    }
+
+    enum Use {
+        // The reader uses each member's readable revision and the group digest.
+        case reading
+        // Workflow commands use the saved group identity and captured versions.
+        case workflow
+    }
+
+    func invalidity<Source: RecordingSourceFacts>(in catalog: [String: Source], for use: Use) -> RecordingExpressionInvalidity? {
+        let readingDigest = use == .reading ? digest : nil
+        for sourceID in sourceIDs {
+            guard let member = catalog[sourceID] else { return .missingMember }
+            switch use {
+            case .reading:
+                guard let expression = member.readableRecordingExpression,
+                      expression.digest == readingDigest else { return .memberChanged }
+            case .workflow:
+                guard member.presentation?.expression?.id == id,
+                      member.recordingTranscriptVersionID == versions[sourceID],
+                      member.policyVersion == policies[sourceID],
+                      !member.localOnly, member.state == "saved" else { return .memberChanged }
+            }
+            if let pair = member.presentation?.recordingContext {
+                guard externalVersions?[pair.externalSourceID] == pair.externalVersionID,
+                      externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion else { return .pairedContextChanged }
+            }
+        }
+        for (sourceID, version) in externalVersions ?? [:] {
+            guard let external = catalog[sourceID],
+                  external.recordingTranscriptVersionID == version,
+                  external.policyVersion == externalPolicies?[sourceID],
+                  !external.localOnly, !external.needsTranscriptionReview else { return .externalChanged }
+        }
+        return nil
+    }
+}
+
 public struct RecordingExpressionProposal: Codable, Sendable {
     public let existingID: String
     public let sourceIDs: [String]
@@ -67,28 +141,25 @@ public struct ContinuousRecordingContext: Codable, Sendable {
 
 extension VoiceOSStore {
     func continuousRecordingContext(sourceID:String) throws -> ContinuousRecordingContext? {
-        try continuousRecordingContext(sourceID: sourceID, catalog: try sources(), expressions: try recordingExpressions())
+        let catalog = try sourceCatalog()
+        return try continuousRecordingContext(sourceID: sourceID, catalog: catalog,
+                                              expressions: RecordingExpression.current(in: catalog))
     }
     /// Preloaded catalog and expressions keep per-receipt validation off the
     /// full-library read path.
-    func continuousRecordingContext(sourceID:String, catalog:[SourceRecord], expressions:[RecordingExpression]) throws -> ContinuousRecordingContext? {
-        let byID = Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        guard let source = byID[sourceID] else { return nil }
+    func continuousRecordingContext(sourceID:String, catalog:[String:SourceRecord], expressions:[RecordingExpression]) throws -> ContinuousRecordingContext? {
+        guard let source = catalog[sourceID] else { return nil }
         let expression=expressions.first(where: { $0.sourceIDs.contains(sourceID) })
         if let expression,expression.state != "completed" { throw VoiceOSError("连续表达仍在整体理解，后续跟进稍后继续") }
         let members=expression?.sourceIDs ?? [sourceID]
-        let expanded=try recordingContextSourceIDs(sourceIDs:members,catalog:byID)
+        let expanded=try recordingContextSourceIDs(sourceIDs:members,catalog:catalog)
         guard members.count > 1 || expanded.count > members.count else { return nil }
-        let selected=Set(expanded)
-        let context=try prepareLocalTranscriptContext(sourceIDs:expanded,scalarBudget:max(1,expanded.compactMap { byID[$0] }.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
-        let policies=Dictionary(uniqueKeysWithValues:expanded.compactMap { byID[$0] }.map { ($0.id,$0.policyVersion) })
+        let context=try prepareLocalTranscriptContext(sourceIDs:expanded,scalarBudget:max(1,expanded.compactMap { catalog[$0] }.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
+        let policies=Dictionary(uniqueKeysWithValues:expanded.compactMap { catalog[$0] }.map { ($0.id,$0.policyVersion) })
         return .init(expressionID:expression?.id ?? source.presentation?.recordingContext?.sessionID ?? sourceID,digest:context.contentDigest,context:context,policies:policies)
     }
 
-    func validateContinuousRecordingContext(_ input:ContinuousRecordingContext?,sourceID:String) throws {
-        try validateContinuousRecordingContext(input, sourceID: sourceID, catalog: try sources(), expressions: try recordingExpressions())
-    }
-    func validateContinuousRecordingContext(_ input:ContinuousRecordingContext?,sourceID:String,catalog:[SourceRecord],expressions:[RecordingExpression]) throws {
+    func validateContinuousRecordingContext(_ input:ContinuousRecordingContext?,sourceID:String,catalog:[String:SourceRecord],expressions:[RecordingExpression]) throws {
         guard let input else {
             if try continuousRecordingContext(sourceID:sourceID,catalog:catalog,expressions:expressions) != nil { throw VoiceOSError("单段跟进的依据已扩展为连续表达，需要结合全部分段") }
             return
@@ -97,7 +168,7 @@ extension VoiceOSStore {
         try validateLocalTranscriptContext(input.context)
     }
     public func registerAutomaticRecording(sourceID:String,inbox:String,recordedAt:String?,discoveredAt:String? = nil) throws {
-        guard let source=try sources().first(where: { $0.id == sourceID }),source.origin == "user",source.speaker == "user",!source.localOnly else { throw VoiceOSError("自动录音的归属或文字授权不可用") }
+        guard let source=try sourceRecords(ids: [sourceID]).first,source.origin == "user",source.speaker == "user",!source.localOnly else { throw VoiceOSError("自动录音的归属或文字授权不可用") }
         var presentation=source.presentation ?? RecordingPresentation()
         guard presentation.automaticInput == nil else { return }
         presentation.automaticInput = .init(inbox:inbox,recordedAt:recordedAt,discoveredAt:discoveredAt ?? Self.now())
@@ -122,11 +193,12 @@ extension VoiceOSStore {
         }
     }
     public func completeUnchangedSingleRecording(_ expression:RecordingExpression) throws -> Bool {
-        guard expression.sourceIDs.count == 1,let id=expression.sourceIDs.first,
-              try recordingContext(sourceID:id) == nil,
-              try recordingExpressions().contains(where: { $0.id == expression.id && $0.digest == expression.digest }),
+        guard expression.sourceIDs.count == 1,let id=expression.sourceIDs.first else { return false }
+        let catalog = try sourceCatalog()
+        guard try recordingContext(sourceID:id,catalog:catalog) == nil,
+              RecordingExpression.current(in: catalog).contains(where: { $0.id == expression.id && $0.digest == expression.digest }),
               try modelAttempts(sourceID:id).contains(where: { $0.provider == "organized_import" && $0.state == "completed" && $0.contextState == "current" }),
-              let source=try sources().first(where: { $0.id == id }),
+              let source=catalog[id],
               source.presentation?.automaticInput?.inbox == "previous-automatic-intake" else { return false }
         // No context was added: preserve the existing complete understanding and
         // its task states instead of extracting the same recording a second time.
@@ -140,32 +212,16 @@ extension VoiceOSStore {
         try db.execute("UPDATE sources SET presentation_json=? WHERE id=?",[try Self.relevanceJSON(presentation),sourceID])
     }
     public func recordingExpressions() throws -> [RecordingExpression] {
-        let catalog=Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith:{ first,_ in first })
-        var seen=Set<String>()
-        return catalog.values.compactMap { source in
-            guard let expression=source.presentation?.expression,seen.insert(expression.id).inserted else { return nil }
-            // An old group is never a route around a changed source or permission.
-            guard expression.sourceIDs.allSatisfy({ id in
-                guard let member=catalog[id] else { return false }
-                return member.presentation?.expression?.id == expression.id && member.transcriptVersionID == expression.versions[id] && member.policyVersion == expression.policies[id] && !member.localOnly && member.state == "saved"
-            }) else { return nil }
-            guard expression.sourceIDs.allSatisfy({ id in
-                guard let pair=catalog[id]?.presentation?.recordingContext else { return true }
-                return expression.externalVersions?[pair.externalSourceID] == pair.externalVersionID && expression.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion
-            }) else { return nil }
-            guard (expression.externalVersions ?? [:]).allSatisfy({ id,version in
-                guard let external=catalog[id] else { return false }
-                return external.transcriptVersionID == version && external.policyVersion == expression.externalPolicies?[id] && !external.localOnly && !external.needsTranscriptionReview
-            }) else { return nil }
-            return expression
-        }.sorted { $0.id < $1.id }
+        try RecordingExpression.current(in: sourceCatalog())
     }
     public func prepareRecordingExpressions() throws -> RecordingExpressionInput? {
         // The inbox records provenance, not a semantic boundary: phone sync and
         // a watched folder can deliver parts of the same expression.
-        let catalog=try sources().filter { $0.origin == "user" && $0.speaker == "user" && $0.presentation?.automaticInput != nil && !$0.localOnly && $0.state == "saved" && $0.jobState == "completed" && !$0.needsTranscriptionReview && !($0.transcript ?? "").isEmpty }
+        let records = try sources()
+        let sourceCatalog = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog=records.filter { $0.origin == "user" && $0.speaker == "user" && $0.presentation?.automaticInput != nil && !$0.localOnly && $0.state == "saved" && $0.jobState == "completed" && !$0.needsTranscriptionReview && !($0.transcript ?? "").isEmpty }
         let allowed=Set(catalog.map(\.id))
-        let existing=try recordingExpressions().filter { Set($0.sourceIDs).isSubset(of:allowed) }
+        let existing=RecordingExpression.current(in: sourceCatalog).filter { Set($0.sourceIDs).isSubset(of:allowed) }
         let assigned=Set(existing.flatMap(\.sourceIDs))
         let pending=catalog.filter { !assigned.contains($0.id) }.map(\.id)
         guard !pending.isEmpty else { return nil }
@@ -178,7 +234,7 @@ extension VoiceOSStore {
             if !groups.contains(where: { Set($0) == Set(ids) }) { groups.append(ids) }
         }
         guard correctedGroups.allSatisfy({ Set($0).isSubset(of: allowed) }) else { throw VoiceOSError("同一次更正的完整录音尚未全部核对完成，暂不处理其中片段") }
-        return .init(context:context,policies:Dictionary(catalog.map { ($0.id,$0.policyVersion) }, uniquingKeysWith:{ first,_ in first }),newSourceIDs:pending,existing:existing,dates:Dictionary(catalog.map { ($0.id,$0.presentation!.automaticInput!) }, uniquingKeysWith:{ first,_ in first }),names:Dictionary(catalog.map { ($0.id,$0.name) }, uniquingKeysWith:{ first,_ in first }),recordingContexts:try ordered.compactMap { try prepareRecordingContext(sourceID:$0.id) },correctedSourceGroups:correctedGroups)
+        return .init(context:context,policies:Dictionary(catalog.map { ($0.id,$0.policyVersion) }, uniquingKeysWith:{ first,_ in first }),newSourceIDs:pending,existing:existing,dates:Dictionary(catalog.map { ($0.id,$0.presentation!.automaticInput!) }, uniquingKeysWith:{ first,_ in first }),names:Dictionary(catalog.map { ($0.id,$0.name) }, uniquingKeysWith:{ first,_ in first }),recordingContexts:try ordered.compactMap { try prepareRecordingContext(sourceID:$0.id,catalog:sourceCatalog) },correctedSourceGroups:correctedGroups)
     }
     public static func validateRecordingExpressions(_ proposals:[RecordingExpressionProposal],input:RecordingExpressionInput) throws {
         let sources=Dictionary(uniqueKeysWithValues:input.context.sources.map { ($0.sourceID,$0) })
@@ -220,15 +276,16 @@ extension VoiceOSStore {
         guard let input=try prepareRecordingExpressions() else { return try recordingExpressions().filter { $0.state != "completed" } }
         let (proposals,receipts)=try await port.group(input)
         try validateLocalTranscriptContext(input.context)
+        let catalog = try sourceCatalog()
         for snapshot in input.recordingContexts ?? [] {
             try validateLocalTranscriptContext(snapshot.context)
-            guard let current=try prepareRecordingContext(sourceID:snapshot.pairing.personalSourceID),try Self.relevanceJSON(current) == Self.relevanceJSON(snapshot) else { throw VoiceOSError("节目上下文在连续表达判断期间已变化") }
+            guard let current=try prepareRecordingContext(sourceID:snapshot.pairing.personalSourceID,catalog:catalog),try Self.relevanceJSON(current) == Self.relevanceJSON(snapshot) else { throw VoiceOSError("节目上下文在连续表达判断期间已变化") }
         }
         for (id,version) in input.policies { guard try sourcePolicy(sourceID:id).version == version else { throw VoiceOSError("分组合并期间文字授权已变化") } }
         guard receipts.count >= 2,Set(receipts).count == receipts.count else { throw VoiceOSError("连续表达缺少独立核对回执") }
         try Self.validateRecordingExpressions(proposals,input:input)
         let allActions=try actions(includeHistory:true),claims=Dictionary(uniqueKeysWithValues:try candidateClaims(includeFrozen:true).map { ($0.id,$0) })
-        let correctionActions=Dictionary(try sources().map { ($0.id,Set($0.presentation?.correctedActionIDs ?? [])) }, uniquingKeysWith:{ first,_ in first })
+        let correctionActions=catalog.mapValues { Set($0.presentation?.correctedActionIDs ?? []) }
         return try db.transaction {
             var result:[RecordingExpression]=[]
             for proposal in proposals {
@@ -240,7 +297,7 @@ extension VoiceOSStore {
                 }.map(\.id)
                 let expression=RecordingExpression(id:proposal.existingID.isEmpty ? UUID().uuidString : proposal.existingID,sourceIDs:proposal.sourceIDs,title:proposal.title,summary:proposal.summary,reason:proposal.reason,responseIDs:receipts,versions:Dictionary(uniqueKeysWithValues:input.context.sources.filter { members.contains($0.sourceID) }.map { ($0.sourceID,$0.transcriptVersionID) }),policies:input.policies.filter { members.contains($0.key) },state:"pending",previousActionIDs:previous,externalVersions:Dictionary((input.recordingContexts ?? []).filter { members.contains($0.pairing.personalSourceID) }.map { ($0.pairing.externalSourceID,$0.pairing.externalVersionID) },uniquingKeysWith:{ first,_ in first }),externalPolicies:Dictionary((input.recordingContexts ?? []).filter { members.contains($0.pairing.personalSourceID) }.map { ($0.pairing.externalSourceID,$0.pairing.externalPolicyVersion) },uniquingKeysWith:{ first,_ in first }))
                 for id in proposal.sourceIDs {
-                    guard let source=try sources().first(where: { $0.id == id }) else { throw VoiceOSError("录音缺失") }
+                    guard let source=catalog[id] else { throw VoiceOSError("录音缺失") }
                     var presentation=source.presentation ?? RecordingPresentation();presentation.expression=expression
                     try saveExpressionPresentation(presentation,sourceID:id)
                 }
@@ -273,6 +330,8 @@ extension VoiceOSStore {
         for id in expression.sourceIDs {
             for row in try db.query("SELECT c.id FROM claims c JOIN model_attempts m ON m.id=c.attempt_id JOIN context_inputs i ON i.context_id=m.context_id WHERE i.source_id=? AND m.provider='organized_import' AND c.validity='current'",[id]) where !keep.contains(row["id"]!) { replaced.insert(row["id"]!) }
         }
+        let members = Dictionary(try sourceRecords(ids: completed.sourceIDs).map { ($0.id, $0) },
+                                 uniquingKeysWith: { first, _ in first })
         try db.transaction {
             _ = try reconcileExpressionActions(decisions,input:input,responseIDs:completed.actionReviewResponseIDs ?? [])
             for id in replaced {
@@ -280,8 +339,8 @@ extension VoiceOSStore {
                 try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id=?",[id])
             }
             for id in completed.sourceIDs {
-                let source=try sources().first { $0.id == id }!
-                var presentation=source.presentation!;presentation.expression=completed
+                guard var presentation=members[id]?.presentation else { throw VoiceOSError("录音缺失") }
+                presentation.expression=completed
                 presentation.correctedActionIDs=nil;presentation.correctedSourceIDs=nil;presentation.recordingUnderstandingIsCorrection=nil
                 try saveExpressionPresentation(presentation,sourceID:id)
             }

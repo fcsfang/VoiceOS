@@ -1,8 +1,10 @@
 import Foundation
-import Security
 import VoiceOSCore
+import VoiceOSPlatform
 
 struct NoteHistoryMemory: Codable, Sendable {
+    private static let credential = KeychainCredential(service: "VoiceOS Hindsight Cloud", account: "VoiceOS")
+
     private struct Pilot: Decodable {
         struct Source: Decodable { let documentID: String }
         let bankID: String
@@ -73,18 +75,15 @@ struct NoteHistoryMemory: Codable, Sendable {
     }
 
     private func request(_ path: [String], method: String, payload: [String: Any]? = nil) throws -> URLRequest {
-        let queryKey: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "VoiceOS Hindsight Cloud",
-            kSecAttrAccount as String: "VoiceOS", kSecReturnData as String: true
-        ]
-        var value: CFTypeRef?
-        let status = SecItemCopyMatching(queryKey as CFDictionary, &value)
-        guard status == errSecSuccess,
-              let bytes = value as? Data, let key = String(data: bytes, encoding: .utf8), !key.isEmpty else {
-            throw VoiceOSError(status == errSecItemNotFound
-                ? "钥匙串中缺少 Hindsight 密钥"
-                : "VoiceOS 需要读取 Hindsight 的钥匙串权限")
+        let inaccessible = VoiceOSError("VoiceOS 需要读取 Hindsight 的钥匙串权限")
+        let credentialValue: String?
+        do {
+            credentialValue = try Self.credential.read()
+        } catch {
+            throw inaccessible
         }
+        guard let key = credentialValue else { throw VoiceOSError("钥匙串中缺少 Hindsight 密钥") }
+        guard !key.isEmpty else { throw inaccessible }
         let base = URL(string: "https://api.hindsight.vectorize.io/v1/default/banks")!.appendingPathComponent(bankID)
         let url = path.reduce(base) { $0.appendingPathComponent($1) }
         var request = URLRequest(url: url, timeoutInterval: 180)

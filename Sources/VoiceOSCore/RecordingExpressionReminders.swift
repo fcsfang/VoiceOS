@@ -43,7 +43,7 @@ extension VoiceOSStore {
         guard link["calendar_id"] == access.calendarID else { throw VoiceOSError("补录关联在其他提醒清单，保留原提醒") }
         guard let externalID=link["external_id"],!externalID.isEmpty else { throw VoiceOSError("补录关联缺少外部标识，等待回读补全") }
         guard let marker=link["marker"],let original=link["desired_title"] else { throw VoiceOSError("补录关联尚未确认唯一提醒，保留原提醒") }
-        guard let action=try actions(includeHistory:true).first(where: { $0.id == actionID }) else { throw VoiceOSError("补录对应的任务已不存在，保留原提醒") }
+        guard let action=try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("补录对应的任务已不存在，保留原提醒") }
         let withdrawal=action.state == "dismissed" && action.validity != "current"
         let desired=withdrawal ? "已撤回 · "+action.title : action.title
         let edit=RecordingExpressionReminderEdit(calendarID:access.calendarID,externalID:externalID,marker:marker,expectedTitle:original,desiredTitle:desired,withdraw:withdrawal,expectedFields:action.intent?.reminderFields?.desired)
@@ -64,7 +64,7 @@ extension VoiceOSStore {
         expression.reminderUpdates?.removeAll { $0 == actionID }
         try db.transaction {
             for id in expression.sourceIDs {
-                guard var presentation=try sources().first(where: { $0.id == id })?.presentation else { throw VoiceOSError("连续表达来源缺失") }
+                guard var presentation=try sourceRecord(id: id)?.presentation else { throw VoiceOSError("连续表达来源缺失") }
                 presentation.expression=expression;try saveExpressionPresentation(presentation,sourceID:id)
             }
         }

@@ -44,9 +44,10 @@ public protocol RecordingExpressionActionPort: Sendable {
 }
 extension VoiceOSStore {
     func prepareExpressionActionReview(_ expression:RecordingExpression) throws -> RecordingExpressionActionInput {
-        let catalog=try sources(),members=Set(expression.sourceIDs)
-        let expanded=try recordingContextSourceIDs(sourceIDs:expression.sourceIDs),contextIDs=Set(expanded)
-        let context=try prepareLocalTranscriptContext(sourceIDs:expanded,scalarBudget:max(1,catalog.filter { contextIDs.contains($0.id) }.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
+        let catalog = try recordingContextCatalog(sourceIDs: expression.sourceIDs)
+        let expanded = try recordingContextSourceIDs(sourceIDs: expression.sourceIDs, catalog: catalog)
+        let contextSources = Set(expanded).compactMap { catalog[$0] }
+        let context = try prepareLocalTranscriptContext(sourceIDs: expanded, scalarBudget: max(1, contextSources.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
         let claims=Dictionary(uniqueKeysWithValues:try candidateClaims(includeFrozen:true).map { ($0.id,$0) })
         let latest=try latestCandidateClaimsBySource()
         let currentClaims=Set(expression.sourceIDs.flatMap { latest[$0] ?? [] }.map(\.id))
@@ -56,8 +57,8 @@ extension VoiceOSStore {
             guard let claim=claims[action.claimID] else { return nil }
             return .init(id:action.id,claimID:claim.id,title:action.title,kind:action.kind,note:action.note,state:action.state,version:action.version,claimReviewVersion:action.claimReviewVersion,statement:claim.statement)
         }
-        let correction = catalog.contains { members.contains($0.id) && $0.presentation?.recordingUnderstandingIsCorrection == true }
-        return .init(context:context,policies:Dictionary(uniqueKeysWithValues:catalog.filter { contextIDs.contains($0.id) }.map { ($0.id,$0.policyVersion) }),oldActions:all.filter { previous.contains($0.id) && $0.state != "dismissed" }.compactMap(item),newActions:all.filter { !previous.contains($0.id) && currentClaims.contains($0.claimID) && $0.validity == "current" && $0.state != "dismissed" }.compactMap(item),transcriptionCorrection:correction ? true : nil)
+        let correction = expression.sourceIDs.contains { catalog[$0]?.presentation?.recordingUnderstandingIsCorrection == true }
+        return .init(context:context,policies:Dictionary(uniqueKeysWithValues:contextSources.map { ($0.id,$0.policyVersion) }),oldActions:all.filter { previous.contains($0.id) && $0.state != "dismissed" }.compactMap(item),newActions:all.filter { !previous.contains($0.id) && currentClaims.contains($0.claimID) && $0.validity == "current" && $0.state != "dismissed" }.compactMap(item),transcriptionCorrection:correction ? true : nil)
     }
     public static func validateExpressionActionReview(_ decisions:[RecordingExpressionActionDecision],input:RecordingExpressionActionInput) throws {
         let old=Dictionary(uniqueKeysWithValues:input.oldActions.map { ($0.id,$0) }),new=Dictionary(uniqueKeysWithValues:input.newActions.map { ($0.id,$0) })

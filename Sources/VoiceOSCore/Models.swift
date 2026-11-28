@@ -5,6 +5,21 @@ public struct VoiceOSError: LocalizedError {
     public init(_ message: String) { self.message = message }
     public var errorDescription: String? { message }
 }
+
+public struct RecordingServiceFailure: LocalizedError, Sendable {
+    public enum Cause: Sendable {
+        case http(Int)
+        case connection
+    }
+
+    public let cause: Cause
+    public let message: String
+    public init(_ cause: Cause, message: String) {
+        self.cause = cause
+        self.message = message
+    }
+    public var errorDescription: String? { message }
+}
 public struct MediaInfo: Sendable {
     public let duration: Double
     public let kind: String

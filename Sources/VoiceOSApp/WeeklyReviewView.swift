@@ -8,7 +8,7 @@ struct WeeklyReviewView: View {
     @ObservedObject var model: ControlCenter
     let openTask: (String) -> Void
     let openActions: () -> Void
-    var openFilter: ((String) -> Void)? = nil
+    var openFilter: ((ActionFilter) -> Void)? = nil
     @State private var actionError = ""
     @State private var focusError = ""
     @State private var focusedIDs: Set<String> = []
@@ -32,9 +32,6 @@ struct WeeklyReviewView: View {
     @FocusState private var reviewListFocused: Bool
     @State private var keyboardSelection = ReviewKeySelection()
 
-    private enum ReviewFilter: String {
-        case todo = "我的待办", review = "待核对", completed = "已完成"
-    }
     private enum LoadState: Equatable {
         case idle, loading, loaded, failed
     }
@@ -45,7 +42,7 @@ struct WeeklyReviewView: View {
     }
 
     private var openTasks: [ActionRecord] {
-        model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }
+        model.actionRecords.filter(\.isCurrentOpenTask)
     }
     private var surface: ActionTimeSurface {
         ActionTimeSurface.build(actions: openTasks, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
@@ -245,7 +242,7 @@ struct WeeklyReviewView: View {
             HStack(spacing: 8) {
                 Button("打开行动页") { jump(.todo) }
                     .buttonStyle(.workspaceQuiet)
-                Button("查看待确认") { jump(.review) }
+                Button("查看待确认") { jump(.needsReview) }
                     .buttonStyle(.workspaceQuiet)
             }
         }
@@ -402,11 +399,11 @@ struct WeeklyReviewView: View {
         }
     }
 
-    private func jump(_ filter: ReviewFilter) {
-        if let openFilter { openFilter(filter.rawValue) } else { openActions() }
+    private func jump(_ filter: ActionFilter) {
+        if let openFilter { openFilter(filter) } else { openActions() }
     }
 
-    private func allButton(_ count: Int, _ filter: ReviewFilter) -> some View {
+    private func allButton(_ count: Int, _ filter: ActionFilter) -> some View {
         Button("查看全部 \(count) 条 →") { jump(filter) }
             .buttonStyle(.workspaceQuiet)
             .padding(.top, 10)
@@ -596,7 +593,7 @@ struct WeeklyReviewView: View {
                           highlighted: isReviewHighlighted("unclarified", action.id)) { openTask(action.id) }
                     .id(reviewRowID("unclarified", action.id))
             }
-            if unclarifiedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
+            if unclarifiedTasks.count > rows.count { linkButton("到待核对查看", .needsReview).padding(.top, 10) }
         }
     }
     private var progressSection: some View {
@@ -739,7 +736,7 @@ struct WeeklyReviewView: View {
         }
     }
 
-    private func linkButton(_ label: String, _ filter: ReviewFilter) -> some View {
+    private func linkButton(_ label: String, _ filter: ActionFilter) -> some View {
         Button(label + " →") { jump(filter) }
             .buttonStyle(.workspaceQuiet)
     }
@@ -754,7 +751,7 @@ struct WeeklyReviewView: View {
                           highlighted: isReviewHighlighted("paused", action.id)) { openTask(action.id) }
                     .id(reviewRowID("paused", action.id))
             }
-            if pausedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
+            if pausedTasks.count > rows.count { linkButton("到待核对查看", .needsReview).padding(.top, 10) }
         }
     }
 

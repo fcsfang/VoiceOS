@@ -49,7 +49,7 @@ extension VoiceOSStore {
         let revisionCommand = "reminder-status-resolution:" + resolutionID
         let revisionHash = try Self.actionHash([initial.action.id, String(expectedActionVersion), target, note])
         let baseline = try reminderStatusBaseline(link)
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = TimestampFormatting.iso.string(from: Date())
         try db.transaction {
             try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)",
                            [revisionID, initial.action.id, String(next), String(expectedActionVersion), target, note, revisionCommand, revisionHash, now])
@@ -66,8 +66,8 @@ extension VoiceOSStore {
     private func reminderResolutionInput(link: [String: String], actionVersion: Int, observationID: String) throws -> (action: ActionRecord, observation: [String: String]) {
         guard let currentLink = try db.query("SELECT * FROM reminder_links WHERE id=?", [link["id"]]).first,
               currentLink["state"] == "conflict",
-              let action = try actions(includeHistory: true).first(where: { $0.id == link["action_id"] }),
-              action.kind == "task", action.validity == "current", action.version == actionVersion,
+              let action = try link["action_id"].flatMap { try self.action(id: $0, includeHistory: true) },
+              action.isCurrentTask, action.version == actionVersion,
               let observation = try db.query("SELECT * FROM reminder_observations WHERE link_id=? ORDER BY sequence DESC LIMIT 1", [link["id"]]).first,
               observation["id"] == observationID, observation["marker_valid"] == "1",
               observation["external_id"] == currentLink["external_id"],

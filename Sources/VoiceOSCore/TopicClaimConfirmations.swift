@@ -9,7 +9,7 @@ extension VoiceOSStore {
         }
         guard try db.query("SELECT claim_id FROM topic_claim_confirmations WHERE topic_id=? AND claim_id=?", [topicID, claimID]).isEmpty else { return false }
         guard try db.query("SELECT id FROM claims WHERE id=?", [claimID]).first != nil else { throw VoiceOSError("观点不存在") }
-        try db.execute("INSERT INTO topic_claim_confirmations(topic_id,claim_id,command_id,created_at) VALUES(?,?,?,?)", [topicID, claimID, commandID, ISO8601DateFormatter().string(from: Date())])
+        try db.execute("INSERT INTO topic_claim_confirmations(topic_id,claim_id,command_id,created_at) VALUES(?,?,?,?)", [topicID, claimID, commandID, TimestampFormatting.iso.string(from: Date())])
         return true
     }
 

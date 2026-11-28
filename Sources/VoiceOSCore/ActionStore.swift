@@ -41,6 +41,8 @@ public struct ActionRecord: Identifiable, Sendable {
         self.id = id; self.claimID = claimID; self.claimReviewVersion = claimReviewVersion; self.title = title; self.kind = kind; self.intentActor = intentActor; self.note = note; self.state = state; self.validity = validity; self.version = version; self.autoSend = autoSend; self.intent = intent; self.commandID = commandID; self.createdAt = createdAt; self.parentID = parentID; self.nature = nature; self.completedAt = completedAt
     }
     public var isExtracted: Bool { commandID.hasPrefix("extracted:") }
+    public var isCurrentTask: Bool { kind == ActionKind.task.rawValue && validity == "current" }
+    public var isCurrentOpenTask: Bool { isCurrentTask && state == LocalActionState.open.rawValue }
 }
 public struct ActionRevision: Identifiable, Codable, Sendable {
     public let id: String
@@ -84,7 +86,7 @@ extension VoiceOSStore {
         guard (kind == .aiSuggestion) == (intentActor == .ai), intentActor != .ai || claim.ownership == "ai_candidate" else { throw VoiceOSError("AI 建议不能成为用户承诺的任务或探索意图") }
         let id = UUID().uuidString
         try db.transaction {
-            try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,'open','current',?,?,?)", [id,claimID,String(expectedClaimReviewVersion),title,kind.rawValue,intentActor.rawValue,note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,'open','current',?,?,?)", [id,claimID,String(expectedClaimReviewVersion),title,kind.rawValue,intentActor.rawValue,note,commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try checkpoint(.actionUncommitted)
         }
         try checkpoint(.actionCommitted)
@@ -93,10 +95,24 @@ extension VoiceOSStore {
     /// The newest revision that entered completed supplies the 已完成 order and the row date.
     private static let completedAtColumn = "(SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at"
     public func actions(includeHistory: Bool = false) throws -> [ActionRecord] {
-        _ = try candidateClaims(includeFrozen: true) // Dynamic source/hash/policy barrier also freezes actions.
-        let clause = includeHistory ? "WHERE a.removed=0" : "WHERE a.removed=0 AND a.validity='current' AND a.state='open'"
-        return try db.query("SELECT a.*,\(Self.completedAtColumn) FROM actions a \(clause) ORDER BY a.created_at,a.id").map(Self.actionRecord)
+        try readActions(includeHistory: includeHistory)
     }
+
+    public func action(id: String, includeHistory: Bool = false) throws -> ActionRecord? {
+        try readActions(includeHistory: includeHistory, id: id).first
+    }
+
+    private func readActions(includeHistory: Bool, id: String? = nil) throws -> [ActionRecord] {
+        // A conversation or earlier outcome can invalidate actions in another
+        // context. Refresh the complete claim-context verdict before applying the
+        // row scope, without decoding claims that the caller will not use.
+        try validateClaimContexts()
+        let visibility = includeHistory ? "" : " AND a.validity='current' AND a.state='open'"
+        let identity = id == nil ? "" : " AND a.id=?"
+        let bindings = id.map { [$0] } ?? []
+        return try db.query("SELECT a.*,\(Self.completedAtColumn) FROM actions a WHERE a.removed=0\(visibility)\(identity) ORDER BY a.created_at,a.id", bindings).map(Self.actionRecord)
+    }
+
     private static func actionRecord(_ row: [String: String]) throws -> ActionRecord {
         var row = row
         if let title = row["edited_title"] { row["title"] = title }
@@ -185,10 +201,10 @@ extension VoiceOSStore {
             return receipt["id"]!
         }
         guard !title.isEmpty, title.unicodeScalars.count <= 2000,
-              let original = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+              let original = try self.action(id: actionID, includeHistory: true),
               original.validity == "current", original.state == "open", original.kind == "opportunity", original.intentActor == "user", original.version == expectedVersion,
               let claim = try candidateClaim(id: original.claimID), claim.reviewVersion == original.claimReviewVersion else { throw VoiceOSError("事项或原话已变化，请重新核对") }
-        let id = UUID().uuidString, now = ISO8601DateFormatter().string(from: Date())
+        let id = UUID().uuidString, now = TimestampFormatting.iso.string(from: Date())
         let fingerprint = try Self.actionHash([claim.id,String(claim.reviewVersion),title,"task","user",original.note])
         let note = "已核对为明确待办：" + id
         let revisionHash = try Self.actionHash([actionID,String(expectedVersion),"dismissed",note])
@@ -209,14 +225,14 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一行动状态命令不能更换内容") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }), current.validity == "current",
+        guard let current = try self.action(id: actionID, includeHistory: true), current.validity == "current",
               current.version == expectedVersion else { throw VoiceOSError("行动版本或依据已变化，请重新核对") }
         guard state.rawValue != current.state, note.unicodeScalars.count <= 2000 else { throw VoiceOSError("行动状态没有变化或备注过长") }
         guard state != .completed || current.kind == "task" else { throw VoiceOSError("探索意图与 AI 建议不能标成任务完成；问题与目标的完成请使用 completeOutcome") }
         guard state != .someday || current.kind != "task" else { throw VoiceOSError("待办不能留到将来也许；请完成或不再跟进") }
         let next = expectedVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),state.rawValue,note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),state.rawValue,note,commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET state=?,version=? WHERE id=?", [state.rawValue,String(next),actionID])
             try checkpoint(.actionStateUncommitted)
         }
@@ -235,7 +251,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一次撤销外部完成不能更换任务或版本") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let current = try self.action(id: actionID, includeHistory: true),
               current.kind == "task", current.validity == "frozen",
               current.state == LocalActionState.completed.rawValue, current.version == expectedVersion,
               let latest = try db.query("SELECT state,command_id FROM action_revisions WHERE action_id=? ORDER BY version DESC LIMIT 1", [actionID]).first,
@@ -245,7 +261,7 @@ extension VoiceOSStore {
         }
         let next = expectedVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString, actionID, String(next), String(expectedVersion), LocalActionState.open.rawValue, note, command, hash, ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString, actionID, String(next), String(expectedVersion), LocalActionState.open.rawValue, note, command, hash, TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET state=?,version=? WHERE id=?", [LocalActionState.open.rawValue, String(next), actionID])
             try checkpoint(.actionStateUncommitted)
         }
@@ -263,13 +279,13 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash, receipt["action_id"] == id, receipt["from_version"] == String(expectedVersion) else { throw VoiceOSError("同一次归类不能更换行动或归类") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == id }) else { throw VoiceOSError("行动不存在") }
+        guard let current = try self.action(id: id, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard current.validity == "current" else { throw VoiceOSError("已失效的行动不能归类") }
         guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
         guard current.nature != nature.rawValue else { throw VoiceOSError("行动归类没有变化") }
         let next = expectedVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,id,String(next),String(expectedVersion),current.state,note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,id,String(next),String(expectedVersion),current.state,note,revisionCommand,hash,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET nature=?,version=? WHERE id=?", [nature.rawValue,String(next),id])
             try checkpoint(.actionStateUncommitted)
         }
@@ -286,14 +302,14 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一完成目标命令不能更换内容") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let current = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard current.kind == "opportunity" else { throw VoiceOSError("只有问题与目标可以达成") }
         guard current.state == "open" else { throw VoiceOSError("只有未完成的问题与目标可以达成") }
         guard current.validity == "current" else { throw VoiceOSError("已失效的问题与目标不能达成") }
         guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
         let next = expectedVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'completed',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'completed',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET state='completed',version=? WHERE id=?", [String(next),actionID])
             try checkpoint(.actionStateUncommitted)
         }
@@ -311,17 +327,17 @@ extension VoiceOSStore {
             guard receipt["action_id"] == actionID, receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一添加下一步命令不能更换目标或行动") }
             return Int(receipt["version"]!)!
         }
-        guard let outcome = try actions(includeHistory: true).first(where: { $0.id == outcomeID }) else { throw VoiceOSError("目标不存在") }
+        guard let outcome = try self.action(id: outcomeID, includeHistory: true) else { throw VoiceOSError("目标不存在") }
         guard outcome.kind == "opportunity" else { throw VoiceOSError("下一步只能挂在问题与目标下") }
         guard outcome.state == "open", outcome.validity == "current" else { throw VoiceOSError("只有未完成且有效的问题与目标可以添加下一步") }
-        guard let child = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let child = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard child.kind == "task" else { throw VoiceOSError("只有待办可以作为下一步") }
         guard child.state == "open", child.validity == "current" else { throw VoiceOSError("只有未完成且有效的待办可以作为下一步") }
         guard child.parentID == nil else { throw VoiceOSError("这条待办已经挂在目标下") }
         try Self.rejectNextActionCycle(db, outcomeID: outcomeID, actionID: actionID)
         let next = child.version + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(child.version),note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(child.version),note,revisionCommand,hash,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET parent_id=?,version=? WHERE id=?", [outcomeID,String(next),actionID])
             try checkpoint(.actionStateUncommitted)
         }
@@ -337,13 +353,13 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一摘除下一步命令不能更换行动") }
             return Int(receipt["version"]!)!
         }
-        guard let child = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let child = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard child.kind == "task" else { throw VoiceOSError("只有待办可以作为目标下一步") }
         guard child.parentID != nil else { throw VoiceOSError("这条待办没有挂在目标下") }
         guard child.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
         let next = expectedVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),child.state,note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),child.state,note,revisionCommand,hash,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET parent_id=NULL,version=? WHERE id=?", [String(next),actionID])
             try checkpoint(.actionStateUncommitted)
         }
@@ -388,7 +404,7 @@ extension VoiceOSStore {
             guard receipt["action_id"] == actionID, receipt["decision"] == decision.rawValue else { throw VoiceOSError("同一澄清命令不能更换行动或判断") }
             return try db.query("SELECT version FROM actions WHERE id=?", [actionID]).first?["version"].flatMap(Int.init) ?? expectedVersion
         }
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let action = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         try Self.rejectNextActionKindChange(db, action: action)
         guard action.isExtracted, action.state == "open", action.validity == "current", action.version == expectedVersion else {
             throw VoiceOSError("只有抽取得到且仍有效的未完成行动可以澄清")
@@ -396,7 +412,7 @@ extension VoiceOSStore {
         guard try db.query("SELECT action_id FROM action_clarifications WHERE action_id=?", [actionID]).isEmpty else {
             throw VoiceOSError("这条行动已经澄清过一次")
         }
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = TimestampFormatting.iso.string(from: Date())
         try db.transaction {
             try db.execute("INSERT INTO action_clarifications(action_id,decision,command_id,created_at) VALUES(?,?,?,?)", [actionID,decision.rawValue,commandID,now])
             guard decision != .commit else { return }
@@ -429,7 +445,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一提升命令不能更换行动或内容") }
             return Int(receipt["version"]!)!
         }
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let action = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         try Self.rejectNextActionKindChange(db, action: action)
         guard action.kind == "opportunity" else { throw VoiceOSError("只有问题与目标可以转为待办") }
         guard action.state == "open" else { throw VoiceOSError("只有未完成的问题与目标可以转为待办") }
@@ -437,7 +453,7 @@ extension VoiceOSStore {
         guard action.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
         let next = expectedVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,revisionCommand,hash,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET kind='task',intent_actor='user',version=? WHERE id=?", [String(next),actionID])
             try checkpoint(.actionStateUncommitted)
         }
@@ -460,12 +476,12 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一次回看命令不能更换行动") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard let current = try self.action(id: actionID, includeHistory: true) else { throw VoiceOSError("行动不存在") }
         guard current.state == LocalActionState.someday.rawValue, current.validity == "current" else { throw VoiceOSError("只有留到以后的行动可以回看") }
         guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
         let next = expectedVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'someday',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'someday',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,revisionCommand,hash,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET version=? WHERE id=?", [String(next),actionID])
             try checkpoint(.actionStateUncommitted)
         }
@@ -476,7 +492,7 @@ extension VoiceOSStore {
     /// the goal entered someday, then to its creation date.
     public func somedayReviewCandidates(unreviewedDays: Int = 60, now: Date = Date()) throws -> [ActionRecord] {
         _ = try candidateClaims(includeFrozen: true)
-        let cutoff = ISO8601DateFormatter().string(from: now.addingTimeInterval(-Double(unreviewedDays) * 86400))
+        let cutoff = TimestampFormatting.iso.string(from: now.addingTimeInterval(-Double(unreviewedDays) * 86400))
         return try db.query("""
             SELECT a.* FROM actions a
             WHERE a.state='someday' AND a.validity='current'
@@ -504,7 +520,7 @@ extension VoiceOSStore {
         }
     }
     static func actionHash(_ fields: [String]) throws -> String {
-        SHA256.hash(data: try JSONSerialization.data(withJSONObject: fields)).map { String(format: "%02x", $0) }.joined()
+        Digest.sha256(try JSONSerialization.data(withJSONObject: fields))
     }
     static func validateStoredActions(_ db: Database) throws {
         for action in try db.query("SELECT a.*,c.review_version AS latest_review,c.validity AS claim_validity,c.ownership AS original_owner FROM actions a JOIN claims c ON c.id=a.claim_id") {

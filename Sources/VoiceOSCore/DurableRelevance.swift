@@ -47,7 +47,7 @@ extension VoiceOSStore {
             INSERT INTO relevance_attempts(id,command_id,fingerprint,snapshot_json,snapshot_digest,destination,provider,model,prompt_version,schema_version,state,validity,created_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,'reserved','current',?)
             """, [id,command,fingerprint,try Self.relevanceJSON(snapshot),snapshot.contentDigest,snapshot.destination.rawValue,
-                    config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date())])
+                    config.provider,config.model,config.promptVersion,config.schemaVersion,TimestampFormatting.iso.string(from: Date())])
             for (ordinal, hit) in snapshot.candidates.enumerated() {
                 try db.execute("INSERT INTO relevance_inputs(id,attempt_id,source_id,transcript_version_id,policy_version,ordinal) VALUES(?,?,?,?,?,?)",
                                [UUID().uuidString,id,hit.document.sourceID,hit.document.transcriptVersionID,String(hit.document.policyVersion),String(ordinal)])
@@ -113,10 +113,10 @@ extension VoiceOSStore {
     }
 
     static func relevanceJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
-    static func relevanceHash(_ value: Data) -> String { SHA256.hash(data: value).map { String(format: "%02x", $0) }.joined() }
+    static func relevanceHash(_ value: Data) -> String { Digest.sha256(value) }
     static func relevanceFingerprint(_ digest: String, _ config: ModelConfiguration) throws -> String {
         relevanceHash(Data(try relevanceJSON(["relevance-attempt-v1",digest,config.provider,config.model,config.promptVersion,config.schemaVersion,config.destination.rawValue]).utf8))
     }
@@ -155,8 +155,8 @@ extension VoiceOSStore {
                       isPrunedHistoricalTranscript(version, historical: row["validity"] == "frozen") ||
                         (d.textEnd <= scalars.count && spans.contains(where: { $0.id == d.spanID && $0.textStart <= d.textStart && $0.textEnd >= d.textEnd }) &&
                          String(String.UnicodeScalarView(scalars[d.textStart..<d.textEnd])) == d.text) else { throw VoiceOSError("相关性历史摘录不一致") }
-                let historicalLocal = d.policyVersion == Int(version["policy_version"]!)! ? version["local_only"] : try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [d.sourceID,String(d.policyVersion)]).first?["from_local_only"]
-                guard historicalLocal == (d.localOnly ? "1":"0") else { throw VoiceOSError("相关性历史权限不一致") }
+                guard try historicalSourcePolicyMatches(db, source: version, sourceID: d.sourceID,
+                                                        version: d.policyVersion, localOnly: d.localOnly) else { throw VoiceOSError("相关性历史权限不一致") }
             }
             if row["state"] == "completed" {
                 guard let text = row["selection_json"], row["result_digest"] == relevanceHash(Data(text.utf8)) else { throw VoiceOSError("相关性历史结果摘要不一致") }

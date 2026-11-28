@@ -90,9 +90,8 @@ extension VoiceOSStore {
               let policy = try db.query("SELECT policy_version,local_only FROM sources WHERE id=?", [source.sourceID]).first,
               snapshot.policyVersion > 0, snapshot.policyVersion <= Int(policy["policy_version"]!)! else { throw VoiceOSError("处理意图原话或授权历史不一致") }
         try SpeechText(text: source.text, spans: source.spans).validate(duration: version["duration"].flatMap(Double.init))
-        let historicalLocal = policy["policy_version"] == String(snapshot.policyVersion) ? policy["local_only"] :
-            try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [source.sourceID, String(snapshot.policyVersion)]).first?["from_local_only"]
-        guard historicalLocal == (source.localOnly ? "1" : "0") else { throw VoiceOSError("处理意图授权历史不一致") }
+        guard try historicalSourcePolicyMatches(db, source: policy, sourceID: source.sourceID,
+                                                version: snapshot.policyVersion, localOnly: source.localOnly) else { throw VoiceOSError("处理意图授权历史不一致") }
 
         for (column, table) in [("cognition_attempt_id", "model_attempts"), ("association_attempt_id", "expression_association_attempts")] {
             guard let id = row[column] else { continue }

@@ -47,7 +47,7 @@ extension VoiceOSStore {
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'current',?,?,?)
                 """, [id,actionID,draft["action_version"],draft["schedule_version"],draft["link_id"],draft["observation_id"],String(expectedAccessVersion),
                         draft["roots_json"],draft["operations_json"],expectedImpactDigest,draft["before_json"],draft["desired_json"],draft["effect_digest"],
-                        commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                        commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try checkpoint(.compensationPlanUncommitted)
         }
         try checkpoint(.compensationPlanCommitted)
@@ -91,7 +91,7 @@ extension VoiceOSStore {
         let id = UUID().uuidString
         try db.transaction {
             try db.execute("INSERT INTO reminder_compensation_grants(id,plan_id,effect_digest,actor,validity,command_id,input_fingerprint,created_at) VALUES(?,?,?,'user','current',?,?,?)",
-                           [id,planID,displayedEffectDigest,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                           [id,planID,displayedEffectDigest,commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try checkpoint(.compensationGrantUncommitted)
         }
         try checkpoint(.compensationGrantCommitted)
@@ -114,7 +114,7 @@ extension VoiceOSStore {
         let id = UUID().uuidString
         try db.transaction {
             try db.execute("INSERT INTO reminder_compensation_revocations(id,grant_id,actor,reason,command_id,input_fingerprint,created_at) VALUES(?,?,'user',?,?,?,?)",
-                           [id,grantID,reason,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                           [id,grantID,reason,commandID,hash,TimestampFormatting.iso.string(from: Date())])
             try checkpoint(.compensationRevocationUncommitted)
         }
         try checkpoint(.compensationRevocationCommitted)

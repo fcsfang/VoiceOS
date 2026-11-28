@@ -295,7 +295,7 @@ extension VoiceOSStore {
         try db.transaction {
             for draft in drafts {
                 let id = UUID().uuidString
-                let hash = SHA256.hash(data: Data(draft.content.utf8)).map { String(format: "%02x", $0) }.joined()
+                let hash = Digest.sha256(Data(draft.content.utf8))
                 try db.execute("""
                     INSERT OR IGNORE INTO monitor_messages(id,source_id,external_id,kind,sender_name,sent_at,collected_at,content,content_sha256,meta_json)
                     VALUES(?,?,?,?,?,?,?,?,?,?)
@@ -335,7 +335,7 @@ extension VoiceOSStore {
     /// the run's message ids so a failed analysis can retry without re-collecting.
     public func advanceMonitorCursor(sourceID: String, lastSuccessEnd: Date, newMessageIDs: [String]) throws {
         struct CursorState: Encodable { let last_success_end: String; let last_run_message_ids: [String] }
-        let iso = ISO8601DateFormatter().string(from: lastSuccessEnd)
+        let iso = TimestampFormatting.iso.string(from: lastSuccessEnd)
         let cursor = try Self.relevanceJSON(CursorState(last_success_end: iso, last_run_message_ids: newMessageIDs))
         try db.execute("""
             INSERT INTO monitor_cursors(source_id,cursor_json,last_success_at,last_error,updated_at) VALUES(?,?,?,NULL,?)

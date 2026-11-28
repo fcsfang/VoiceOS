@@ -44,6 +44,60 @@ final class OutcomeModelChecks: XCTestCase {
         return try XCTUnwrap(actions.first { $0.id == id })
     }
 
+    func testReflectionReusesSavedFeedbackWhenLegacyTranscriptRowsWereDuplicated() async throws {
+        let store = try await openStore()
+        let task = try await addAction(store, title: "校验反馈证据", kind: .task)
+        let version = try await store.setActionState(actionID: task.id, expectedVersion: task.version, state: .completed)
+        let sourceID = try await store.recordActionFeedback(actionID: task.id, expectedVersion: version, kind: .outcome, text: "原反馈")
+        let first = try await store.actionFeedback(actionID: task.id)
+        let old = try XCTUnwrap(first.first)
+
+        let db = await store.db
+        try db.transaction {
+            let source = try XCTUnwrap(db.query("SELECT asset_id,version_id FROM sources WHERE id=?", [sourceID]).first)
+            try db.execute("""
+                INSERT INTO jobs(id,source_id,input_version_id,stage,config,state)
+                VALUES('legacy-feedback-job',?,?,'transcription','legacy-feedback','completed')
+                """, [sourceID, source["version_id"]])
+            try db.createTranscript(sourceID: sourceID, assetID: source["asset_id"]!, inputVersionID: source["version_id"]!,
+                                    jobID: "legacy-feedback-job", speech: SpeechText(text: "改进后的反馈"),
+                                    backend: "fixture", createdAt: "2099-01-01T00:00:00Z")
+        }
+
+        let current = try await store.actionFeedback(actionID: task.id)
+        XCTAssertEqual(current.map(\.id), [old.id])
+        XCTAssertEqual(current.map(\.text), ["改进后的反馈"])
+        let outcomes = try await store.recentActionOutcomes()
+        XCTAssertEqual(outcomes, current)
+        let day = ReflectionPeriod.day.interval(containing: Date())
+        let focus = try await store.reflection(start: day.start, end: day.end, timeZoneID: TimeZone.current.identifier)
+        XCTAssertEqual(focus.outcomes, current)
+        let captured = try XCTUnwrap(focus.tasks.first)
+        let legacyTask = ConversationThoughtTask(actionID: captured.actionID, version: captured.version,
+                                                  title: captured.title, state: captured.state,
+                                                  feedbackSourceIDs: [sourceID, sourceID], kind: captured.kind,
+                                                  goalID: captured.goalID, feedbackActionVersions: captured.feedbackActionVersions,
+                                                  claimID: captured.claimID)
+        let legacy = ConversationReflectionFocus(start: focus.start, end: focus.end, timeZoneID: focus.timeZoneID,
+                                                  expressions: focus.expressions, thoughts: focus.thoughts, tasks: [legacyTask],
+                                                  outcomes: [old] + current, completions: focus.completions, connections: focus.connections)
+        try await store.validateReflectionBasis(legacy)
+        let conversationID = try await store.beginConversationForReflection(legacy, commandID: "legacy-feedback-reflection")
+        let beforeEdit = try await store.conversation(id: conversationID)
+        XCTAssertEqual(beforeEdit.validity, "current")
+
+        let newest = try XCTUnwrap(try db.query("SELECT current_version_id FROM transcripts WHERE job_id='legacy-feedback-job'").first?["current_version_id"])
+        _ = try await store.correctTranscript(sourceID: sourceID, expectedVersionID: newest, text: "新的反馈证据")
+        do {
+            try await store.validateReflectionBasis(legacy)
+            XCTFail("反馈实际变化后，旧回顾证据不能继续使用")
+        } catch {
+            XCTAssertEqual((error as? VoiceOSError)?.message, "回顾结果已变化，请重新进入这个周期")
+        }
+        let afterEdit = try await store.conversation(id: conversationID)
+        XCTAssertEqual(afterEdit.validity, "frozen")
+    }
+
     func testSetActionStateCompletesTasksOnly() async throws {
         let store = try await openStore()
         let outcome = try await addAction(store, title: "要不要换工作", kind: .opportunity)

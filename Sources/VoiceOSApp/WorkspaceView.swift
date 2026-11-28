@@ -176,8 +176,6 @@ struct WorkspaceRow: View {
     }
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hovered = false
     let title: String
     let subtitle: String
     /// Colors the second line without changing its type; reminder exceptions read in warning.
@@ -217,9 +215,7 @@ struct WorkspaceRow: View {
                 }.buttonStyle(.plain).accessibilityLabel(accessibilityText)
                     .zIndex(0)
             }
-            .background(hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-            .onHover { hovered=$0 }
-            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+            .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
         } else {
             Button(action:open) {
                 HStack(alignment:.top,spacing:14) {
@@ -234,11 +230,10 @@ struct WorkspaceRow: View {
                     titleAndTrailing
                 }.padding(.vertical,10).padding(.horizontal,10).padding(.trailing,trailingGutter)
                     .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-                    .background(hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
                     .accessibilityElement(children:.combine)
-            }.buttonStyle(.plain).onHover { hovered=$0 }
+            }.buttonStyle(.plain)
                 .accessibilityLabel(accessibilityText)
-                .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
         }
     }
     private var accessibilityText: String {
@@ -285,6 +280,44 @@ struct WorkspaceRow: View {
         }
     }
 }
+private struct SourceRailRow: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
+    let title: String
+    let subtitle: String
+    let icon: MaterialRowIconKind
+    let isSelected: Bool
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 9) {
+                MaterialRowIcon(kind: icon, size: 27)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).vosFont(WorkspaceText.rowTitle)
+                        .foregroundStyle(palette.text)
+                        .lineLimit(textScale >= 1.3 ? 2 : 1)
+                    if !subtitle.isEmpty {
+                        Text(subtitle).vosFont(WorkspaceText.meta)
+                            .foregroundStyle(palette.secondaryText)
+                            .lineLimit(textScale >= 1.3 ? 2 : 1)
+                    }
+                }
+                Spacer(minLength: 8)
+                WorkspaceRowChevron()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius, isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 private struct WorkspaceAttentionDot: View {
     @ObservedObject var model: ControlCenter
     @ObservedObject var inbox: RecordingInbox
@@ -324,13 +357,13 @@ private struct WorkspaceAttentionDot: View {
 private final class MaterialPageCache {
     struct Key: Equatable { let records: Int; let states: Int }
     var key: Key?
-    var pages: [String: MaterialReadingPage] = [:]
+    var page: MaterialReadingPage?
 }
 
 // Rebuilt only when records, secondary data, the minute or the filter change;
 // survives body re-evaluation.
 private final class ActionPageCache {
-    struct Key: Equatable { let records: Int; let secondary: Int; let minute: Int; let filter: String }
+    struct Key: Equatable { let records: Int; let secondary: Int; let minute: Int; let filter: ActionFilter }
     var key: Key?
     var todoActions: [ActionRecord] = []
     var timeSurface: ActionTimeSurface?
@@ -399,8 +432,8 @@ struct WorkspaceView: View {
     @State private var discussionDrafts: [String: String] = [:]
     @State private var pendingURL: URL?
     @State private var showingOutcome = false
-    @State private var materialFilter = "日常材料"
-    @State private var actionFilter = "我的待办"
+    @State private var materialFilter: MaterialReadingFilter = .daily
+    @State private var actionFilter: ActionFilter = .todo
     @State private var savedViews: [SavedWorkspaceView] = []
     @State private var showingSaveView = false
     @State private var savingView = false
@@ -643,7 +676,7 @@ struct WorkspaceView: View {
                 else if page == .tool("导入录音") { back() }
             }
             .onChange(of:page) { _, next in if next != .actions { exitActionSelection() } }
-            .onChange(of:actionFilter) { _, filter in actionKeyboardHighlightID=nil;if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
+            .onChange(of:actionFilter) { _, filter in actionKeyboardHighlightID=nil;if !filter.usesTodoList { exitActionSelection() } }
             .onChange(of:materialFilter) { _, _ in materialKeyboardFocus.id=nil }
             .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
             .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
@@ -848,8 +881,8 @@ struct WorkspaceView: View {
     private var sidebarSelection: Binding<String?> {
         Binding(get: {
             if let saved = savedViews.first(where: {
-                ($0.page == .materials && page == .materials && materialFilter == $0.filter) ||
-                ($0.page == .actions && page == .actions && actionFilter == $0.filter)
+                ($0.page == .materials && page == .materials && materialFilter.rawValue == $0.filter) ||
+                ($0.page == .actions && page == .actions && actionFilter.rawValue == $0.filter)
             }) { return saved.id }
             return section
         }, set: { selection in
@@ -1183,8 +1216,8 @@ struct WorkspaceView: View {
             topicTab: browsingTopics ? "" : topicTab,
             topicReadingMode: browsingTopics ? "" : topicReadingMode)
         switch page {
-        case .materials: entry.listFilter = materialFilter
-        case .actions: entry.listFilter = actionFilter
+        case .materials: entry.listFilter = materialFilter.rawValue
+        case .actions: entry.listFilter = actionFilter.rawValue
         default: break
         }
         return entry
@@ -1200,29 +1233,15 @@ struct WorkspaceView: View {
             Button(actionTitle) { if let action { action() } else { go(.actions) } }.buttonStyle(.workspacePrimary)
         }.frame(maxWidth:.infinity)
     }
-    private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
-        let index=model.sourcePageIndex
-        let catalog=index.recordsByID
-        let attachedContextIDs=Set(sources.compactMap { $0.pairedContextSourceID(in: catalog) })
-        var seen=Set<String>()
-        return sources.filter { source in
-            // Keep a context recording independently reachable when its personal
-            // recording is outside this list, rather than hiding it globally.
-            guard !attachedContextIDs.contains(source.id) else { return false }
-            guard let expression=index.expression(for:source.id),expression.sourceIDs.count > 1 else { return true }
-            return seen.insert(expression.id).inserted
-        }
-    }
     private var readingMaterials: [SourceRecord] { materialPage.rows }
     private var materialPage: MaterialReadingPage {
         let key = MaterialPageCache.Key(records: model.recordsRevision, states: readingStatesRevision)
-        if materialPageCache.key != key { materialPageCache.key = key; materialPageCache.pages.removeAll() }
-        if let page = materialPageCache.pages[materialFilter] { return page }
+        if materialPageCache.key == key, let page = materialPageCache.page?.selecting(materialFilter) { return page }
         let page = MaterialReadingPage(records: model.records, filter: materialFilter,
-                                       filters: SavedViewPage.materials.filters,
                                        readingStates: readingStates, catalog: recordCatalog,
                                        expressions: model.sourcePageIndex.expressionsBySourceID)
-        materialPageCache.pages[materialFilter] = page
+        materialPageCache.key = key
+        materialPageCache.page = page
         return page
     }
     private func materialDayGroups(_ sources: [SourceRecord]) -> [MaterialDayGroup] {
@@ -1250,10 +1269,10 @@ struct WorkspaceView: View {
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"材料") {
                 WorkspaceHeaderMenu {
-                    Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter) }
+                    Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter.rawValue) }
                 }
             }
-            if materialFilter == "日常材料", !todayReading.isEmpty {
+            if materialFilter == .daily, !todayReading.isEmpty {
                 WorkspaceListSection(title:"今日阅读",count:todayReading.count) {
                     VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                         ForEach(todayReading) { item in
@@ -1265,40 +1284,43 @@ struct WorkspaceView: View {
             }
             HStack {
                 Picker("阅读状态", selection: $materialFilter) {
-                    ForEach(["日常材料", "未读", "在读"], id: \.self) { filter in
-                        Text("\(filter)  \(page.counts[filter] ?? 0)").tag(filter)
+                    ForEach([MaterialReadingFilter.daily, .unread, .reading], id: \.self) { filter in
+                        Text("\(filter.rawValue)  \(page.count(for: filter))").tag(filter)
                     }
-                    if materialFilter == "已归档" || materialFilter == "回收站" {
-                        Text("\(materialFilter)  \(rows.count)").tag(materialFilter)
+                    if materialFilter == .archived || materialFilter == .trash {
+                        Text("\(materialFilter.rawValue)  \(rows.count)").tag(materialFilter)
                     }
                 }.pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer()
                 Menu {
-                    Button("已归档（\(page.counts["已归档"] ?? 0)）", systemImage:"archivebox") { materialFilter="已归档" }
-                    Button("回收站（\(page.counts["回收站"] ?? 0)）", systemImage:"trash") { materialFilter="回收站" }
+                    ForEach([MaterialReadingFilter.archived, .trash], id: \.self) { filter in
+                        Button("\(filter.rawValue)（\(page.count(for: filter))）", systemImage: filter == .trash ? "trash" : "archivebox") {
+                            materialFilter = filter
+                        }
+                    }
                 } label: {
                     Label("归档与回收站", systemImage:"archivebox")
                 }.fixedSize()
             }
-            if !rows.isEmpty, ["已归档","回收站"].contains(materialFilter) {
-                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            if !rows.isEmpty, [.archived, .trash].contains(materialFilter) {
+                Text(materialFilter == .archived ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             if rows.isEmpty {
-                if materialFilter == "日常材料" {
+                if materialFilter == .daily {
                     WorkspaceEmptyState(title: model.records.isEmpty ? "还没有材料" : "日常材料是空的", systemImage:"tray", description: model.records.isEmpty ? "可以先记录想法，或导入一段录音、视频。" : "其他材料在已归档或回收站里，可以切换查看。") {
                         Button("添加材料") { go(.capture) }.buttonStyle(.workspacePrimary)
                     }
-                } else if materialFilter == "未读" {
+                } else if materialFilter == .unread {
                     WorkspaceEmptyState(title:"没有未读材料",systemImage:"eye") {
-                        Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
+                        Button("查看日常材料") { materialFilter = .daily }.buttonStyle(.workspaceSecondary)
                     }
-                } else if materialFilter == "在读" {
+                } else if materialFilter == .reading {
                     WorkspaceEmptyState(title:"没有在读的材料",systemImage:"book") {
-                        Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
+                        Button("查看日常材料") { materialFilter = .daily }.buttonStyle(.workspaceSecondary)
                     }
                 } else {
-                    WorkspaceEmptyState(title:"这里暂时没有材料",systemImage:materialFilter == "回收站" ? "trash" : "archivebox",description:materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。") {
-                        Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
+                    WorkspaceEmptyState(title:"这里暂时没有材料",systemImage:materialFilter == .trash ? "trash" : "archivebox",description:materialFilter == .archived ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。") {
+                        Button("查看日常材料") { materialFilter = .daily }.buttonStyle(.workspaceSecondary)
                     }
                 }
             } else {
@@ -1370,7 +1392,7 @@ struct WorkspaceView: View {
 
     private var unlinkedTopicMaterials: [SourceRecord] {
         let linked = Set(model.workspaceTopicSources.values.flatMap { $0 })
-        return distinctExpressions(activeMaterials.filter { !linked.contains($0.id) })
+        return model.sourcePageIndex.groupedMaterialRows(in: activeMaterials.filter { !linked.contains($0.id) })
     }
     private var reviewInterval: DateInterval { reviewPeriod.interval(containing: reviewAnchor) }
     private func reviewSources(for reading: TopicReadingData) -> [SourceRecord] {
@@ -1584,7 +1606,7 @@ struct WorkspaceView: View {
         switch topicTab {
         case "材料":
             let catalog = recordCatalog
-            let expressions = distinctExpressions(reading.sources)
+            let expressions = model.sourcePageIndex.groupedMaterialRows(in: reading.sources)
             WorkspaceSection(title:"主题材料",count:reading.sources.count) {
                 VStack(spacing:0) {
                     ForEach(expressions) { source in
@@ -1641,7 +1663,7 @@ struct WorkspaceView: View {
             let interval=reviewInterval
             let sources=reviewSources(for: reading)
             let catalog=recordCatalog
-            let expressions=distinctExpressions(sources)
+            let expressions=model.sourcePageIndex.groupedMaterialRows(in: sources)
             VStack(spacing:0) {
                 ForEach(expressions) { source in
                     sourceRow(source,catalog:catalog)
@@ -1681,7 +1703,7 @@ struct WorkspaceView: View {
         return reads
     }
     private func actionPageTimeSurface(_ todoActions: [ActionRecord]) -> ActionTimeSurface? {
-        guard ["全部","我的待办"].contains(actionFilter) else { return nil }
+        guard actionFilter.usesTodoList else { return nil }
         if let surface = actionPageCache.timeSurface { return surface }
         let surface = ActionTimeSurface.build(actions: todoActions, schedules: model.scheduleIntents,
                                               links: model.reminderLinks, now: Date(), calendar: .current)
@@ -1711,7 +1733,7 @@ struct WorkspaceView: View {
     /// Both keyboard call sites use `visibleActions`, which is that same list
     /// under the filters that build a surface; every other filter caches nil.
     private func cachedActionTimeSurface() -> ActionTimeSurface? {
-        guard ["全部","我的待办"].contains(actionFilter), actionPageCache.key == actionPageKey else { return nil }
+        guard actionFilter.usesTodoList, actionPageCache.key == actionPageKey else { return nil }
         return actionPageCache.timeSurface
     }
     private var actions: some View {
@@ -1728,13 +1750,13 @@ struct WorkspaceView: View {
         let rowReads = actionPageRowReads()
         if actionPageCache.nextStepCounts.isEmpty { actionPageCache.nextStepCounts = model.sourcePageIndex.nextStepCounts }
         let nextStepCounts = actionPageCache.nextStepCounts
-        let listGroup:ActionRowGroup=actionFilter == "已完成" ? .completed : actionFilter == "历史记录" ? .history : actionFilter == "待核对" ? .needsReview : .active
+        let listGroup:ActionRowGroup=actionFilter == .completed ? .completed : actionFilter == .history ? .history : actionFilter == .needsReview ? .needsReview : .active
         let timeSurface = actionPageTimeSurface(todoActions)
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"行动") {
                 HStack(spacing:8) {
                     Group {
-                        Button { actionFilter = "AI 助理"; error = "" } label: {
+                        Button { actionFilter = .assistant; error = "" } label: {
                             WorkspaceBadge(text:model.unreadDeliveryCount > 0 ? "AI 交付 \(model.unreadDeliveryCount) 份待读" : "AI 交付", tone:.neutral)
                                 .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
                                 .padding(.horizontal, 6)
@@ -1742,30 +1764,30 @@ struct WorkspaceView: View {
                         }.buttonStyle(.plain)
                             .accessibilityLabel("AI 交付 \(model.unreadDeliveryCount) 份待读，打开列表")
                     }
-                    if actionFilter == "我的待办" {
+                    if actionFilter == .todo {
                         Button { beginPlanningToday() } label: {
                             Label("安排今天", systemImage:"sun.max")
                         }.buttonStyle(.workspacePrimary)
                             .accessibilityLabel("安排今天").help("从即将与随时里挑最多 3 条加入专注")
                     }
                     WorkspaceHeaderMenu {
-                        if ["问题","目标"].contains(actionFilter) {
+                        if listNature != nil {
                             Button("逐个澄清", systemImage:"checklist") {
-                                clarifyScope = actionFilter == "目标" ? .goals : .questions
+                                clarifyScope = actionFilter == .goals ? .goals : .questions
                                 showingClarifyQueue=true
                             }
                         }
-                        if ["全部","我的待办"].contains(actionFilter) {
+                        if actionFilter.usesTodoList {
                             Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.disabled(batchRunning)
                         }
-                        Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter) }
+                        Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter.rawValue) }
                         Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }
                     }
                 }
             }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model, scope:clarifyScope) }
             Picker("行动视图", selection: $actionFilter) {
-                ForEach(SavedViewPage.actions.filters, id: \.self) { filter in
-                    Text(filter == "AI 助理" ? "AI 交付" : filter).tag(filter)
+                ForEach(ActionFilter.allCases, id: \.self) { filter in
+                    Text(filter.menuTitle).tag(filter)
                 }
             }.pickerStyle(.menu).fixedSize().accessibilityIdentifier("actions.view")
             if let offer = localCompletionOffer {
@@ -1789,17 +1811,17 @@ struct WorkspaceView: View {
                     .workspaceFocusRing(summaryPendingFocus, radius: WorkspaceMetrics.controlRadius)
                     .accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
             }
-            if actionFilter == "全部", let surface = timeSurface {
+            if actionFilter == .all, let surface = timeSurface {
                 let focusedTodayIDs = Set(focusedActions.map(\.id))
                 let overdue = surface.today.filter { $0.isOverdue && !focusedTodayIDs.contains($0.action.id) }
                 let dueToday = surface.today.filter { !$0.isOverdue && !focusedTodayIDs.contains($0.action.id) }
                 actionTodayFirstScreen(overdue: overdue, dueToday: dueToday, nextStepCounts: nextStepCounts, reads: rowReads)
             }
-            if actionFilter == "目标", !model.stalledOutcomes.isEmpty { stalledBanner }
-            let visible = ["全部","我的待办"].contains(actionFilter) ? todoActions : visibleActions
+            if actionFilter == .goals, !model.stalledOutcomes.isEmpty { stalledBanner }
+            let visible = actionFilter.usesTodoList ? todoActions : visibleActions
             let focusedIDs = Set(focusedActions.map(\.id))
             let todayIDs = Set((timeSurface?.today ?? []).map(\.action.id))
-            let listed = actionFilter == "全部"
+            let listed = actionFilter == .all
                 ? todoOrder(visible, surface: timeSurface).filter { !focusedIDs.contains($0.id) && !todayIDs.contains($0.id) }
                 : visible
             let timeEntries: [String: ActionTimeEntry] = timeSurface.map { surface in
@@ -1807,14 +1829,14 @@ struct WorkspaceView: View {
             } ?? [:]
             let executions = model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.state != "cancelled" })
             let paused = model.workspacePausedTasks
-            if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
+            if actionFilter.usesTodoList, !focusedActions.isEmpty {
                 WorkspaceListSection(title:"专注",count:focusedActions.count) {
                     ActionCardList {
                         ForEach(focusedActions) { action in actionRow(action,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
                 }
             }
-            if actionFilter == "我的待办", !visible.isEmpty, let surface = timeSurface {
+            if actionFilter == .todo, !visible.isEmpty, let surface = timeSurface {
                 let overdue = surface.today.filter(\.isOverdue)
                 let dueToday = surface.today.filter { !$0.isOverdue }
                 if !overdue.isEmpty {
@@ -1845,12 +1867,12 @@ struct WorkspaceView: View {
                         }
                     }
                 }
-            } else if actionFilter == "AI 助理" {
+            } else if actionFilter == .assistant {
                 if !executions.isEmpty {
                     WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
                 }
             } else if !listed.isEmpty {
-                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,count:listed.count) {
+                WorkspaceListSection(title:actionFilter == .all ? ActionFilter.todo.rawValue : actionFilter.rawValue,count:listed.count) {
                     ActionCardList {
                         ForEach(listed) { action in actionRow(action,timeEntry:timeEntries[action.id],group:listGroup,nature:listNature,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
@@ -1858,8 +1880,8 @@ struct WorkspaceView: View {
             }
             // Stalled goals are a standing backlog, not today's work; on the
             // overview they sit below the backlog as one quiet line.
-            if actionFilter == "全部", !model.stalledOutcomes.isEmpty { stalledBanner }
-            if actionFilter == "全部", !paused.isEmpty {
+            if actionFilter == .all, !model.stalledOutcomes.isEmpty { stalledBanner }
+            if actionFilter == .all, !paused.isEmpty {
                 WorkspaceListSection(title:"需要核对的待办",count:paused.count) {
                     ActionCardList {
                         ForEach(paused) { action in actionRow(action,group:.needsReview,nextStepCounts:nextStepCounts,reads:rowReads) }
@@ -1867,7 +1889,7 @@ struct WorkspaceView: View {
                     if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
                 }
             }
-            let overviewQuestions = actionFilter == "全部" ? model.openQuestions : []
+            let overviewQuestions = actionFilter == .all ? model.openQuestions : []
             if !overviewQuestions.isEmpty {
                 WorkspaceListSection(title:"问题",count:overviewQuestions.count,collapsible:true) {
                     ActionCardList {
@@ -1876,12 +1898,12 @@ struct WorkspaceView: View {
                         }
                     }
                     if overviewQuestions.count > 3 {
-                        Button("查看全部 \(overviewQuestions.count)") { actionFilter = "问题" }
+                        Button("查看全部 \(overviewQuestions.count)") { actionFilter = .questions }
                             .buttonStyle(.workspaceQuietCompact).padding(.vertical,6)
                     }
                 }
             }
-            let overviewGoals = actionFilter == "全部" ? model.openGoals : []
+            let overviewGoals = actionFilter == .all ? model.openGoals : []
             if !overviewGoals.isEmpty {
                 WorkspaceListSection(title:"目标",count:overviewGoals.count,collapsible:true) {
                     ActionCardList {
@@ -1890,12 +1912,12 @@ struct WorkspaceView: View {
                         }
                     }
                     if overviewGoals.count > 3 {
-                        Button("查看全部 \(overviewGoals.count)") { actionFilter = "目标" }
+                        Button("查看全部 \(overviewGoals.count)") { actionFilter = .goals }
                             .buttonStyle(.workspaceQuietCompact).padding(.vertical,6)
                     }
                 }
             }
-            if actionFilter == "目标" {
+            if actionFilter == .goals {
                 let suggestions = model.untriagedSuggestions
                 if !suggestions.isEmpty {
                     WorkspaceListSection(title:"系统整理的建议",subtitle:"VoiceOS 还拿不准类别；可以逐条归类。",count:suggestions.count,collapsible:true) {
@@ -1916,24 +1938,24 @@ struct WorkspaceView: View {
                     }.padding(.vertical,10)
                 }
             }
-            if actionFilter == "全部", !executions.isEmpty {
+            if actionFilter == .all, !executions.isEmpty {
                 WorkspaceListSection(title:"AI 助理的工作",count:executions.count,collapsible:true) { executionRows(executions) }
             }
             if model.pausedActionBatch != nil {
                 WorkspaceListSection(title:"批量重新识别") { PausedActionBatchControl(model:model) }
             }
-            if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true)
-                && !(actionFilter == "全部" && (!paused.isEmpty || !overviewQuestions.isEmpty || !overviewGoals.isEmpty))
-                && !(actionFilter == "目标" && !model.untriagedSuggestions.isEmpty) {
+            if visible.isEmpty && (actionFilter == .assistant || actionFilter == .all ? executions.isEmpty : true)
+                && !(actionFilter == .all && (!paused.isEmpty || !overviewQuestions.isEmpty || !overviewGoals.isEmpty))
+                && !(actionFilter == .goals && !model.untriagedSuggestions.isEmpty) {
                 WorkspaceEmptyState(title:actionEmptyTitle,systemImage:"checkmark.circle",description:actionEmptyDescription) {
                     HStack {
                         Button("记录想法") { go(.capture) }.buttonStyle(.workspacePrimary)
-                        if actionFilter != "问题" { Button("查看问题") { actionFilter="问题" }.buttonStyle(.workspaceSecondary) }
-                        if actionFilter != "目标" { Button("查看目标") { actionFilter="目标" }.buttonStyle(.workspaceSecondary) }
+                        if actionFilter != .questions { Button("查看问题") { actionFilter = .questions }.buttonStyle(.workspaceSecondary) }
+                        if actionFilter != .goals { Button("查看目标") { actionFilter = .goals }.buttonStyle(.workspaceSecondary) }
                     }
                 }
             }
-            if actionFilter == "待核对" { processingIssues }
+            if actionFilter == .needsReview { processingIssues }
             HStack { Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.buttonStyle(.workspaceSecondary).disabled(model.reminderAccess?.enabled != true || model.remindersBusy);Spacer();Text(model.reminderSyncStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).lineLimit(2) }
         }
         .help("↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进 · ⌥⌘Z 撤销上一次变更")
@@ -1957,21 +1979,21 @@ struct WorkspaceView: View {
     }
     private var actionEmptyTitle: String {
         switch actionFilter {
-        case "历史记录": "还没有历史任务记录"
-        case "已完成": "还没有已完成的事项"
-        case "AI 助理": "还没有 AI 代办"
-        case "待核对": "没有待核对的行动"
-        case "问题": "还没有问题"
-        case "目标": "还没有目标"
+        case .history: "还没有历史任务记录"
+        case .completed: "还没有已完成的事项"
+        case .assistant: "还没有 AI 代办"
+        case .needsReview: "没有待核对的行动"
+        case .questions: "还没有问题"
+        case .goals: "还没有目标"
         default: "目前没有可执行的待办"
         }
     }
     private var actionEmptyDescription: String {
         switch actionFilter {
-        case "AI 助理": "在一项待办中选择“交给 AI”，编辑要求后开始执行。"
-        case "待核对": "下方处理问题里的事项仍需要查看。"
-        case "问题": "记录一个问题，VoiceOS 会先试着回答；想清楚了可以加下一步。"
-        case "目标": "这里是你长期要达到的结果；转成待办后可提醒。"
+        case .assistant: "在一项待办中选择“交给 AI”，编辑要求后开始执行。"
+        case .needsReview: "下方处理问题里的事项仍需要查看。"
+        case .questions: "记录一个问题，VoiceOS 会先试着回答；想清楚了可以加下一步。"
+        case .goals: "这里是你长期要达到的结果；转成待办后可提醒。"
         default: "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
         }
     }
@@ -2007,7 +2029,7 @@ struct WorkspaceView: View {
         }
     }
     private var todaySummaryJump: some View {
-        Button("查看我的待办") { actionFilter = "我的待办" }
+        Button("查看我的待办") { actionFilter = .todo }
             .buttonStyle(.workspaceQuietCompact)
             .focused($summaryTodayFocus).focusEffectDisabled()
             .workspaceFocusRing(summaryTodayFocus, radius: WorkspaceMetrics.controlRadius)
@@ -2023,8 +2045,8 @@ struct WorkspaceView: View {
     }
     private var listNature: ActionNature? {
         switch actionFilter {
-        case "问题": .question
-        case "目标": .goal
+        case .questions: .question
+        case .goals: .goal
         default: nil
         }
     }
@@ -2078,22 +2100,22 @@ struct WorkspaceView: View {
     }
     private var focusRefreshKey: String { model.sourcePageIndex.actionRevisionKey }
     private var myTodoActions: [ActionRecord] {
-        model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && !model.sourcePageIndex.requiresReview($0.id) }
+        model.actionRecords.filter { $0.isCurrentOpenTask && !model.sourcePageIndex.requiresReview($0.id) }
     }
     private var visibleActions: [ActionRecord] {
         switch actionFilter {
-        case "已完成":
+        case .completed:
             return model.actionRecords.filter { $0.state == "completed" }.sorted { left, right in
                 let leftDate = left.completedAt ?? left.createdAt, rightDate = right.completedAt ?? right.createdAt
                 return leftDate == rightDate ? left.id > right.id : leftDate > rightDate
             }
-        case "历史记录":
+        case .history:
             return model.actionRecords.filter { $0.state == "dismissed" || ($0.validity != "current" && !model.sourcePageIndex.requiresReview($0.id)) }
-        case "待核对":
+        case .needsReview:
             return model.actionRecords.filter { model.sourcePageIndex.requiresReview($0.id) || $0.validity == "current" && ($0.intent?.uncertain == true || $0.intent?.followupState == "needs_review") }
-        case "问题":
+        case .questions:
             return model.actionRecords.filter { $0.kind == "opportunity" && $0.nature == ActionNature.question.rawValue && $0.state == "open" && $0.validity == "current" }
-        case "目标":
+        case .goals:
             return model.actionRecords.filter { $0.kind == "opportunity" && $0.nature == ActionNature.goal.rawValue && $0.state == "open" && $0.validity == "current" }
         default:
             return myTodoActions
@@ -2136,7 +2158,7 @@ struct WorkspaceView: View {
                         recentSearchChips
                     }
                 }
-                let sources=distinctExpressions(model.records.filter { !$0.isTrashed })
+                let sources=model.sourcePageIndex.groupedMaterialRows(in: model.records.filter { !$0.isTrashed })
                 if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
                 let catalog=recordCatalog
                 ForEach(sources) { source in
@@ -2297,7 +2319,7 @@ struct WorkspaceView: View {
         searchSuggestionCache.topics = model.workspaceTopics.map { topic in
             SearchSuggestionCache.Entry(id:"suggestion:topic:" + topic.id,title:topic.title) { selectTopic(topic.id) }
         }
-        searchSuggestionCache.tasks = model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }.map { action in
+        searchSuggestionCache.tasks = model.actionRecords.filter(\.isCurrentOpenTask).map { action in
             SearchSuggestionCache.Entry(id:"suggestion:task:" + action.id,title:action.title) { go(.task(action.id)) }
         }
         let claims = model.claims.filter { $0.validity == "current" && $0.reviewState != "rejected" }
@@ -3146,7 +3168,7 @@ struct WorkspaceView: View {
     }
     private func unassignedTopicReasonSummary(_ sources:[SourceRecord],catalog:[String:SourceRecord]) -> String {
         var counts:[String:Int]=[:]
-        for source in distinctExpressions(sources) { counts[source.topicAssignmentReason(in:catalog),default:0] += 1 }
+        for source in model.sourcePageIndex.groupedMaterialRows(in: sources) { counts[source.topicAssignmentReason(in:catalog),default:0] += 1 }
         return counts.sorted { $0.value > $1.value }.prefix(3).map { "\($0.value) 份 · \($0.key)" }.joined(separator:"；")
     }
     private func splitMaterialExpression(_ ids:[String]) {
@@ -3273,7 +3295,7 @@ struct WorkspaceView: View {
         let keyboardHighlighted=page == .actions && !selectingActions && actionKeyboardHighlightID == action.id
         let focused=focusedActionIDs.contains(action.id)
         let canChangeDay=actionable && reads.linkedReminderByActionID[action.id] != nil && !model.savingAction && !model.remindersBusy
-        let canComplete=actionable && action.kind == "task"
+        let canComplete = !selectingActions && action.isCurrentOpenTask
         let externalCompletion=model.workspaceExternalCompletion(action) != nil
         let layout=actionRowStatus(action,timeEntry:timeEntry,group:group,nature:nature,nextStepCount:nextStepCounts[action.id] ?? 0,reads:reads)
         let tagged=StatementTagParser.split(action.title)
@@ -3281,7 +3303,6 @@ struct WorkspaceView: View {
         let reminderException=layout.meta.contains("提醒待核对") || layout.meta.contains("提醒缺失") || layout.meta.contains("已逾期")
         let trailingStyle:WorkspaceRow.TrailingStyle=marksSelected ? .status(palette.accent) : (layout.status.isEmpty ? .secondary : .status(actionRowToneColor(layout.tone)))
         let icon:String=selectingActions ? (selectable ? (selected ? "checkmark.circle.fill" : "circle") : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : nature == .question ? "questionmark.circle" : nature == .goal ? "target" : typeIcon(tagged.tag)
-        let showsCompletion = !selectingActions && action.kind == "task" && action.state == "open" && action.validity == "current"
         return WorkspaceActionRowChrome(action:action,
             canTransition:actionable || externalCompletion,
             revealed:keyboardHighlighted,
@@ -3293,7 +3314,7 @@ struct WorkspaceView: View {
                     trailingStyle:trailingStyle,
                     statusAccessibility:layout.status,
                     trailingGutter:WorkspaceRowChrome.actionGutter,
-                    completion:showsCompletion ? WorkspaceRow.CompletionControl(enabled:canComplete && !model.savingAction,complete:{ applyActionState(action,to:.completed) }) : nil) {
+                    completion:canComplete ? WorkspaceRow.CompletionControl(enabled:!model.savingAction,complete:{ applyActionState(action,to:.completed) }) : nil) {
                     if selectingActions {
                         guard selectable else { return }
                         if selected { selectedActionIDs.remove(action.id) } else { selectedActionIDs.insert(action.id) }
@@ -3494,32 +3515,32 @@ struct WorkspaceView: View {
         func add<S:Sequence>(_ actions:S) where S.Element == ActionRecord {
             for action in actions where seen.insert(action.id).inserted { rows.append(action) }
         }
-        let timeFilters = ["全部","我的待办"].contains(actionFilter)
+        let timeFilters = actionFilter.usesTodoList
         let surface: ActionTimeSurface? = timeFilters
             ? (cachedActionTimeSurface() ?? ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current))
             : nil
         // 键盘顺序与可见顺序一致：「全部」首屏先是今天，再是专注。
-        if actionFilter == "全部", let surface {
+        if actionFilter == .all, let surface {
             add(surface.today.map(\.action))
             add(focusedActions)
         } else if timeFilters {
             add(focusedActions)
         }
-        if actionFilter == "我的待办", let surface {
+        if actionFilter == .todo, let surface {
             add(surface.today.map(\.action))
             add(surface.soon.map(\.action))
             add(surface.anytime.map(\.action))
-        } else if actionFilter != "AI 助理" {
+        } else if actionFilter != .assistant {
             add(visibleActions)
         }
-        if actionFilter == "全部" {
+        if actionFilter == .all {
             add(model.workspacePausedTasks)
             add(model.openQuestions.prefix(3))
             add(model.openGoals.prefix(3))
         }
         return rows
     }
-    private func cycledFilter(_ current:String, over filters:[String], forward:Bool) -> String {
+    private func cycledFilter<Filter: Equatable>(_ current: Filter, over filters: [Filter], forward: Bool) -> Filter {
         guard !filters.isEmpty, let index=filters.firstIndex(of: current) else { return filters.first ?? current }
         return filters[(index + (forward ? 1 : -1) + filters.count) % filters.count]
     }
@@ -3539,7 +3560,7 @@ struct WorkspaceView: View {
             actionKeyboardHighlightID=order[next].id
             return .handled
         case .leftArrow, .rightArrow:
-            let next=cycledFilter(actionFilter, over: SavedViewPage.actions.filters, forward: press.key == .rightArrow)
+            let next=cycledFilter(actionFilter, over: ActionFilter.allCases, forward: press.key == .rightArrow)
             guard next != actionFilter else { return .ignored }
             actionFilter=next
             return .handled
@@ -3601,7 +3622,7 @@ struct WorkspaceView: View {
             guard materialKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
             return .handled
         case .leftArrow, .rightArrow:
-            let next=cycledFilter(materialFilter, over: SavedViewPage.materials.filters, forward: press.key == .rightArrow)
+            let next=cycledFilter(materialFilter, over: MaterialReadingFilter.allCases, forward: press.key == .rightArrow)
             guard next != materialFilter else { return .ignored }
             materialFilter=next
             return .handled
@@ -3689,7 +3710,7 @@ struct WorkspaceView: View {
         guard page == .themes, topic != nil, topicTab == "材料", topicMaterialListFocused,
               press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let ids=currentTopicReading.map { distinctExpressions($0.sources).map(\.id) } ?? []
+        let ids=currentTopicReading.map { model.sourcePageIndex.groupedMaterialRows(in: $0.sources).map(\.id) } ?? []
         switch press.key {
         case .downArrow, .upArrow:
             guard topicMaterialKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
@@ -3706,7 +3727,7 @@ struct WorkspaceView: View {
         guard page == .themes, topic != nil, topicTab == "认识与问题", topicReadingMode == "回顾", topicReviewListFocused,
               press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let ids=currentTopicReading.map { distinctExpressions(reviewSources(for: $0)).map(\.id) } ?? []
+        let ids=currentTopicReading.map { model.sourcePageIndex.groupedMaterialRows(in: reviewSources(for: $0)).map(\.id) } ?? []
         switch press.key {
         case .downArrow, .upArrow:
             guard topicReviewKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
@@ -3724,7 +3745,7 @@ struct WorkspaceView: View {
     private var searchKeyboardRows: [(id:String, open:()->Void)] {
         let term=query.trimmingCharacters(in:.whitespacesAndNewlines)
         if term.isEmpty {
-            return distinctExpressions(model.records.filter { !$0.isTrashed }).map { source in
+            return model.sourcePageIndex.groupedMaterialRows(in: model.records.filter { !$0.isTrashed }).map { source in
                 (id: "material:" + source.id, open: { go(.source(source.id)) })
             }
         }
@@ -3892,17 +3913,8 @@ struct WorkspaceView: View {
         } else { page = .notes }
         topicFocus=nil;error=""
     }
-    private var sourceRailRows: [SourceRecord] {
-        let index=model.sourcePageIndex
-        var seen=Set<String>()
-        return model.records.filter { source in
-            guard !source.isArchived,!source.isTrashed else { return false }
-            guard let expression=index.expression(for:source.id),expression.sourceIDs.count > 1 else { return true }
-            return seen.insert(expression.id).inserted
-        }.sorted { $0.createdAt > $1.createdAt }
-    }
     private func sourceRail(selectedID:String) -> some View {
-        let rows=sourceRailRows
+        let rows = model.sourcePageIndex.materialRailRows(in: activeMaterials)
         return VStack(alignment:.leading,spacing:0) {
             HStack(spacing:8) {
                 Text("材料").vosFont(WorkspaceText.meta.size, weight:.semibold).foregroundStyle(palette.secondaryText)
@@ -3914,9 +3926,11 @@ struct WorkspaceView: View {
             ScrollView {
                 LazyVStack(alignment:.leading,spacing:2) {
                     ForEach(rows) { source in
-                        WorkspaceListRow(density:.compact,title:fittedDisplayTitle(source.displayTitle),subtitle:source.recordingDateLabel,materialIcon: MaterialRowIconKind(source),highlighted:source.id == selectedID) { selectSource(source.id) }
-                            .help(fittedDisplayTitle(source.displayTitle))
-                            .accessibilityIdentifier("sourceRail.item." + source.id)
+                        SourceRailRow(title: fittedDisplayTitle(source.displayTitle), subtitle: source.recordingDateLabel,
+                                      icon: MaterialRowIconKind(source), isSelected: source.id == selectedID) {
+                            selectSource(source.id)
+                        }
+                        .accessibilityIdentifier("sourceRail.item." + source.id)
                     }
                 }.padding(.horizontal,8).padding(.bottom,12)
             }
@@ -4051,8 +4065,14 @@ struct WorkspaceView: View {
     private func openSavedView(_ view:SavedWorkspaceView) {
         path=[]
         switch view.page {
-        case .materials: materialFilter=view.filter;page = .materials
-        case .actions: actionFilter=view.filter;page = .actions
+        case .materials:
+            guard let filter = MaterialReadingFilter(rawValue: view.filter) else { return }
+            materialFilter = filter
+            page = .materials
+        case .actions:
+            guard let filter = ActionFilter(rawValue: view.filter) else { return }
+            actionFilter = filter
+            page = .actions
         }
         error=""
     }
@@ -4125,7 +4145,7 @@ struct WorkspaceView: View {
         guard let action=model.actionRecords.first(where: { $0.id == actionID }) else {
             error="这条行动已不在当前资料库，完成未写入"; return
         }
-        guard action.kind == "task", action.state == "open", action.validity == "current" else {
+        guard action.isCurrentOpenTask else {
             error="这条行动当前不能标记完成"; return
         }
         applyActionState(action,to:.completed)

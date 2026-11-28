@@ -68,7 +68,7 @@ private struct OrganizedTasks: Decodable {
 }
 
 private func transcriptInputDigest(_ text: String) -> String {
-    SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    Digest.sha256(Data(text.utf8))
 }
 extension VoiceOSStore {
 public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool = false, requireAPIReview: Bool = true) async throws -> Int {
@@ -79,7 +79,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     guard !needsAPIReview || tasks.api_review_completed == true else { throw VoiceOSError("外部 API 意图核对尚未完成；没有接入初稿或写入提醒事项") }
     guard !needsAPIReview || tasks.continuations_checked == true else { throw VoiceOSError("已有任务接续核对尚未完成；没有接入初稿或写入提醒事项") }
     guard !needsAPIReview || ((tasks.intent_review_completed ?? tasks.independent_semantic_review_completed) == true && (tasks.transcription_review_completed ?? tasks.audio_review_completed) == true) else { throw VoiceOSError("意图核对或全文转写校正尚未完成；没有写入提醒事项") }
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    let encoder = StableJSON.makeEncoder()
     if allowReminderWrites {
         guard let access = try reminderAccess(), access.enabled, access.title == "VoiceOS" else { throw VoiceOSError("请先在应用中连接正式 VoiceOS 清单") }
     }
@@ -110,12 +110,11 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     let previousActions = try actions(includeHistory: true).filter { $0.validity == "current" }
     var reusedActions: [Int: ActionRecord] = [:]
     var sourceIDs: [String: String] = [:]
-    var budget = 1
     for (folder, original, transcript, manifest) in inputs {
         let name = folder.lastPathComponent
         let id: String
         if let existingID = manifest.voiceos_source_id {
-            guard let existing = try sources().first(where: { $0.id == existingID }),
+            guard let existing = try sourceRecord(id: existingID),
                   existing.origin == "user",existing.speaker == "user",
                   existing.transcriptionBackend == original.backend, let originalVersion = manifest.voiceos_transcript_version_id else { throw VoiceOSError("完整整理的原话版本已变化，请重新整理") }
             guard !existing.localOnly else { throw VoiceOSError("这份文字已限制为仅本机，完整整理结果暂未接回；原件和逐字稿保留") }
@@ -137,7 +136,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
             id = try await importPersonalAudio(namedAudio, commandID: "podcast-full-qwen:" + name)
             try await processTranscriptions(using: original, sourceIDs: [id])
             if let review = transcript.transcription_review, review.completed, review.changed,
-               let version = try sources().first(where: { $0.id == id })?.transcriptVersionID {
+               let version = try sourceRecord(id: id)?.transcriptVersionID {
                 _ = try applyReviewedQwenTranscript(sourceID: id, expectedVersionID: version,
                                                    speech: SpeechText(text: transcript.text, spans: transcript.spans), responseID: review.response_id)
             }
@@ -148,14 +147,13 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         }
         if let review = transcript.transcription_review { try saveTranscriptionReview(review, sourceID: id) }
         sourceIDs[name] = id
-        budget += transcript.text.unicodeScalars.count
     }
     // Full-text correction may have advanced only the personal version. Rebind
     // the same physical session after verifying programme and both permissions.
     for snapshot in tasks.recording_contexts ?? [] {
         let pairing=snapshot.pairing
-        guard let personal=try sources().first(where: { $0.id == pairing.personalSourceID }),
-              let external=try sources().first(where: { $0.id == pairing.externalSourceID }),
+        guard let personal=try sourceRecord(id: pairing.personalSourceID),
+              let external=try sourceRecord(id: pairing.externalSourceID),
               personal.policyVersion == pairing.personalPolicyVersion,external.policyVersion == pairing.externalPolicyVersion,
               external.transcriptVersionID == pairing.externalVersionID,
               let currentPair=personal.presentation?.recordingContext,
@@ -163,15 +161,15 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         try attachRecordingContext(personalSourceID:pairing.personalSourceID,externalSourceID:pairing.externalSourceID,sessionID:pairing.sessionID,offsetMS:pairing.offsetMS)
     }
     let personalIDs=tasks.source_folders.compactMap { sourceIDs[URL(fileURLWithPath:$0).lastPathComponent] }
-    let expectedSnapshots=try personalIDs.compactMap { try prepareRecordingContext(sourceID:$0) }
+    let catalog = try recordingContextCatalog(sourceIDs: personalIDs)
+    let expectedSnapshots = try personalIDs.compactMap { try prepareRecordingContext(sourceID: $0, catalog: catalog) }
     let providedSnapshots=tasks.recording_contexts ?? []
     guard Set(expectedSnapshots.map { $0.pairing.personalSourceID }) == Set(providedSnapshots.map { $0.pairing.personalSourceID }),
           Set(providedSnapshots.map { $0.pairing.personalSourceID }).count == providedSnapshots.count else { throw VoiceOSError("完整整理缺少本次配对的节目上下文") }
-    let expandedIDs=try recordingContextSourceIDs(sourceIDs:personalIDs)
-    let catalog=Dictionary(uniqueKeysWithValues:try sources().map { ($0.id,$0) })
-    budget=max(1,expandedIDs.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
+    let expandedIDs = try recordingContextSourceIDs(sourceIDs: personalIDs, catalog: catalog)
+    let budget = max(1, expandedIDs.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
     let context = try prepareLocalTranscriptContext(sourceIDs:expandedIDs,scalarBudget:budget)
-    let listDigest = SHA256.hash(data: taskData).map { String(format: "%02x", $0) }.joined()
+    let listDigest = Digest.sha256(taskData)
     let command = "podcast-comprehensive:" + context.contentDigest + ":" + listDigest
     guard try db.query("SELECT state FROM contexts WHERE command_id=?", [command]).first?["state"] != "frozen" else { throw VoiceOSError("这份整理的原话或授权已变化，旧结果继续暂停；没有重新激活任务") }
     let alreadyImported = !(try db.query("SELECT c.id FROM claims c JOIN model_attempts m ON m.id=c.attempt_id JOIN contexts x ON x.id=m.context_id WHERE x.command_id=? AND m.state='completed'", [command])).isEmpty
@@ -288,7 +286,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         for (index, task) in tasks.items.enumerated() where proposals[index].action != nil {
             guard let actionID = actionIDs[index] else { throw VoiceOSError("整理事项缺少对应任务") }
             var metadata = ActionIntentMetadata(intentType: task.intent_type, followupState: task.followup_state, uncertain: task.uncertain)
-            metadata.reminderFields = try self.actions(includeHistory: true).first(where: { $0.id == actionID })?.intent?.reminderFields
+            metadata.reminderFields = try self.action(id: actionID, includeHistory: true)?.intent?.reminderFields
             try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try encoder.encode(metadata), as: UTF8.self), actionID])
         }
     }
@@ -301,7 +299,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
             bySource[link.personalSourceID,default:[]].append(.init(personalClaimID:claimIDs[taskIndex],externalClaimID:claimIDs[personalProposalCount+index],relation:link.relation,explanation:link.explanation,personalQuote:link.personalQuote,externalQuote:link.externalQuote,pairing:linkPairings[index],responseIDs:contextReceipts,personalReviewVersion:savedClaims[claimIDs[taskIndex]]?.reviewVersion,externalReviewVersion:savedClaims[claimIDs[personalProposalCount+index]]?.reviewVersion))
         }
         for id in personalIDs {
-            guard let source=try sources().first(where: { $0.id == id }) else { continue }
+            guard let source=try sourceRecord(id: id) else { continue }
             var presentation=source.presentation ?? RecordingPresentation()
             presentation.contextLinks=bySource[id] ?? []
             try saveExpressionPresentation(presentation,sourceID:id)
@@ -331,7 +329,7 @@ private func finishTranscriptImport(folders: [String], writeReadableCopy: Bool =
         let manifestURL = folder.appendingPathComponent("source.json")
         var sourceName = folder.lastPathComponent
         if let data = try? Data(contentsOf: manifestURL), var manifest = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let id = manifest["voiceos_source_id"] as? String, let current = try sources().first(where: { $0.id == id })?.transcriptVersionID {
+           let id = manifest["voiceos_source_id"] as? String, let current = try sourceRecord(id: id)?.transcriptVersionID {
             sourceName = manifest["source_name"] as? String ?? sourceName
             manifest["voiceos_transcript_version_id"] = current
             try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]).write(to: manifestURL, options: .atomic)
@@ -364,7 +362,7 @@ private func finishTranscriptImport(folders: [String], writeReadableCopy: Bool =
     }
 }
 public func writeOrganizingInput(sourceID: String, to folder: URL, reviewTranscriptOnly: Bool = false) throws -> LocalTranscriptContext {
-    guard let record = try sources().first(where: { $0.id == sourceID }), reviewTranscriptOnly || (record.origin == "user" && record.speaker == "user"),
+    guard let record = try sourceRecord(id: sourceID), reviewTranscriptOnly || (record.origin == "user" && record.speaker == "user"),
           record.jobState == "completed", let text = record.transcript, !text.isEmpty,
           let backend = record.transcriptionBackend, backend.hasPrefix("Qwen3-ASR"), let duration = record.duration,
           let version = record.transcriptVersionID else { throw VoiceOSError("请先完成本人音轨的 Qwen 转写") }
@@ -378,7 +376,7 @@ public func writeOrganizingInput(sourceID: String, to folder: URL, reviewTranscr
 
     let transcript = CompletedQwenTranscript(backend: backend, text: text, spans: record.spans,
                                            processed_chunks: nil, total_chunks: nil, complete: true, duration_seconds: duration, transcription_review: record.transcriptionReview)
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    let encoder = StableJSON.makeEncoder()
     let transcriptURL = folder.appendingPathComponent("Qwen完整逐字稿.json")
     let userCorrected = try db.query("SELECT id FROM transcript_versions WHERE id=? AND reason='transcription_error' AND actor='user'", [version]).first != nil
     if FileManager.default.fileExists(atPath: transcriptURL.path) {
@@ -400,13 +398,13 @@ public func applyTranscriptQualityResult(sourceID: String, expectedVersionID: St
     let legacy = folder.appendingPathComponent("Qwen核对逐字稿.json")
     let reviewed = FileManager.default.fileExists(atPath: legacy.path) ? try JSONDecoder().decode(CompletedQwenTranscript.self, from: Data(contentsOf: legacy)) : original
     let manifest = try JSONDecoder().decode(OrganizedSource.self, from: Data(contentsOf: folder.appendingPathComponent("source.json")))
-    guard let source = try sources().first(where: { $0.id == sourceID }), !source.localOnly,
+    guard let source = try sourceRecord(id: sourceID), !source.localOnly,
           source.transcriptVersionID == expectedVersionID,
           source.transcript == original.text || manifest.transcription_input_sha256 == transcriptInputDigest(source.transcript ?? ""),
           source.transcriptionBackend == original.backend, reviewed.backend == original.backend,
           let review = reviewed.transcription_review, review.isCompleteFullTextReview,
           !review.response_id.isEmpty else { throw VoiceOSError("转写校正期间原话或许可已变化，未覆盖当前内容") }
-    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    let encoder = StableJSON.makeEncoder()
     if FileManager.default.fileExists(atPath: legacy.path) {
         guard try encoder.encode(source.spans) == encoder.encode(original.spans) else { throw VoiceOSError("转写校正依据的音频范围已变化") }
     } else {

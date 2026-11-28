@@ -7,7 +7,7 @@ extension ControlCenter {
         guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
         let record: ActionRecord
         do {
-            guard let current = try await store.actions(includeHistory: true).first(where: { $0.id == actionID }) else {
+            guard let current = try await store.action(id: actionID, includeHistory: true) else {
                 status = "找不到可以撤销的行动"
                 return false
             }

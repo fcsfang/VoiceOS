@@ -59,7 +59,9 @@ public struct ResponsesRecordingExpressionPort: RecordingExpressionPort, Recordi
             let data = try JSONSerialization.data(withJSONObject: body)
             let request = endpoint.request(body: data, timeout: 600)
             let response=try await transport.send(request)
-            guard response.status == 200 else { throw VoiceOSError("补录行动核对 HTTP \(response.status)，原记录保留") }
+            guard response.status == 200 else {
+                throw RecordingServiceFailure(.http(response.status), message: "补录行动核对 HTTP \(response.status)，原记录保留")
+            }
             let envelope=try ResponsesEnvelope.parse(response.body)
             guard envelope.status == .completed,let text=envelope.text,let json=try JSONSerialization.jsonObject(with:response.body) as? [String:Any],let id=json["id"] as? String,!id.isEmpty else { throw VoiceOSError("补录行动核对没有完整返回") }
             struct Result:Decodable { let decisions:[RecordingExpressionActionDecision] }
@@ -106,7 +108,9 @@ public struct ResponsesRecordingExpressionPort: RecordingExpressionPort, Recordi
             let data = try JSONSerialization.data(withJSONObject: body)
             let request = endpoint.request(body: data, timeout: 600)
             let response=try await transport.send(request)
-            guard response.status == 200 else { throw VoiceOSError("连续表达判断 HTTP \(response.status)，原件和转写保留") }
+            guard response.status == 200 else {
+                throw RecordingServiceFailure(.http(response.status), message: "连续表达判断 HTTP \(response.status)，原件和转写保留")
+            }
             let envelope=try ResponsesEnvelope.parse(response.body)
             guard envelope.status == .completed,let text=envelope.text,let json=try JSONSerialization.jsonObject(with:response.body) as? [String:Any],let id=json["id"] as? String,!id.isEmpty else { throw VoiceOSError("连续表达判断没有完整返回") }
             struct Result:Decodable { let groups:[RecordingExpressionProposal] }

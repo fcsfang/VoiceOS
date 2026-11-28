@@ -215,7 +215,7 @@ extension VoiceOSStore {
                   s.input.destination == .local || s.context.sources.allSatisfy({ !$0.localOnly }),
                   Set(s.priorReplies.map(\.attemptID)).count == s.priorReplies.count else { throw VoiceOSError("讨论实际来源或衍生限制不符") }
             let canonical = try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(context["snapshot_json"]!.utf8))
-            let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+            let encoder = StableJSON.makeEncoder()
             guard canonical.contentDigest == relevanceHash(try encoder.encode(canonical.sources)), canonical.contentDigest == context["digest"] else { throw VoiceOSError("讨论输入上下文摘要不符") }
             let precedingIDs = Set(s.input.userTurns.dropLast().map(\.turnID))
             let precedingCompleted = try db.query("SELECT a.id,a.reply_to_turn_id FROM discussion_attempts a JOIN conversation_user_turns t ON t.id=a.reply_to_turn_id WHERE a.conversation_id=? AND a.state='completed' ORDER BY t.ordinal",[row["conversation_id"]]).filter { precedingIDs.contains($0["reply_to_turn_id"]!) }

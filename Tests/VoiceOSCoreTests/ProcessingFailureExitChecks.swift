@@ -168,6 +168,18 @@ final class ProcessingFailureExitChecks: XCTestCase {
         let result = try await store.runExpressionProcessingIntent(id: queue.id, retrieval: NativeRetrieval(),
             cognitionPort: ExitAcceptingModel(), associationPort: ExitAssociation())
         XCTAssertEqual(result.state, .completed, "重新核对后的请求应被消费并完成")
+
+        let cloud = ModelConfiguration(provider: "fixture", model: "flow",
+            promptVersion: "v1", schemaVersion: "v1", destination: .cloud)
+        let cloudRecording = try await store.beginProcessingDictation(commandID: "cloud-recording",
+            cognition: cloud, association: cloud)
+        let replayedRecording = try await store.beginProcessingDictation(commandID: "cloud-recording",
+            cognition: cloud, association: cloud)
+        XCTAssertEqual(replayedRecording.sourceID, cloudRecording.sourceID)
+        let policy = try await store.sourcePolicy(sourceID: cloudRecording.sourceID)
+        XCTAssertEqual(policy.version, 2)
+        XCTAssertFalse(policy.localOnly)
+        try VoiceOSStore.validateStoredRecordingProcessingRequests(await store.db)
     }
 
     func testPendingReminderSyncKeepsLatestFailureAndClearsOnSuccess() throws {

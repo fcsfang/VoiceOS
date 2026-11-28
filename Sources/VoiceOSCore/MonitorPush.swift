@@ -294,7 +294,7 @@ public struct MonitorPushService: Sendable {
             try await store.setMonitorReportPayload(id: reportID, payloadJSON: Self.payloadJSON(request))
             let response = try await transport.send(request.urlRequest)
             try MonitorPushComposer.validateResponse(channel: channel, statusCode: response.statusCode, body: response.body)
-            let deliveredAt = ISO8601DateFormatter().string(from: now())
+            let deliveredAt = TimestampFormatting.iso.string(from: now())
             try await store.markMonitorReportDelivered(id: reportID, at: deliveredAt)
             return .init(success: true, error: nil, deliveredAt: deliveredAt)
         } catch {
@@ -309,7 +309,7 @@ public struct MonitorPushService: Sendable {
             let request = try MonitorPushComposer.request(content, channel: channel, webhookURL: webhookURL)
             let response = try await transport.send(request.urlRequest)
             try MonitorPushComposer.validateResponse(channel: channel, statusCode: response.statusCode, body: response.body)
-            return .init(success: true, error: nil, deliveredAt: ISO8601DateFormatter().string(from: now()))
+            return .init(success: true, error: nil, deliveredAt: TimestampFormatting.iso.string(from: now()))
         } catch {
             return .init(success: false, error: MonitorPushErrorText.display(error), deliveredAt: nil)
         }

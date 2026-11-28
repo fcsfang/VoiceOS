@@ -23,7 +23,7 @@ extension VoiceOSStore {
     func existingRecordingTasks(excludingSourceIDs: Set<String> = []) throws -> [ExistingRecordingTask] {
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
         var result: [ExistingRecordingTask] = []
-        for action in try actions(includeHistory: true) where action.kind == "task" && action.intentActor == "user" && action.validity == "current" && ["open", "completed"].contains(action.state) {
+        for action in try actions(includeHistory: true) where action.isCurrentTask && action.intentActor == "user" && ["open", "completed"].contains(action.state) {
             guard let claim = claims[action.claimID], claim.reviewVersion == action.claimReviewVersion,
                   !claim.references.isEmpty, claim.references.allSatisfy({ !excludingSourceIDs.contains($0.sourceID) }) else { continue }
             var policies: [String: Int] = [:]
@@ -50,7 +50,7 @@ extension VoiceOSStore {
 
     func validateTaskContinuations(_ links: [OrganizedTaskContinuation], excludingSourceIDs: Set<String>) throws {
         let current = Dictionary(uniqueKeysWithValues: try existingRecordingTasks(excludingSourceIDs: excludingSourceIDs).map { ($0.id, $0) })
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         for link in links {
             guard ["repeat", "progress", "outcome"].contains(link.relation), let task = current[link.target.id],
                   try encoder.encode(task) == encoder.encode(link.target), link.relation != "repeat" || task.state == "open" else {

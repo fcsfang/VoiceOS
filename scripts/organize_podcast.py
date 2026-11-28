@@ -181,6 +181,12 @@ class ResponseContractError(ValueError):
     pass
 
 
+class OrganizerServiceError(RuntimeError):
+    def __init__(self, message, http_status=None):
+        super().__init__(message)
+        self.http_status = http_status
+
+
 def validate_result(value, schema, path="$"):
     kind = schema["type"]
     types = {"object": dict, "array": list, "string": str, "boolean": bool, "integer": int}
@@ -359,13 +365,14 @@ def ask(payload, instructions, cache, schema=SCHEMA, max_output_tokens=65536, re
             break
         except urllib.error.HTTPError as error:
             if error.code not in [429, 502, 503, 504] or attempt == 2:
-                raise RuntimeError(f"Text service HTTP {error.code}; no response saved") from None
+                raise OrganizerServiceError(f"Text service HTTP {error.code}; no response saved", error.code) from None
             delay = [5, 15][attempt]
             print(f"文本服务暂时不可用（HTTP {error.code}），{delay} 秒后重试本次核对…", flush=True)
             time.sleep(delay)
         except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
             record({"event": "connection_failure", "error_type": type(error).__name__, "received_bytes": received})
-            if attempt == 2: raise RuntimeError("Text service temporarily unavailable or connection timed out; completed reviews are preserved") from None
+            if attempt == 2:
+                raise OrganizerServiceError("Text service temporarily unavailable or connection timed out; completed reviews are preserved") from None
             delay = [5, 15][attempt]
             print(f"文本服务连接中断或超时，{delay} 秒后重试本次核对；已完成批次保留…", flush=True)
             time.sleep(delay)
@@ -751,4 +758,15 @@ def main():
               render_only=args.render_only)
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    try:
+        main()
+    except OrganizerServiceError as error:
+        if failure_path := os.environ.get("VOICEOS_ORGANIZER_FAILURE_FILE"):
+            try:
+                with Path(failure_path).open("x") as failure_file:
+                    json.dump({"kind": "connection"} if error.http_status is None else
+                              {"kind": "http", "status": error.http_status}, failure_file)
+            except OSError:
+                pass
+        raise RuntimeError(str(error)) from None

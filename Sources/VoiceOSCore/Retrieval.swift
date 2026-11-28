@@ -108,8 +108,8 @@ extension VoiceOSStore {
         }
     }
     private func retrievalCorpusDigest(_ documents: [RetrievalDocument]) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        return SHA256.hash(data: try encoder.encode(documents)).map { String(format: "%02x", $0) }.joined()
+        let encoder = StableJSON.makeEncoder()
+        return Digest.sha256(try encoder.encode(documents))
     }
     public func retrieve(_ query: String, semantic: Bool = false, limit: Int = 20, using port: any LocalRetrievalPort) async throws -> RetrievalResult {
         guard !query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, query.unicodeScalars.count <= 512, (1...100).contains(limit) else { throw VoiceOSError("请填写不超过 512 字的查询并使用有效结果数量") }

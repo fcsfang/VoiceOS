@@ -136,7 +136,7 @@ extension VoiceOSStore {
             }
             let commandID = "recurrence-reopen:" + id + ":" + String(version)
             let hash = try Self.actionHash([id, String(version), LocalActionState.open.rawValue, ""])
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open','','user',?,?,?)", [UUID().uuidString, id, String(version + 1), String(version), commandID, hash, ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open','','user',?,?,?)", [UUID().uuidString, id, String(version + 1), String(version), commandID, hash, TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE actions SET state='open',version=? WHERE id=?", [String(version + 1), id])
             try checkpoint(.actionStateUncommitted)
         }

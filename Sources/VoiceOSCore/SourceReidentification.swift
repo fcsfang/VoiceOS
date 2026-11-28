@@ -35,7 +35,7 @@ extension VoiceOSStore {
                                  associationPort: (any ExpressionAssociationPort)?,
                                  retrieval: any LocalRetrievalPort) async throws -> SourceReidentificationResult {
         try Task.checkCancellation()
-        guard let source = try sources().first(where: { $0.id == request.sourceID }) else { return .skipped(.unavailableSource) }
+        guard let source = try sourceRecord(id: request.sourceID) else { return .skipped(.unavailableSource) }
         if source.state == "quarantined" { return .skipped(.quarantined) }
         guard ["saved", "reference_only"].contains(source.state) else { return .skipped(.unavailableSource) }
         guard let transcript = source.transcript, !transcript.isEmpty else { return .skipped(.missingTranscript) }

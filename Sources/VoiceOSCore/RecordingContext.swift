@@ -12,6 +12,47 @@ public struct RecordingContext: Codable, Sendable {
     public let personalPolicyVersion: Int
     public let externalPolicyVersion: Int
 }
+/// The source fields shared by full records and targeted validation reads.
+protocol RecordingSourceFacts {
+    var id: String { get }
+    var state: String { get }
+    var origin: String { get }
+    var speaker: String { get }
+    var localOnly: Bool { get }
+    var needsTranscriptionReview: Bool { get }
+    var recordingTranscriptVersionID: String? { get }
+    var policyVersion: Int { get }
+    var presentation: RecordingPresentation? { get }
+}
+
+extension RecordingSourceFacts {
+    var isPersonalRecording: Bool { origin == "user" && speaker == "user" }
+    var isExternalRecording: Bool { origin == "external" && speaker != "user" }
+    var canUseRecordingContextText: Bool { !localOnly && !needsTranscriptionReview }
+}
+
+extension SourceRecord: RecordingSourceFacts {
+    var recordingTranscriptVersionID: String? { transcriptVersionID }
+}
+
+extension RecordingContext {
+    func matchesCurrentRevisions<Source: RecordingSourceFacts>(personalSourceID: String,
+                                                                 personal: Source, external: Source) -> Bool {
+        self.personalSourceID == personalSourceID &&
+            personal.canUseRecordingContextText && external.canUseRecordingContextText &&
+            personal.recordingTranscriptVersionID == personalVersionID &&
+            external.recordingTranscriptVersionID == externalVersionID &&
+            personal.policyVersion == personalPolicyVersion &&
+            external.policyVersion == externalPolicyVersion
+    }
+
+    func canSupplyContext<Source: RecordingSourceFacts>(personalSourceID: String,
+                                                        personal: Source, external: Source) -> Bool {
+        personal.isPersonalRecording && external.isExternalRecording &&
+            matchesCurrentRevisions(personalSourceID: personalSourceID, personal: personal, external: external)
+    }
+}
+
 public struct RecordingContextSnapshot: Codable, Sendable {
     public let pairing: RecordingContext
     public let context: LocalTranscriptContext
@@ -32,19 +73,16 @@ public extension SourceRecord {
     /// Views verify all companions using the same loaded catalog, including
     /// program permissions, before presenting a saved whole-expression summary.
     func recordingExpression(in catalog:[String:SourceRecord]) -> RecordingExpression? {
-        guard let expression=recordingExpression,
-              expression.sourceIDs.allSatisfy({ id in
-                  guard let member=catalog[id],member.recordingExpression?.digest == expression.digest else { return false }
-                  if let pair=member.presentation?.recordingContext {
-                      return expression.externalVersions?[pair.externalSourceID] == pair.externalVersionID && expression.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion
-                  }
-                  return true
-              }),
-              (expression.externalVersions ?? [:]).allSatisfy({ id,version in
-                  guard let external=catalog[id] else { return false }
-                  return external.transcriptVersionID == version && external.policyVersion == expression.externalPolicies?[id] && !external.localOnly && !external.needsTranscriptionReview
-              }) else { return nil }
+        guard case .success(let expression) = resolveRecordingExpression(in: catalog) else { return nil }
         return expression
+    }
+
+    internal func resolveRecordingExpression(in catalog: [String: SourceRecord])
+        -> Result<RecordingExpression, RecordingExpressionInvalidity>? {
+        guard presentation?.expression != nil else { return nil }
+        guard let expression = recordingExpression else { return .failure(.sourceChanged) }
+        if let invalidity = expression.invalidity(in: catalog, for: .reading) { return .failure(invalidity) }
+        return .success(expression)
     }
 }
 
@@ -111,6 +149,8 @@ public struct SourcePageIndex: Sendable {
     /// `workspacePausedTasks` derives; dismissed actions never pause.
     public let pausedTasks: [ActionRecord]
     private let expressionIssueBySourceID: [String: String]
+    private let correctionGroupOwnerIDs: Set<String>
+    private let correctionAffectedSourceIDs: Set<String>
     /// Materials with unresolved transcription doubts, derived once per
     /// snapshot instead of once per sidebar and processing-page body.
     public let transcriptReviewPoints: [WorkspaceTranscriptReviewPoint]
@@ -129,16 +169,23 @@ public struct SourcePageIndex: Sendable {
         let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.recordsByID = recordsByID
         var expressions: [String: RecordingExpression] = [:]
+        var issues: [String: String] = [:]
         for record in records {
-            if let expression = record.recordingExpression(in: recordsByID) { expressions[record.id] = expression }
+            switch record.resolveRecordingExpression(in: recordsByID) {
+            case .success(let expression): expressions[record.id] = expression
+            case .failure(let invalidity):
+                if let saved = record.presentation?.expression, saved.sourceIDs.count > 1 {
+                    issues[record.id] = invalidity.message
+                }
+            case nil: break
+            }
         }
         expressionBySourceID = expressions
-        var issues: [String: String] = [:]
-        for record in records where expressions[record.id] == nil {
-            if let saved = record.presentation?.expression, saved.sourceIDs.count > 1,
-               let issue = record.recordingExpressionIssue(in: recordsByID) { issues[record.id] = issue }
-        }
-        expressionIssueBySourceID = issues
+        expressionIssueBySourceID = issues.filter { expressions[$0.key] == nil }
+
+        let correctionGroups = records.compactMap { RecordingCorrectionGroup(ownerID: $0.id, presentation: $0.presentation) }
+        correctionGroupOwnerIDs = Set(correctionGroups.map(\.ownerID))
+        correctionAffectedSourceIDs = Set(correctionGroups.flatMap(\.memberIDs)).union(correctionGroups.compactMap(\.programmeID))
 
         var claimByID: [String: CandidateClaim] = [:]
         for claim in claims { claimByID[claim.id] = claim }
@@ -177,8 +224,7 @@ public struct SourcePageIndex: Sendable {
         pausedTasks = paused
 
         var openActionIDsBySourceID: [String: Set<String>] = [:]
-        for action in actionByID.values where action.kind == "task" && action.state == "open"
-            && action.validity == "current" && !reviewRequired.contains(action.id) {
+        for action in actionByID.values where action.isCurrentOpenTask && !reviewRequired.contains(action.id) {
             guard let claim = claimByID[action.claimID] else { continue }
             for sourceID in Set(claim.references.map(\.sourceID)) {
                 openActionIDsBySourceID[sourceID, default: []].insert(action.id)
@@ -234,6 +280,14 @@ public struct SourcePageIndex: Sendable {
         expressionIssueBySourceID[sourceID]
     }
 
+    public func isRecordingUnderstandingPending(for sourceID: String) -> Bool {
+        if correctionAffectedSourceIDs.contains(sourceID) { return true }
+        if let expression = expressionBySourceID[sourceID] {
+            return expression.sourceIDs.contains(where: correctionGroupOwnerIDs.contains)
+        }
+        return correctionGroupOwnerIDs.contains(sourceID)
+    }
+
     /// Actions whose claim cites any of these sources, in workspace order.
     public func actions(for sourceIDs: Set<String>) -> [ActionRecord] {
         var seen: Set<String> = []
@@ -276,13 +330,22 @@ public struct SourcePageIndex: Sendable {
 }
 
 extension VoiceOSStore {
+    /// A recording's context can use only its directly paired programme.
+    func recordingContextCatalog(sourceIDs: [String]) throws -> [String: SourceRecord] {
+        let sources = try sourceRecords(ids: Array(Set(sourceIDs)))
+        let companionIDs = Set(sources.compactMap { $0.presentation?.recordingContext?.externalSourceID })
+            .subtracting(sources.map(\.id))
+        let companions = try sourceRecords(ids: Array(companionIDs))
+        return Dictionary(uniqueKeysWithValues: (sources + companions).map { ($0.id, $0) })
+    }
+
     public func attachRecordingContext(personalSourceID: String, externalSourceID: String, sessionID: String, offsetMS: Int = 0) throws {
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog = Dictionary(try sourceRecords(ids: [personalSourceID, externalSourceID]).map { ($0.id, $0) },
+                                 uniquingKeysWith: { first, _ in first })
         guard let personal=catalog[personalSourceID],let external=catalog[externalSourceID],
-              personal.origin == "user",personal.speaker == "user",external.origin == "external",external.speaker != "user",
-              !personal.localOnly,!external.localOnly,!sessionID.isEmpty,
+              personal.isPersonalRecording, external.isExternalRecording,
+              personal.canUseRecordingContextText, external.canUseRecordingContextText, !sessionID.isEmpty,
               let personalVersion=personal.transcriptVersionID,let externalVersion=external.transcriptVersionID,
-              !personal.needsTranscriptionReview,!external.needsTranscriptionReview,
               !(personal.transcript ?? "").isEmpty,!(external.transcript ?? "").isEmpty else { throw VoiceOSError("双轨配对需要已授权并完整核对的本人和节目原话") }
         var presentation=personal.presentation ?? RecordingPresentation()
         let pairing=RecordingContext(personalSourceID:personalSourceID,externalSourceID:externalSourceID,sessionID:sessionID,offsetMS:offsetMS,personalVersionID:personalVersion,externalVersionID:externalVersion,personalPolicyVersion:personal.policyVersion,externalPolicyVersion:external.policyVersion)
@@ -291,19 +354,18 @@ extension VoiceOSStore {
         try saveExpressionPresentation(presentation,sourceID:personalSourceID)
     }
     public func recordingContext(sourceID: String) throws -> RecordingContext? {
-        try recordingContext(sourceID: sourceID, catalog: Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first }))
+        try recordingContext(sourceID: sourceID, catalog: recordingContextCatalog(sourceIDs: [sourceID]))
     }
     public func recordingContext(sourceID: String, catalog:[String:SourceRecord]) throws -> RecordingContext? {
         guard let personal=catalog[sourceID],let pairing=personal.presentation?.recordingContext else { return nil }
-        guard pairing.personalSourceID == sourceID,let external=catalog[pairing.externalSourceID],
-              personal.origin == "user",personal.speaker == "user",external.origin == "external",external.speaker != "user",
-              !personal.localOnly,!external.localOnly,!personal.needsTranscriptionReview,!external.needsTranscriptionReview,
-              personal.transcriptVersionID == pairing.personalVersionID,external.transcriptVersionID == pairing.externalVersionID,
-              personal.policyVersion == pairing.personalPolicyVersion,external.policyVersion == pairing.externalPolicyVersion else { throw VoiceOSError("双轨原话或许可已变化，需要重新关联后继续理解") }
+        guard let external = catalog[pairing.externalSourceID],
+              pairing.canSupplyContext(personalSourceID: sourceID, personal: personal, external: external) else {
+            throw VoiceOSError("双轨原话或许可已变化，需要重新关联后继续理解")
+        }
         return pairing
     }
     public func recordingContextSourceIDs(sourceIDs: [String]) throws -> [String] {
-        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first }))
+        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: recordingContextCatalog(sourceIDs: sourceIDs))
     }
     public func recordingContextSourceIDs(sourceIDs: [String], catalog:[String:SourceRecord]) throws -> [String] {
         var result=sourceIDs,seen=Set(sourceIDs)
@@ -313,13 +375,17 @@ extension VoiceOSStore {
         return result
     }
     public func prepareRecordingContext(sourceID: String) throws -> RecordingContextSnapshot? {
-        guard let pairing=try recordingContext(sourceID:sourceID) else { return nil }
-        let catalog=try sources().filter { $0.id == sourceID || $0.id == pairing.externalSourceID }
-        let context=try prepareLocalTranscriptContext(sourceIDs:[sourceID,pairing.externalSourceID],scalarBudget:max(1,catalog.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
+        try prepareRecordingContext(sourceID: sourceID, catalog: recordingContextCatalog(sourceIDs: [sourceID]))
+    }
+    func prepareRecordingContext(sourceID: String, catalog: [String: SourceRecord]) throws -> RecordingContextSnapshot? {
+        guard let pairing=try recordingContext(sourceID:sourceID,catalog:catalog) else { return nil }
+        let members = [sourceID, pairing.externalSourceID]
+        let budget = members.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) }
+        let context=try prepareLocalTranscriptContext(sourceIDs:members,scalarBudget:max(1,budget))
         return .init(pairing:pairing,context:context)
     }
     public func recordingContextLinks(sourceID: String) throws -> [RecordingContextLink] {
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog = try recordingContextCatalog(sourceIDs: [sourceID])
         return try recordingContextLinks(sourceIDs: [sourceID], catalog: catalog)
     }
     /// One catalog and one claim read serve every source on the page.

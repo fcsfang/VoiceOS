@@ -290,7 +290,7 @@ extension VoiceOSStore {
     public func taskInitiationInput(sourceID: String, mode: TaskInitiationMode,
                                     preferredRoute: TaskInitiationRoute? = nil, answer: String = "") throws -> TaskInitiationInput {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
-        guard let source = try sources().first(where: { $0.id == sourceID }) else { throw VoiceOSError("材料不存在") }
+        guard let source = try sourceRecord(id: sourceID) else { throw VoiceOSError("材料不存在") }
         guard source.origin == "user", source.speaker == "user", ["saved", "reference_only"].contains(source.state) else {
             throw VoiceOSError("启动包只接受本人已保存的原话")
         }
@@ -514,7 +514,7 @@ extension VoiceOSStore {
     }
 
     private func validateTaskInitiationBasis(_ input: TaskInitiationInput) throws {
-        guard let source = try sources().first(where: { $0.id == input.sourceID }) else {
+        guard let source = try sourceRecord(id: input.sourceID) else {
             throw VoiceOSError("启动包对应的材料已不存在")
         }
         guard source.origin == "user", source.speaker == "user", ["saved", "reference_only"].contains(source.state) else {

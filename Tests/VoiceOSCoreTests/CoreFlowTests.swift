@@ -118,6 +118,16 @@ private struct FlowDiscussion: DiscussionModelPort {
         return .init(status: .completed, parts: [.init(kind: .aiSuggestion, text: responseText, references: reference.map { [$0] } ?? [])])
     }
 }
+private struct FlowDiscussionOutcome: ConversationOutcomePort {
+    let configuration = ModelConfiguration(provider: "fixture", model: "outcome", promptVersion: "v1", schemaVersion: "v1", destination: .cloud)
+    let evidence: OutcomeSourceEvidence
+
+    func extract(_ request: ConversationOutcomeRequest) async throws -> ConversationOutcomeResponse {
+        .init(status: .completed, proposals: [
+            .init(statement: "在另一组材料上核对这个发现。", ownership: .aiCandidate, sourceEvidence: [evidence])
+        ])
+    }
+}
 private actor FlowAssistantTransport: ModelHTTPTransport {
     var assessments = 0
     var deliveries = 0
@@ -373,8 +383,9 @@ private func verifyScopedExpressionActionReview(at root:URL) async throws {
         let retained=try XCTUnwrap(currentActions.first { $0.id == report.id })
         let backup=try XCTUnwrap(currentActions.first { $0.id == clear.id })
         let candidate=try XCTUnwrap(currentActions.first { $0.id == newLabel.id })
-        let allowed=try await store.reminderSourceAllowed(backup),blocked=try await store.reminderSourceAllowed(retained)
-        XCTAssertTrue(allowed);XCTAssertFalse(blocked)
+        let allowed = try await store.eligibleReminderClaim(for: backup, requiresLatest: false)
+        let blocked = try await store.eligibleReminderClaim(for: retained, requiresLatest: false)
+        XCTAssertNotNil(allowed); XCTAssertNil(blocked)
         try await store.sendTaskToReminders(actionID:retained.id,expectedVersion:retained.version,calendarID:access.calendarID,using:reminders,expectedAccessVersion:access.version)
         let retainedRemote=await reminders.items
         XCTAssertEqual(retainedRemote.count,2)
@@ -1324,9 +1335,32 @@ final class CoreFlowTests: XCTestCase {
         do { _ = try await dual.recordingContextLinks(sourceID:personalID);XCTFail("旧双轨关联不能绕过节目更正") } catch {}
         let correctionMembers=try await dual.queueCorrectedRecordingUnderstanding(sourceID:programmeID,previousActionIDs:[dualTask.id])
         XCTAssertEqual(correctionMembers,[personalID])
+        let pendingCorrection = try await dual.pendingRecordingContextReview()
+        XCTAssertTrue(pendingCorrection.hasPendingGroup)
+        XCTAssertTrue(pendingCorrection.isTranscriptionCorrection)
+        XCTAssertEqual(pendingCorrection.sourceIDs, correctionMembers)
+        XCTAssertEqual(pendingCorrection.externalSourceIDBySource, [personalID: programmeID])
+        let pendingIndex = SourcePageIndex(records: try await dual.sources())
+        XCTAssertTrue(pendingIndex.isRecordingUnderstandingPending(for: personalID))
+        XCTAssertTrue(pendingIndex.isRecordingUnderstandingPending(for: programmeID))
+        XCTAssertFalse(pendingIndex.isRecordingUnderstandingPending(for: dualQuestion))
+        let scopedRecordings = try await dual.recordingContextCatalog(sourceIDs: correctionMembers)
+        XCTAssertEqual(Set(scopedRecordings.keys), [personalID, programmeID])
+        do {
+            try await dual.refreshCorrectedRecordingContexts(sourceIDs: correctionMembers + ["missing-recording"])
+            XCTFail("有成员未就绪时，整批配对保持旧版本")
+        } catch {
+            let current = try await dual.sourceRecord(id: personalID)
+            XCTAssertEqual(current?.presentation?.recordingContext?.externalVersionID, programmeBefore.transcriptVersionID)
+        }
         // Explicit user correction is authoritative text; do not invent new
         // audio alignment or run an AI transcription correction over it.
-        try await dual.refreshCorrectedRecordingContexts(sourceIDs:correctionMembers)
+        try await dual.refreshCorrectedRecordingContexts(sourceIDs: pendingCorrection.sourceIDs)
+        let refreshedPair = try await dual.recordingContext(sourceID: personalID)
+        let revisedProgramme = try await dual.sourceRecord(id: programmeID)
+        XCTAssertNotEqual(refreshedPair?.externalVersionID, programmeBefore.transcriptVersionID)
+        XCTAssertEqual(refreshedPair?.externalVersionID, revisedProgramme?.transcriptVersionID)
+        XCTAssertEqual(refreshedPair?.offsetMS, 250)
         let repairedGroups=try await dual.connectRecordingExpressions(using:fixture)
         let repairedGroup=try XCTUnwrap(repairedGroups.first)
         XCTAssertTrue(repairedGroup.previousActionIDs.contains(dualTask.id))
@@ -1342,6 +1376,12 @@ final class CoreFlowTests: XCTestCase {
         let repairedPersonal=try XCTUnwrap(repairedRecords.first { $0.id == personalID })
         XCTAssertNil(repairedPersonal.presentation?.correctedSourceIDs)
         XCTAssertNil(repairedPersonal.presentation?.correctedActionIDs)
+        let finishedCorrection = try await dual.pendingRecordingContextReview()
+        XCTAssertFalse(finishedCorrection.hasPendingGroup)
+        XCTAssertTrue(finishedCorrection.sourceIDs.isEmpty)
+        let finishedIndex = SourcePageIndex(records: repairedRecords)
+        XCTAssertFalse(finishedIndex.isRecordingUnderstandingPending(for: personalID))
+        XCTAssertFalse(finishedIndex.isRecordingUnderstandingPending(for: programmeID))
         let programmePolicy=try await dual.sourcePolicy(sourceID:programmeID)
         _ = try await dual.setSourceLocalOnly(sourceID:programmeID,expectedVersion:programmePolicy.version,localOnly:true)
         do { _ = try await dual.recordingContextSourceIDs(sourceIDs:[personalID]);XCTFail("撤回节目许可后不能继续发送上下文") } catch {}
@@ -1351,7 +1391,12 @@ final class CoreFlowTests: XCTestCase {
         _ = try await dual.setSourceLocalOnly(sourceID:programmeID,expectedVersion:revokedPolicy.version,localOnly:false)
         let dualRestoredMembers=try await dual.queueRecordingUnderstanding(sourceID:programmeID,previousActionIDs:[dualTask.id])
         XCTAssertEqual(dualRestoredMembers,[personalID])
-        try await dual.refreshCorrectedRecordingContexts(sourceIDs:dualRestoredMembers)
+        let restoredReview = try await dual.pendingRecordingContextReview()
+        XCTAssertTrue(restoredReview.hasPendingGroup)
+        XCTAssertFalse(restoredReview.isTranscriptionCorrection)
+        XCTAssertEqual(restoredReview.sourceIDs, dualRestoredMembers)
+        XCTAssertEqual(restoredReview.externalSourceIDBySource, [personalID: programmeID])
+        try await dual.refreshCorrectedRecordingContexts(sourceIDs: restoredReview.sourceIDs)
         let restoredGroups=try await dual.connectRecordingExpressions(using:fixture)
         let restoredGroup=try XCTUnwrap(restoredGroups.first)
         XCTAssertTrue(restoredGroup.previousActionIDs.contains(dualTask.id))
@@ -1486,10 +1531,25 @@ final class CoreFlowTests: XCTestCase {
         let enriched = try await store.reflection(start: month.start, end: month.end, timeZoneID: calendar.timeZone.identifier)
         XCTAssertTrue(enriched.thoughts.contains { $0.claimID == retainedID && $0.ownership == "ai_candidate" })
         XCTAssertTrue(Set(complete.thoughts.map(\.claimID)).isSubset(of: Set(enriched.thoughts.map(\.claimID))))
+        let retainedClaim = try XCTUnwrap(enriched.thoughts.first { $0.claimID == retainedID })
+        let discussedSourceID = try XCTUnwrap(retainedClaim.evidence.first?.reference.sourceID)
+        let detailClaims = try await store.latestCandidateClaims(for: discussedSourceID)
+        let batchClaims = try await store.latestCandidateClaimsBySource()
+        XCTAssertTrue(detailClaims.contains { $0.id == retainedID })
+        XCTAssertEqual(batchClaims[discussedSourceID]?.map(\.id), detailClaims.map(\.id))
         try await store.endConversation(id: discussionID, expectedVersion: 2)
         let outcome = try await store.prepareConversationOutcome(id: discussionID, expectedVersion: 3, destination: .cloud)
         XCTAssertEqual(outcome.context.reflectionFocus?.sourceIDs, complete.sourceIDs)
         XCTAssertGreaterThan(outcome.context.scalarBudget, 12000)
+        let reusable = try await store.prepareReusableConversationOutcome(id: discussionID, expectedVersion: 3, destination: .cloud)
+        let evidence = try XCTUnwrap(retainedClaim.evidence.first)
+        let outcomeIDs = try await store.performConversationOutcome(reusable, using: FlowDiscussionOutcome(evidence: evidence))
+        let outcomeID = try XCTUnwrap(outcomeIDs.first)
+        let afterOutcome = try await store.reflection(start: month.start, end: month.end, timeZoneID: calendar.timeZone.identifier)
+        let sourceAfterOutcome = try await store.latestCandidateClaims(for: discussedSourceID)
+        XCTAssertTrue(sourceAfterOutcome.contains { $0.id == outcomeID })
+        XCTAssertTrue(afterOutcome.thoughts.contains { $0.claimID == outcomeID })
+        XCTAssertTrue(Set(complete.thoughts.map(\.claimID)).isSubset(of: Set(afterOutcome.thoughts.map(\.claimID))))
         let package = root.appendingPathComponent("reflection-package"), restored = root.appendingPathComponent("reflection-restored")
         try await store.exportPackage(to: package, includeMedia: true)
         try await VoiceOSStore.restorePackage(from: package, to: restored, inspector: NativeMediaInspector())

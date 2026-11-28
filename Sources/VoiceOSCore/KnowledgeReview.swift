@@ -209,7 +209,7 @@ extension KnowledgeReviewSourceSignature {
 extension VoiceOSStore {
     public func prepareKnowledgeReview(sourceID: String) throws -> KnowledgeReviewInput {
         knowledgeReviewPreparations += 1
-        guard ready, let source = try sources().first(where: { $0.id == sourceID }),source.origin == "user",source.speaker == "user",!source.needsTranscriptionReview,let text = source.transcript,!text.isEmpty,let version = source.transcriptVersionID else { throw VoiceOSError("知识核查只接受已有完整原话的个人资料") }
+        guard ready, let source = try sourceRecord(id: sourceID),source.origin == "user",source.speaker == "user",!source.needsTranscriptionReview,let text = source.transcript,!text.isEmpty,let version = source.transcriptVersionID else { throw VoiceOSError("知识核查只接受已有完整原话的个人资料") }
         let claims = try latestCandidateClaims(for: sourceID)
         guard !claims.isEmpty else { throw VoiceOSError("请先完成这份原话的理解，再进行知识核查") }
         let context = try prepareLocalTranscriptContext(sourceIDs:[sourceID],scalarBudget:max(1,text.unicodeScalars.count))
@@ -226,7 +226,7 @@ extension VoiceOSStore {
         guard try Self.relevanceJSON(current) == Self.relevanceJSON(input) else { throw VoiceOSError("原话、归属、理解或授权已变化，旧知识核查已暂停") }
         if destination == .cloud,input.context.sources.contains(where:\.localOnly) { throw VoiceOSError("仅本地原话不能用于云端知识核查") }
     }
-    private struct KnowledgeReviewSourceFacts {
+    private struct KnowledgeReviewSourceFacts: RecordingSourceFacts {
         let sourceID: String
         let state: String
         let kind: String
@@ -241,6 +241,8 @@ extension VoiceOSStore {
         let transcriptionReview: TranscriptionReview?
         let transcriptionReviewJSON: String?
         let needsTranscriptionReview: Bool
+        var id: String { sourceID }
+        var recordingTranscriptVersionID: String? { transcriptVersionID }
     }
     private enum KnowledgeReviewContinuousLookup {
         case absent
@@ -299,22 +301,9 @@ extension VoiceOSStore {
         let review = presentation?.transcriptionReview.flatMap { $0.transcriptVersionID == transcriptVersion ? $0 : nil }
         let reviewJSON = review.flatMap { try? Self.relevanceJSON($0) }
         guard review == nil || reviewJSON != nil else { return nil }
-        let needsReview = ["audio","video"].contains(kind) && row["backend"]?.hasPrefix("Qwen3-ASR") == true && !spans.isEmpty &&
-            spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } && review?.isCompleteFullTextReview != true
+        let needsReview = TranscriptionReview.requiresFullTextReview(kind: kind, backend: row["backend"],
+            hasText: textLength > 0, spans: spans, review: review)
         return .init(sourceID: sourceID,state: row["state"]!,kind: kind,sourceVersionID: sourceVersion,transcriptVersionID: transcriptVersion,origin: origin,speaker: speaker,localOnly: row["local_only"] != "0",policyVersion: policyVersion,textLength: textLength,presentation: presentation,transcriptionReview: review,transcriptionReviewJSON: reviewJSON,needsTranscriptionReview: needsReview)
-    }
-    private func knowledgeReviewPairingIsValid(_ pair: RecordingContext, personal: KnowledgeReviewSourceFacts?, external: KnowledgeReviewSourceFacts?) -> Bool {
-        guard let personal,let external,
-              pair.personalSourceID == personal.sourceID,
-              personal.origin == "user",personal.speaker == "user",
-              external.origin == "external",external.speaker != "user",
-              !personal.localOnly,!external.localOnly,
-              !personal.needsTranscriptionReview,!external.needsTranscriptionReview,
-              personal.transcriptVersionID == pair.personalVersionID,
-              external.transcriptVersionID == pair.externalVersionID,
-              personal.policyVersion == pair.personalPolicyVersion,
-              external.policyVersion == pair.externalPolicyVersion else { return false }
-        return true
     }
     private func knowledgeReviewContinuousSignature(sourceID: String, base: KnowledgeReviewSourceFacts) throws -> KnowledgeReviewContinuousLookup {
         let expression = base.presentation?.expression
@@ -323,42 +312,32 @@ extension VoiceOSStore {
         if let expression {
             guard expression.state == "completed",!memberIDs.isEmpty,Set(memberIDs).count == memberIDs.count,
                   let memberFacts = try knowledgeReviewSourceFacts(sourceIDs: memberIDs) else { return .unavailable }
-            for id in memberIDs {
-                guard let member = memberFacts[id],
-                      member.presentation?.expression?.id == expression.id,
-                      member.transcriptVersionID == expression.versions[id],
-                      member.policyVersion == expression.policies[id],
-                      !member.localOnly,member.state == "saved",member.kind != "ai_text" else { return .unavailable }
-                if let pair = member.presentation?.recordingContext {
-                    guard expression.externalVersions?[pair.externalSourceID] == pair.externalVersionID,
-                          expression.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion else { return .unavailable }
-                }
-            }
-            if let externalVersions = expression.externalVersions,!externalVersions.isEmpty {
-                guard let externalFacts = try knowledgeReviewSourceFacts(sourceIDs: Array(externalVersions.keys)) else { return .unavailable }
-                for (id,version) in externalVersions {
-                    guard let external = externalFacts[id],external.transcriptVersionID == version,
-                          external.policyVersion == expression.externalPolicies?[id],
-                          !external.localOnly,!external.needsTranscriptionReview else { return .unavailable }
-                }
-            }
             facts = memberFacts
         } else {
             facts = [sourceID: base]
         }
-        var expanded = memberIDs,seen = Set(memberIDs)
+        // Read each programme transcript once. A group can retain a programme
+        // revision even when only one member links to that recording.
+        let attachments = memberIDs.compactMap { facts[$0]?.presentation?.recordingContext?.externalSourceID }
+        let recordedExternals = expression?.externalVersions ?? [:]
+        let externalIDs = Set(attachments).union(recordedExternals.keys)
+        let missing = externalIDs.subtracting(facts.keys)
+        if !missing.isEmpty {
+            guard let extra = try knowledgeReviewSourceFacts(sourceIDs: missing.sorted()) else { return .unavailable }
+            facts.merge(extra) { first, _ in first }
+        }
+        if let expression {
+            guard expression.invalidity(in: facts, for: .workflow) == nil,
+                  memberIDs.allSatisfy({ facts[$0]?.kind != "ai_text" }) else { return .unavailable }
+        }
+        var expanded = memberIDs, seen = Set(memberIDs)
         for id in memberIDs {
-            guard let pair = facts[id]?.presentation?.recordingContext else { continue }
-            let external = try knowledgeReviewSourceFacts(sourceID: pair.externalSourceID)
-            guard knowledgeReviewPairingIsValid(pair,personal: facts[id],external: external) else { return .unavailable }
+            guard let personal = facts[id], let pair = personal.presentation?.recordingContext else { continue }
+            guard let external = facts[pair.externalSourceID],
+                  pair.canSupplyContext(personalSourceID: personal.id, personal: personal, external: external) else { return .unavailable }
             if seen.insert(pair.externalSourceID).inserted { expanded.append(pair.externalSourceID) }
         }
         guard expanded.count > 1 else { return .absent }
-        let missing = expanded.filter { facts[$0] == nil }
-        if !missing.isEmpty {
-            guard let extra = try knowledgeReviewSourceFacts(sourceIDs: missing) else { return .unavailable }
-            facts.merge(extra) { first,_ in first }
-        }
         let expandedSet = Set(expanded)
         var members: [KnowledgeReviewContinuousSignature.Member] = [],policies: [String:Int] = [:],contexts: [RecordingContext] = []
         for id in expanded {
@@ -386,11 +365,7 @@ extension VoiceOSStore {
         return .init(sourceVersionID: base.sourceVersionID,transcriptVersionID: base.transcriptVersionID,origin: base.origin,speaker: base.speaker,localOnly: base.localOnly,policyVersion: base.policyVersion,scalarBudget: base.textLength,transcriptionReviewJSON: base.transcriptionReviewJSON,claimReviewVersions: claims,continuous: continuous)
     }
     private func knowledgeReviewClaimVersions(sourceID: String) throws -> [String: Int]? {
-        guard let attempt = try db.query("""
-        SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-        WHERE i.source_id=? AND a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-        ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC LIMIT 1
-        """,[sourceID]).first?["id"] else { return [:] }
+        guard let attempt = try latestClaimProducerIDs(sourceID: sourceID)[sourceID] else { return [:] }
         var result: [String: Int] = [:]
         for row in try db.query("""
         SELECT c.id,c.review_version,c.refs_json FROM claims c

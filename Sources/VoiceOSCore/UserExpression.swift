@@ -12,7 +12,7 @@ extension VoiceOSStore {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         let data = Data(text.utf8)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("请填写表达原文") }
-        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let hash = Digest.sha256(data)
         let fingerprint = try Self.expressionFingerprint(text, feedback: feedback)
         if let old = try db.query("SELECT * FROM sources WHERE command_id=?", [commandID]).first {
             guard old["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一表达命令不能更换内容") }
@@ -23,7 +23,7 @@ extension VoiceOSStore {
             guard let action = try db.query("SELECT version FROM actions WHERE id=?", [feedback.actionID]).first,
                   action["version"] == String(feedback.actionVersion) else { throw VoiceOSError("行动版本已变化，请重新核对反馈关联") }
         }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         let recipe = try feedback.map { String(decoding:try encoder.encode($0),as:UTF8.self) }
         let id = UUID().uuidString, asset = UUID().uuidString, version = UUID().uuidString
         let relative = "assets/\(asset).txt"
@@ -51,16 +51,16 @@ extension VoiceOSStore {
         for row in try db.query("SELECT s.*,t.text AS original_text,t.backend,j.config FROM sources s JOIN transcripts t ON t.source_id=s.id JOIN jobs j ON j.id=t.job_id WHERE s.kind='user_text'") {
             guard row["origin"] == "user", row["speaker"] == "user", row["backend"] == "user-authored-text", row["config"] == "user-text-v1",
                   let text = row["original_text"], !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("表达原文与来源身份不一致") }
-            let hash = SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+            let hash = Digest.sha256(Data(text.utf8))
             guard row["expected_hash"] == hash, row["expected_bytes"] == String(Data(text.utf8).count), row["input_fingerprint"] == (try expressionFingerprint(text, feedback: feedbackIntent(row["feedback_json"]))) else { throw VoiceOSError("表达原文与原件摘要不一致") }
         }
         guard try db.query("SELECT s.id FROM sources s WHERE s.kind='user_text' AND s.state IN ('saved','reference_only') AND NOT EXISTS(SELECT 1 FROM transcripts t WHERE t.source_id=s.id)").isEmpty else { throw VoiceOSError("表达缺少原文记录") }
     }
     static func expressionFingerprint(_ text: String, feedback: FeedbackIntent?) throws -> String {
-        guard let feedback else { return "user-text-v1:" + SHA256.hash(data:Data(text.utf8)).map { String(format:"%02x",$0) }.joined() }
+        guard let feedback else { return "user-text-v1:" + Digest.sha256(Data(text.utf8)) }
         var values = [text,feedback.actionID,String(feedback.actionVersion),feedback.kind.rawValue]
         if let claimID = feedback.organizedClaimID { values += [claimID,feedback.relation ?? "",feedback.recordingSourceID ?? ""] }
-        return "user-text-feedback-v1:" + SHA256.hash(data:try JSONSerialization.data(withJSONObject:values)).map { String(format:"%02x",$0) }.joined()
+        return "user-text-feedback-v1:" + Digest.sha256(try JSONSerialization.data(withJSONObject:values))
     }
     static func inspectUserText(_ file: URL) throws -> MediaInfo {
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
@@ -75,12 +75,11 @@ extension VoiceOSStore {
         let actual = try DurableFiles.hash(original)
         guard String(actual.0) == row["expected_bytes"], actual.1 == row["expected_hash"] else { throw VoiceOSError("表达原件保存期间发生变化") }
         let text = try String(contentsOf: original, encoding: .utf8)
-        let job = UUID().uuidString, transcript = UUID().uuidString, version = UUID().uuidString
+        let job = UUID().uuidString
         // No speech job: the original is already authored text. Keep the common text-version contract.
         try db.execute("INSERT INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','user-text-v1','completed')", [job,row["id"],row["version_id"]])
-        try db.execute("INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at,current_version_id) VALUES(?,?,?,?,?,'verbatim',?,'zh_CN','user-authored-text',?,?)", [transcript,row["id"],row["asset_id"],row["version_id"],job,text,Self.now(),version])
-        let spans = String(decoding: try JSONEncoder().encode(SpeechText(text: text).spans), as: UTF8.self)
-        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?,'original','system',?)", [version,transcript,text,spans,Self.now()])
+        try db.createTranscript(sourceID: row["id"]!, assetID: row["asset_id"]!, inputVersionID: row["version_id"]!,
+                                jobID: job, speech: SpeechText(text: text), backend: "user-authored-text", createdAt: Self.now())
         if let feedback = try Self.feedbackIntent(row["feedback_json"]) {
             guard let current = try db.query("SELECT version FROM actions WHERE id=?", [feedback.actionID]).first,
                   let version = current["version"].flatMap(Int.init), feedback.actionVersion <= version else { throw VoiceOSError("反馈原始行动版本不存在") }

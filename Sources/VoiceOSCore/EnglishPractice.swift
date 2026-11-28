@@ -54,8 +54,8 @@ extension VoiceOSStore {
     }
     static func englishPracticeDigest(_ current:String,_ prior:[String],_ destination:ModelDestination,_ context:LocalTranscriptContext) throws -> String {
         struct Payload:Encodable { let purpose="english-practice-input-v1";let current:String;let prior:[String];let destination:ModelDestination;let context:LocalTranscriptContext }
-        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
-        return SHA256.hash(data:try encoder.encode(Payload(current:current,prior:prior,destination:destination,context:context))).map { String(format:"%02x",$0) }.joined()
+        let encoder = StableJSON.makeEncoder()
+        return Digest.sha256(try encoder.encode(Payload(current:current,prior:prior,destination:destination,context:context)))
     }
     /// Pure structural validation; the Store must also revalidate the actual input snapshot.
     public static func validateEnglishProposals(suggestions:[EnglishSuggestionProposal],comparisons:[EnglishComparisonProposal],snapshot:EnglishPracticeSnapshot) throws {

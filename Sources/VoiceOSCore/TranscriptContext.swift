@@ -72,7 +72,7 @@ extension VoiceOSStore {
               current.contentDigest == context.contentDigest else { throw VoiceOSError("上下文来源或逐字稿已变化，请重新准备") }
     }
     private func contextDigest(_ sources: [ContextTranscript]) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        return SHA256.hash(data: try encoder.encode(sources)).map { String(format: "%02x", $0) }.joined()
+        let encoder = StableJSON.makeEncoder()
+        return Digest.sha256(try encoder.encode(sources))
     }
 }

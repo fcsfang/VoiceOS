@@ -46,8 +46,8 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一排期命令不能更换内容") }
             return receipt["id"]!
         }
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
-              action.version == expectedActionVersion, action.kind == "task", action.state == "open", action.validity == "current" else {
+        guard let action = try self.action(id: actionID, includeHistory: true),
+              action.version == expectedActionVersion, action.isCurrentOpenTask else {
             throw VoiceOSError("只有当前有效且未完成任务可以记录排期提案")
         }
         let prior = try db.query("SELECT * FROM action_schedule_intents WHERE action_id=? ORDER BY schedule_version DESC LIMIT 1", [actionID]).first
@@ -85,7 +85,7 @@ extension VoiceOSStore {
                 validity,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'current',?,?,?)
                 """, [id,actionID,String(expectedActionVersion),String(expectedScheduleVersion+1),dueJSON,proposal.authority.rawValue,
                         actor.rawValue,proposal.rawExpression,anchor,anchorTimeZone,baseObservationID,baseAuthority.rawValue,
-                        expectedAccessVersion.map(String.init),commandID,hash,ISO8601DateFormatter().string(from: Date())])
+                        expectedAccessVersion.map(String.init),commandID,hash,TimestampFormatting.iso.string(from: Date())])
             if baseObservationID != nil {
                 try db.execute("INSERT INTO reminder_schedule_bases(id,intent_id,authority,operation_id) VALUES(?,?,?,?)",
                                [UUID().uuidString,id,baseAuthority.rawValue,baseOperationID])
@@ -103,7 +103,7 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM action_schedule_intents \(clause) ORDER BY action_id,schedule_version").map { row in
             let latest = try db.query("SELECT MAX(schedule_version) AS n FROM action_schedule_intents WHERE action_id=?", [row["action_id"]]).first?["n"]
             let action = actions[row["action_id"]!]
-            return try Self.scheduleIntent(row, baseOperationID: db.query("SELECT operation_id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).first?["operation_id"], eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.kind == "task" && action?.state == "open" && action?.validity == "current" && row["action_version"] == action.map { String($0.version) })
+            return try Self.scheduleIntent(row, baseOperationID: db.query("SELECT operation_id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).first?["operation_id"], eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.isCurrentOpenTask == true && row["action_version"] == action.map { String($0.version) })
         }
     }
 
@@ -113,8 +113,8 @@ extension VoiceOSStore {
         guard let intent = try actionScheduleIntents().first(where: { $0.id == intentID }),
               let link = try reminderLinks().first(where: { $0.actionID == intent.actionID }) else { throw VoiceOSError("没有当前排期或提醒事项关联") }
         try checkReminderAccess(calendarID: link.calendarID, expectedVersion: expectedAccessVersion)
-        let action = try actions(includeHistory: true).first { $0.id == intent.actionID }
-        let sourcesAllowed = try action.map { try reminderSourceAllowed($0) && reminderCognitionIsLatest($0) } ?? false
+        let action = try self.action(id: intent.actionID, includeHistory: true)
+        let sourcesAllowed = try action.flatMap { try eligibleReminderClaim(for: $0) } != nil
         let proposal = try ReminderScheduleProposal(due: intent.due, authority: intent.authority,
                                                     rawExpression: intent.rawExpression, anchorEventTime: intent.anchorEventTime)
         if intent.eligibleForPlanning, sourcesAllowed, link.state == "linked", link.remoteMarkerValid == true,
@@ -141,7 +141,7 @@ extension VoiceOSStore {
         return text
     }
     private static func scheduleDueJSON(_ due: ReminderDueDate) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(due), as: UTF8.self)
     }
     private static func scheduleIntent(_ row: [String: String], baseOperationID: String? = nil, eligible: Bool) throws -> ActionScheduleIntent {

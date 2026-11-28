@@ -386,8 +386,7 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
         // order when an item's claims are gathered from a set.
         var actionPositionsByClaimID: [String: [Int]] = [:]
         for (position, action) in actions.enumerated()
-        where action.state == "open" && action.validity == "current" && action.kind == "task"
-            && !reviewRequiredActionIDs.contains(action.id) {
+        where action.isCurrentOpenTask && !reviewRequiredActionIDs.contains(action.id) {
             actionPositionsByClaimID[action.claimID, default: []].append(position)
         }
         var digests: [String: RecentContentDigest] = [:]

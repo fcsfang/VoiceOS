@@ -62,6 +62,13 @@ public struct TranscriptionReview: Codable, Sendable {
     public var scope: String? = nil
     public var full_text_independent_passes: Int? = nil
     public var review_method: String? = nil
+    static func requiresFullTextReview(kind: String, backend: String?, hasText: Bool,
+                                       spans: [TranscriptSpan], review: TranscriptionReview?) -> Bool {
+        ["audio", "video"].contains(kind) && backend?.hasPrefix("Qwen3-ASR") == true &&
+            hasText && !spans.isEmpty && spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } &&
+            review?.isCompleteFullTextReview != true
+    }
+
     public var isCompleteFullTextReview: Bool {
         let receipts = (response_ids ?? []).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard completed &&
@@ -153,15 +160,10 @@ public enum MaterialDisplayTitle {
 }
 
 public extension SourceRecord {
-    var recordingExpression: RecordingExpression? {
-        guard let value=presentation?.expression,!localOnly,!needsTranscriptionReview,
-              value.versions[id] == transcriptVersionID,value.policies[id] == policyVersion else { return nil }
-        return value
-    }
+    var recordingExpression: RecordingExpression? { readableRecordingExpression }
     var needsTranscriptionReview: Bool {
-        ["audio", "video"].contains(kind) && transcriptionBackend?.hasPrefix("Qwen3-ASR") == true &&
-        !(transcript ?? "").isEmpty && !spans.isEmpty && spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } &&
-        transcriptionReview?.isCompleteFullTextReview != true
+        TranscriptionReview.requiresFullTextReview(kind: kind, backend: transcriptionBackend,
+            hasText: !(transcript ?? "").isEmpty, spans: spans, review: transcriptionReview)
     }
     var transcriptionReview: TranscriptionReview? {
         guard presentation?.transcriptionReview?.transcriptVersionID == transcriptVersionID else { return nil }
@@ -198,12 +200,12 @@ public extension SourceRecord {
 }
 extension VoiceOSStore {
     func saveTranscriptionReview(_ review: TranscriptionReview, sourceID: String) throws {
-        guard let source = try sources().first(where: { $0.id == sourceID }), let version = source.transcriptVersionID,
+        guard let source = try sourceRecord(id: sourceID), let version = source.transcriptVersionID,
               review.completed, !review.response_id.isEmpty else { throw VoiceOSError("转写核对缺少当前版本或回执") }
         var saved = source.presentation ?? RecordingPresentation(), current = review
         current.transcriptVersionID = version
         current.correction_count = current.correction_count ?? current.corrections?.count
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         if let previous = saved.transcriptionReview, try encoder.encode(previous) == encoder.encode(current) { return }
         let affected = saved.transcriptVersionID != version
         saved.transcriptionReview = current
@@ -303,28 +305,8 @@ public extension SourceRecord {
     /// Explains why a saved multi-segment expression is currently unusable.
     func recordingExpressionIssue(in catalog: [String: SourceRecord]) -> String? {
         guard let saved = presentation?.expression, saved.sourceIDs.count > 1,
-              recordingExpression(in: catalog) == nil else { return nil }
-        guard recordingExpression != nil else { return "这段原文或文字授权已变化" }
-        for id in saved.sourceIDs {
-            guard let member = catalog[id] else { return "分组里有一段录音已不在资料库" }
-            guard member.recordingExpression?.digest == saved.digest else { return "分组里有一段的原文或文字授权已变化" }
-            if let pair = member.presentation?.recordingContext {
-                guard saved.externalVersions?[pair.externalSourceID] == pair.externalVersionID,
-                      saved.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion else {
-                    return "节目背景或原文授权已变化"
-                }
-            }
-        }
-        if let externals = saved.externalVersions {
-            for (id, version) in externals {
-                guard let external = catalog[id], external.transcriptVersionID == version,
-                      external.policyVersion == saved.externalPolicies?[id],
-                      !external.localOnly, !external.needsTranscriptionReview else {
-                    return "节目原文或文字授权已变化"
-                }
-            }
-        }
-        return "分组内容已变化"
+              case .failure(let invalidity) = resolveRecordingExpression(in: catalog) else { return nil }
+        return invalidity.message
     }
 
     /// Short reason shown on a material that has no topic link yet.
@@ -389,7 +371,7 @@ public extension SourceRecord {
 
 extension VoiceOSStore {
     public func recordTranscriptionReviewFailure(sourceID: String, reason: String) throws {
-        guard let source = try sources().first(where: { $0.id == sourceID }), let version = source.transcriptVersionID else {
+        guard let source = try sourceRecord(id: sourceID), let version = source.transcriptVersionID else {
             throw VoiceOSError("转写核对失败无法留存：缺少当前文字版本")
         }
         let clean = reason.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -403,7 +385,7 @@ extension VoiceOSStore {
         try savePresentation(saved, sourceID: sourceID)
     }
     public func clearTranscriptionReviewFailure(sourceID: String) throws {
-        guard let source = try sources().first(where: { $0.id == sourceID }), var saved = source.presentation,
+        guard let source = try sourceRecord(id: sourceID), var saved = source.presentation,
               saved.transcriptionReviewFailure != nil else { return }
         saved.transcriptionReviewFailure = nil
         try savePresentation(saved, sourceID: sourceID)
@@ -434,59 +416,129 @@ public extension SourceRecord {
     /// The external context member this personal recording is attached to,
     /// when both sides still match the saved versions and permissions.
     func pairedContextSourceID(in catalog: [String: SourceRecord]) -> String? {
-        guard let pair = presentation?.recordingContext, pair.personalSourceID == id,
-              let external = catalog[pair.externalSourceID], !localOnly, !external.localOnly,
-              !needsTranscriptionReview, !external.needsTranscriptionReview,
-              transcriptVersionID == pair.personalVersionID,
-              external.transcriptVersionID == pair.externalVersionID,
-              policyVersion == pair.personalPolicyVersion,
-              external.policyVersion == pair.externalPolicyVersion else { return nil }
+        guard let pair = presentation?.recordingContext,
+              let external = catalog[pair.externalSourceID],
+              pair.matchesCurrentRevisions(personalSourceID: id, personal: self, external: external) else { return nil }
         return external.id
     }
 }
 
-/// One materials-page body evaluation: rows for the selected filter and the
-/// tab counts for every filter. Grouping and expression dedupe run once per
-/// filter inside one construction, instead of once per tab plus once for rows.
+struct MaterialRowProjection {
+    enum Grouping {
+        // Compact lists can represent an expression by any member in their scope.
+        case firstVisibleMember
+        // Reading filters keep individual members visible until the group is fully in scope.
+        case completeExpression
+    }
+
+    let catalog: [String: SourceRecord]
+    let expressions: [String: RecordingExpression]
+
+    func rows(in sources: [SourceRecord], grouping: Grouping,
+              hidePairedContext: Bool) -> [(source: SourceRecord, date: String)] {
+        // A programme remains independent when its personal source is outside the list.
+        let attached = hidePairedContext ? Set(sources.compactMap { $0.pairedContextSourceID(in: catalog) }) : []
+        let selectedIDs = grouping == .completeExpression ? Set(sources.map(\.id)) : []
+        var represented = Set<String>()
+        return sources.compactMap { source in
+            guard !attached.contains(source.id) else { return nil }
+            guard let expression = expressions[source.id], expression.sourceIDs.count > 1 else {
+                return (source, source.createdAt)
+            }
+            switch grouping {
+            case .firstVisibleMember:
+                guard represented.insert(expression.id).inserted else { return nil }
+                return (source, source.createdAt)
+            case .completeExpression:
+                guard Set(expression.sourceIDs).isSubset(of: selectedIDs) else { return (source, source.createdAt) }
+                guard expression.sourceIDs.first == source.id else { return nil }
+                return (source, expression.sourceIDs.compactMap { catalog[$0]?.createdAt }.max() ?? source.createdAt)
+            }
+        }
+    }
+}
+
+public extension SourcePageIndex {
+    func groupedMaterialRows(in sources: [SourceRecord]) -> [SourceRecord] {
+        MaterialRowProjection(catalog: recordsByID, expressions: expressionsBySourceID)
+            .rows(in: sources, grouping: .firstVisibleMember, hidePairedContext: true)
+            .map(\.source)
+    }
+
+    func materialRailRows(in sources: [SourceRecord]) -> [SourceRecord] {
+        MaterialRowProjection(catalog: recordsByID, expressions: expressionsBySourceID)
+            .rows(in: sources, grouping: .firstVisibleMember, hidePairedContext: false)
+            .sorted { $0.date > $1.date }
+            .map(\.source)
+    }
+}
+
+/// Raw values are the material filter names stored in saved workspace views.
+public enum MaterialReadingFilter: String, CaseIterable, Sendable {
+    case daily = "日常材料"
+    case unread = "未读"
+    case reading = "在读"
+    case archived = "已归档"
+    case trash = "回收站"
+
+    func includes(_ source: SourceRecord, readingState: SourceReadingState) -> Bool {
+        switch self {
+        case .archived: return source.isArchived
+        case .trash: return source.isTrashed
+        case .daily, .unread, .reading:
+            guard !source.isArchived, !source.isTrashed else { return false }
+            return self == .daily || (self == .unread && readingState == .unread) ||
+                (self == .reading && readingState == .reading)
+        }
+    }
+}
+
+/// Rows and counts for all material filters in the current workspace snapshot.
 public struct MaterialReadingPage: Sendable {
-    public let rows: [SourceRecord]
+    public var rows: [SourceRecord] { rowsByFilter[filter] ?? [] }
     public let counts: [String: Int]
+    private var filter: String
+    private let rowsByFilter: [String: [SourceRecord]]
+
     public init(records: [SourceRecord], filter: String, filters: [String],
                 readingStates: [String: SourceReadingState] = [:],
                 catalog: [String: SourceRecord],
                 expressions: [String: RecordingExpression] = [:]) {
+        let projection = MaterialRowProjection(catalog: catalog, expressions: expressions)
         var byFilter: [String: [SourceRecord]] = [:]
         for name in Set(filters + [filter]) {
-            byFilter[name] = Self.rows(records: records, filter: name, readingStates: readingStates,
-                                       catalog: catalog, expressions: expressions)
+            let selection = MaterialReadingFilter(rawValue: name) ?? .daily
+            let selected = records.filter { selection.includes($0, readingState: readingStates[$0.id] ?? .unread) }
+            byFilter[name] = projection.rows(in: selected, grouping: .completeExpression, hidePairedContext: true)
+                .sorted { $0.date > $1.date }
+                .map(\.source)
         }
-        rows = byFilter[filter] ?? []
+        self.filter = filter
+        rowsByFilter = byFilter
         counts = byFilter.mapValues(\.count)
     }
-    private static func rows(records: [SourceRecord], filter: String,
-                             readingStates: [String: SourceReadingState],
-                             catalog: [String: SourceRecord],
-                             expressions: [String: RecordingExpression]) -> [SourceRecord] {
-        let selected = records.filter { source in
-            switch filter {
-            case "回收站": return source.isTrashed
-            case "已归档": return source.isArchived
-            case "未读": return !source.isArchived && !source.isTrashed && (readingStates[source.id] ?? .unread) == .unread
-            case "在读": return !source.isArchived && !source.isTrashed && readingStates[source.id] == .reading
-            default: return !source.isArchived && !source.isTrashed
-            }
-        }
-        let selectedIDs = Set(selected.map(\.id))
-        let attachedContextIDs = Set(selected.compactMap { $0.pairedContextSourceID(in: catalog) })
-            .intersection(selectedIDs)
-        let entries = selected.compactMap { source -> (SourceRecord, String)? in
-            guard !attachedContextIDs.contains(source.id) else { return nil }
-            guard let expression = expressions[source.id], expression.sourceIDs.count > 1,
-                  Set(expression.sourceIDs).isSubset(of: selectedIDs) else { return (source, source.createdAt) }
-            guard expression.sourceIDs.first == source.id else { return nil }
-            return (source, expression.sourceIDs.compactMap { catalog[$0]?.createdAt }.max() ?? source.createdAt)
-        }
-        return entries.sorted { $0.1 > $1.1 }.map(\.0)
+
+    public init(records: [SourceRecord], filter: MaterialReadingFilter,
+                readingStates: [String: SourceReadingState] = [:],
+                catalog: [String: SourceRecord],
+                expressions: [String: RecordingExpression] = [:]) {
+        self.init(records: records, filter: filter.rawValue, filters: MaterialReadingFilter.allCases.map(\.rawValue),
+                  readingStates: readingStates, catalog: catalog, expressions: expressions)
+    }
+
+    public func count(for filter: MaterialReadingFilter) -> Int {
+        counts[filter.rawValue] ?? 0
+    }
+
+    public func selecting(_ filter: MaterialReadingFilter) -> Self? {
+        selecting(filter.rawValue)
+    }
+
+    public func selecting(_ filter: String) -> Self? {
+        guard rowsByFilter[filter] != nil else { return nil }
+        var selected = self
+        selected.filter = filter
+        return selected
     }
 }
 

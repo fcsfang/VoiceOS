@@ -62,7 +62,7 @@ extension VoiceOSStore {
             """, [sourceID]).first,
               let saved = row["snapshot_json"],
               let previous = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(saved.utf8)).sources.first(where: { $0.sourceID == sourceID }),
-              let source = try sources().first(where: { $0.id == sourceID }) else {
+              let source = try sourceRecord(id: sourceID) else {
             return UnderstandingPause(summary: "应用暂停了之前提取的观点和任务，但没有保存具体原因。", policyChange: nil)
         }
         if source.state == "quarantined" { return UnderstandingPause(summary: "保存的原件未通过完整性检查。请先恢复可用原件，暂时不能重新识别。", policyChange: nil) }
@@ -93,7 +93,7 @@ extension VoiceOSStore {
         try understandingPause(sourceID: sourceID).summary
     }
     private static func pauseTime(_ iso: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
+        guard let date = TimestampFormatting.iso.date(from: iso) else { return iso }
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = .current
@@ -120,12 +120,22 @@ extension VoiceOSStore {
         return id
     }
     public func localContext(id: String) throws -> LocalTranscriptContext {
+        try readContext(id: id)
+    }
+
+    private func readContext(id: String, stamp suppliedStamp: ContextValidationStamp? = nil) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND state='current'", [id]).first else { throw VoiceOSError("上下文已失效或不存在") }
         let snapshot = row["snapshot_json"]!
         let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(snapshot.utf8))
         contextSnapshotDecodeBytes += snapshot.utf8.count
         if !contextValidationSuspended {
-            let stamp = try contextValidationStamp(id: id, digest: row["digest"]!)
+            let digest = row["digest"]!
+            let stamp: ContextValidationStamp
+            if let suppliedStamp, suppliedStamp.generation == db.writeGeneration, suppliedStamp.digest == digest {
+                stamp = suppliedStamp
+            } else {
+                stamp = try contextValidationStamp(id: id, digest: digest)
+            }
             if contextValidationStamps[id] != stamp {
                 do {
                     contextValidationPasses += 1
@@ -139,25 +149,28 @@ extension VoiceOSStore {
         }
         return context
     }
+
+    private static let contextOriginalJoin = "LEFT JOIN sources s ON s.id=i.source_id AND s.state='saved'"
+
     /// Validation re-derives from database rows and from the originals on disk;
-    /// the stamp pins both, so a hit costs one small query and a stat per source.
+    /// each stamp samples the originals when its context is checked.
     private func contextValidationStamp(id: String, digest: String) throws -> ContextValidationStamp {
+        let inputs = try db.query("""
+            SELECT i.source_id,s.relative_path FROM context_inputs i
+            \(Self.contextOriginalJoin) WHERE i.context_id=?
+            """, [id])
+        return contextValidationStamp(digest: digest, inputs: inputs)
+    }
+
+    private func contextValidationStamp(digest: String, inputs: [[String: String]]) -> ContextValidationStamp {
         var files: [String: DurableFiles.Fingerprint] = [:]
-        for row in try db.query("SELECT i.source_id,s.state,s.relative_path FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=?", [id]) {
-            guard row["state"] == "saved", let relative = row["relative_path"],
+        for row in inputs {
+            guard let relative = row["relative_path"],
                   let url = try? assetURL(relativePath: relative),
                   let fingerprint = try? DurableFiles.fingerprint(url) else { continue }
             files[row["source_id"]!] = fingerprint
         }
         return ContextValidationStamp(digest: digest, generation: db.writeGeneration, files: files)
-    }
-    /// Claim listing needs the verdict, not the snapshot; a row whose stamp still
-    /// matches has no new database or file inputs to check.
-    private func validateContextRow(id: String, digest: String) throws {
-        guard !contextValidationSuspended else { return }
-        let stamp = try contextValidationStamp(id: id, digest: digest)
-        if contextValidationStamps[id] == stamp { return }
-        _ = try localContext(id: id)
     }
     /// This slice only supports local fixtures. A reservation is durable before work;
     /// it is not a cloud grant and there is no automatic resend after interruption.
@@ -244,46 +257,95 @@ extension VoiceOSStore {
         try candidateClaimRows(includeFrozen: includeFrozen, claimID: id).first.map(decodeCandidateClaim)
     }
 
-    private func candidateClaimRows(includeFrozen: Bool, attemptID: String? = nil, claimID: String? = nil) throws -> [[String: String]] {
+    /// A discussion or an earlier outcome can invalidate another producer's
+    /// claim. Refresh those dependencies before returning one selected row.
+    public func refreshedCandidateClaim(id: String, includeFrozen: Bool = false) throws -> CandidateClaim? {
+        try candidateClaimRows(includeFrozen: includeFrozen, claimID: id, validatesAllContexts: true).first.map(decodeCandidateClaim)
+    }
+
+    private func candidateClaimRows(includeFrozen: Bool, attemptID: String? = nil, claimID: String? = nil, validatesAllContexts: Bool = false) throws -> [[String: String]] {
         let selection = (attemptID == nil ? "" : " AND a.id=?") + (claimID == nil ? "" : " AND c.id=?")
         let arguments = [attemptID, claimID].compactMap { $0 }
-        // Dynamic read checks are a second barrier in addition to atomic invalidation.
-        // A detail read checks its own producers; it must not decode and validate
-        // the whole library for each claim or recording.
-        if !contextValidationSuspended {
-        for row in try db.query("SELECT DISTINCT x.id,x.digest FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
-            do { try validateContextRow(id: row["id"]!, digest: row["digest"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
-        }
+        if validatesAllContexts {
+            try validateClaimContexts()
+        } else {
+            try validateClaimContexts(matching: selection, arguments: arguments)
         }
         let whereClause = includeFrozen ? "WHERE 1=1" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
         return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause)\(selection) ORDER BY c.created_at,c.id", arguments)
+    }
+
+    func validateClaimContexts() throws {
+        try validateClaimContexts(matching: "", arguments: [])
+    }
+
+    private func validateClaimContexts(matching selection: String, arguments: [String]) throws {
+        guard !contextValidationSuspended else { return }
+        let rows = try db.query("""
+            SELECT selected.id,selected.digest,i.source_id,s.relative_path
+            FROM (
+                SELECT DISTINCT x.id,x.digest
+                FROM contexts x JOIN model_attempts a ON a.context_id=x.id
+                JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)
+            ) selected
+            LEFT JOIN context_inputs i ON i.context_id=selected.id
+            \(Self.contextOriginalJoin)
+            """, arguments)
+        let generation = db.writeGeneration
+        var inputsByContext = Dictionary(grouping: rows) { $0["id"]! }
+        for row in rows {
+            let id = row["id"]!, digest = row["digest"]!
+            guard let inputs = inputsByContext.removeValue(forKey: id) else { continue }
+            do {
+                // A freeze can affect later contexts. After a write, read from the
+                // updated database; always sample original files at the point of use.
+                let stamp = generation == db.writeGeneration
+                    ? contextValidationStamp(digest: digest, inputs: inputs)
+                    : try contextValidationStamp(id: id, digest: digest)
+                if contextValidationStamps[id] != stamp {
+                    _ = try readContext(id: id, stamp: stamp)
+                }
+            } catch { try db.transaction { try freezeContext(id) } }
+        }
     }
 
     private func decodeCandidateClaim(_ row: [String: String]) throws -> CandidateClaim {
         CandidateClaim(contentKind: row["reviewed_statement"] != nil && row["reviewed_statement"] != row["statement"] ? nil : row["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: row["id"]!, statement: row["reviewed_statement"] ?? row["statement"]!, ownership: row["reviewed_ownership"] ?? row["ownership"]!, evidenceState: row["evidence_state"]!, validity: row["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data(row["refs_json"]!.utf8)), reviewVersion: Int(row["review_version"]!)!, reviewState: row["review_state"] ?? "pending")
     }
 
-    /// SQL predicate for an attempt that can own claims, used where
-    /// `model_attempts` is aliased as `a`. Topic organization also records
-    /// attempts, but writes no claims; it runs later over bundled sources, so it
-    /// must not hide the extraction attempt that a source's claims belong to.
-    static let claimExtractionAttemptFilter = "a.provider NOT LIKE 'english_feedback:%' AND a.prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')"
+    enum ClaimProducerScope {
+        case source, reflection, organizedImport
+    }
+
+    // Topic organization runs after extraction and creates no claims.
+    private static let claimProducerPredicate = "a.provider NOT LIKE 'english_feedback:%' AND a.prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')"
+
+    /// Producer sequence orders even retries recorded within the same second.
+    /// The most recent completed attempt can legitimately contain zero claims.
+    func latestClaimProducerIDs(sourceID: String? = nil, scope: ClaimProducerScope = .source) throws -> [String: String] {
+        let eligible: String
+        switch scope {
+        case .source: eligible = Self.claimProducerPredicate
+        case .reflection:
+            // Retained discussion knowledge augments the original understanding.
+            eligible = Self.claimProducerPredicate + " AND a.provider!='discussion_derivation' AND substr(a.provider,1,19)!='discussion_outcome:'"
+        case .organizedImport: eligible = "a.provider='organized_import'"
+        }
+        let sourceFilter = sourceID == nil ? "" : " AND i.source_id=?"
+        let limit = sourceID == nil ? "" : " LIMIT 1"
+        let rows = try db.query("""
+            SELECT i.source_id,a.id
+            FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
+            WHERE a.state='completed' AND \(eligible)\(sourceFilter)
+            ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC\(limit)
+            """, sourceID.map { [$0] } ?? [])
+        return Dictionary(rows.map { ($0["source_id"]!, $0["id"]!) }, uniquingKeysWith: { newest, _ in newest })
+    }
 
     /// Batch source-facing view for the library: validate contexts and read claims
     /// once, rather than repeating both operations for every recording.
     public func latestCandidateClaimsBySource(includeFrozen: Bool = false) throws -> [String: [CandidateClaim]] {
-        var latestAttemptBySource: [String: String] = [:]
-        for row in try db.query("""
-            SELECT i.source_id,a.id
-            FROM model_attempts a
-            JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-            ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC
-            """) {
-            if let sourceID = row["source_id"], latestAttemptBySource[sourceID] == nil {
-                latestAttemptBySource[sourceID] = row["id"]
-            }
-        }
+        let latestAttemptBySource = try latestClaimProducerIDs()
         var result = latestAttemptBySource.mapValues { _ in [CandidateClaim]() }
         for row in try candidateClaimRows(includeFrozen: includeFrozen) {
             let claim = try decodeCandidateClaim(row)
@@ -302,18 +364,7 @@ extension VoiceOSStore {
     /// second set of thoughts.  This helper deliberately keeps the historical
     /// `candidateClaims` API unchanged and narrows only the source-facing view.
     public func latestCandidateClaims(for sourceID: String, includeFrozen: Bool = false) throws -> [CandidateClaim] {
-        guard let attempt = try db.query("""
-            SELECT a.id
-            FROM model_attempts a
-            JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE i.source_id=? AND a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-            -- created_at is intentionally human-readable and may have only
-            -- second-level precision.  producer_sequence is the durable
-            -- ordering authority for model results, including rapid retries.
-            ORDER BY a.producer_sequence DESC, a.created_at DESC, a.id DESC
-            LIMIT 1
-            """, [sourceID]).first,
-              let attemptID = attempt["id"] else { return [] }
+        guard let attemptID = try latestClaimProducerIDs(sourceID: sourceID)[sourceID] else { return [] }
         return try candidateClaimRows(includeFrozen: includeFrozen, attemptID: attemptID).map(decodeCandidateClaim).filter { claim in
             claim.references.contains { $0.sourceID == sourceID }
         }
@@ -358,8 +409,8 @@ extension VoiceOSStore {
         }
         for row in try db.query("SELECT * FROM contexts") {
             let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let digest = SHA256.hash(data: try encoder.encode(context.sources)).map { String(format: "%02x", $0) }.joined()
+            let encoder = StableJSON.makeEncoder()
+            let digest = Digest.sha256(try encoder.encode(context.sources))
             guard context.scalarBudget > 0, !context.sources.isEmpty,
                   context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= context.scalarBudget,
                   digest == context.contentDigest, digest == row["digest"],
@@ -390,14 +441,14 @@ extension VoiceOSStore {
             }
         }
         // 主题整理尝试也写 model_attempts，但其 result_digest 不是观点提案的摘要。
-        for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed' AND provider NOT LIKE 'english_feedback:%' AND prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')") {
+        for attempt in try db.query("SELECT a.* FROM model_attempts a WHERE a.state='completed' AND \(Self.claimProducerPredicate)") {
             var proposals: [ClaimProposal] = []
             for (index, claim) in try db.query("SELECT * FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).enumerated() {
                 guard claim["ordinal"] == String(index), let owner = CandidateOwnership(rawValue: claim["ownership"]!) else { throw VoiceOSError("迁移候选顺序不一致") }
                 proposals.append(ClaimProposal(statement: claim["statement"]!, ownership: owner, references: try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8)), action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) }, contentKind: claim["content_kind"].flatMap(CognitiveContentKind.init(rawValue:))))
             }
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let digest = SHA256.hash(data: try encoder.encode(proposals)).map { String(format: "%02x", $0) }.joined()
+            let encoder = StableJSON.makeEncoder()
+            let digest = Digest.sha256(try encoder.encode(proposals))
             guard digest == attempt["result_digest"] else { throw VoiceOSError("迁移调用结果摘要不一致") }
         }
         try validateStoredUserExpressions(db)
@@ -452,9 +503,9 @@ extension VoiceOSStore {
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?)", [id])
     }
     private func json<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
-    private func hash<T: Encodable>(_ value: T) throws -> String { SHA256.hash(data: Data(try json(value).utf8)).map { String(format: "%02x", $0) }.joined() }
+    private func hash<T: Encodable>(_ value: T) throws -> String { Digest.sha256(Data(try json(value).utf8)) }
     private func timestamp() -> String { TimestampFormatting.iso.string(from: Date()) }
 }

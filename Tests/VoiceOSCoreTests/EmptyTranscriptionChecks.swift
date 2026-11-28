@@ -67,12 +67,33 @@ extension CoreFlowTests {
         let id = try await dictation(store)
         try await store.processTranscriptions(using: SilentSpeech())
         try await store.retryTranscription(sourceID: id)
+        let other = try await dictation(store)
         let text = "重新转写得到的文字。"
-        try await store.processTranscriptions(using: SpeakingSpeech(text: text))
+        try await store.processTranscriptions(using: SpeakingSpeech(text: text), sourceIDs: [])
+        let stillQueued = try await sourceRecord(store, id: id)
+        XCTAssertEqual(stillQueued.jobState, "queued")
+        try await store.processTranscriptions(using: SpeakingSpeech(text: text), sourceIDs: [id, id])
         let record = try await sourceRecord(store, id: id)
+        let unrelated = try await sourceRecord(store, id: other)
         XCTAssertEqual(record.jobState, "completed")
         XCTAssertEqual(record.transcript, text)
         XCTAssertFalse(record.needsEmptyTranscriptionReview)
+        XCTAssertEqual(unrelated.jobState, "queued")
+        XCTAssertNil(unrelated.transcript)
+
+        let db = await store.db
+        try db.execute("""
+            INSERT INTO jobs(id,source_id,input_version_id,stage,config,state)
+            VALUES('obsolete-queued-job',?,?,'transcription','fixture','queued')
+            """, [id, UUID().uuidString])
+        let eligible = try await store.queuedTranscriptionSourceIDs()
+        XCTAssertEqual(eligible, [other])
+        let currentRows = try await store.sourceRecords(ids: [id])
+        XCTAssertEqual(currentRows.count, 1)
+        XCTAssertEqual(currentRows.first?.jobState, "completed")
+        try await store.processTranscriptions(using: SpeakingSpeech(text: text))
+        let remaining = try await store.queuedTranscriptionSourceIDs()
+        XCTAssertTrue(remaining.isEmpty)
     }
 
     func testHistoricalCompletedEmptyTranscriptIsIdentifiedAndReplaced() async throws {

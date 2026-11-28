@@ -27,7 +27,7 @@ public struct TranscriptSegmentationPlan: Codable, Sendable {
 }
 extension VoiceOSStore {
     public func prepareTranscriptSegmentation(sourceID: String, scalarBudget: Int = 4000) throws -> TranscriptSegmentationPlan {
-        guard (1...4000).contains(scalarBudget), let record = try sources().first(where: {$0.id == sourceID}),
+        guard (1...4000).contains(scalarBudget), let record = try sourceRecord(id: sourceID),
               let text = record.transcript else { throw VoiceOSError("分段需要当前逐字稿和1至4000的预算") }
         // Full transcript validation, with an explicit planning-only budget. Never
         // route this larger snapshot to the fixed-budget processing queue.

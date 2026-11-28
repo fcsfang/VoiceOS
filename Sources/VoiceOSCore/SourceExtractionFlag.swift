@@ -41,8 +41,14 @@ extension VoiceOSStore {
     }
 
     public func sourceExtractionFlags() throws -> [String: SourceExtractionFlag] {
+        try readSourceExtractionFlags()
+    }
+
+    private func readSourceExtractionFlags(sourceIDs: Set<String>? = nil) throws -> [String: SourceExtractionFlag] {
+        let scope = sourceIDs == nil ? "" : " WHERE source_id IN (SELECT value FROM json_each(?))"
+        let arguments = try sourceIDs.map { [try Self.relevanceJSON($0.sorted())] } ?? []
         var flags: [String: SourceExtractionFlag] = [:]
-        for row in try db.query("SELECT source_id,state FROM source_extraction_flags") {
+        for row in try db.query("SELECT source_id,state FROM source_extraction_flags" + scope, arguments) {
             guard let id = row["source_id"], let state = row["state"].flatMap(SourceExtractionFlag.init(rawValue:)) else { continue }
             flags[id] = state
         }
@@ -67,8 +73,8 @@ extension VoiceOSStore {
     /// A material that now has references is resolved and loses the row.
     func evaluateSourceExtractionFlags(sourceIDs: Set<String>) throws {
         guard !sourceIDs.isEmpty else { return }
-        let catalog = Dictionary(try sources().filter { sourceIDs.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let existing = try sourceExtractionFlags()
+        let catalog = Dictionary(uniqueKeysWithValues: try sourceRecords(ids: Array(sourceIDs)).map { ($0.id, $0) })
+        let existing = try readSourceExtractionFlags(sourceIDs: sourceIDs)
         for id in sourceIDs.sorted() {
             guard let source = catalog[id] else { continue }
             let facts = SourceExtractionFacts(origin: source.origin, speaker: source.speaker, transcript: source.transcript,
@@ -87,11 +93,7 @@ extension VoiceOSStore {
     /// The organize output is immutable per attempt; counting its claims by
     /// citation is the persisted fact about what this material contributed.
     func organizedReferenceCount(sourceID: String) throws -> Int {
-        guard let attempt = try db.query("""
-            SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE i.source_id=? AND a.provider='organized_import' AND a.state='completed'
-            ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC LIMIT 1
-            """, [sourceID]).first?["id"] else { return 0 }
+        guard let attempt = try latestClaimProducerIDs(sourceID: sourceID, scope: .organizedImport)[sourceID] else { return 0 }
         var count = 0
         for row in try db.query("SELECT refs_json FROM claims WHERE attempt_id=?", [attempt]) {
             guard let json = row["refs_json"], let references = try? JSONDecoder().decode([ClaimReference].self, from: Data(json.utf8)) else { continue }

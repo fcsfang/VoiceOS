@@ -320,101 +320,22 @@ struct WorkspaceRowChevron: View {
     }
 }
 
-struct WorkspaceListRow<Trailing: View>: View {
-    enum Density { case comfortable, compact }
-    @Environment(\.workspacePalette) private var palette
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.vosTextScale) private var textScale
-    var density: Density = .comfortable
-    let title: String
-    var subtitle: String = ""
-    var icon: String? = nil
-    var materialIcon: MaterialRowIconKind? = nil
-    @ViewBuilder var trailing: () -> Trailing
-    var highlighted: Bool = false
-    var action: (() -> Void)? = nil
-    @State private var hovered = false
-
-    var body: some View {
-        Group {
-            if let action {
-                Button(action: action) { row }
-            } else {
-                row
-            }
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 && action != nil }
-        .accessibilityAddTraits(highlighted ? .isSelected : [])
-    }
-
-    private var row: some View {
-        HStack(spacing: density == .comfortable ? 11 : 9) {
-            if let materialIcon {
-                MaterialRowIcon(kind: materialIcon, size: density == .compact ? 27 : 30)
-            } else if let icon {
-                Image(systemName: icon).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
-                    .foregroundStyle(action == nil ? palette.disabledText : palette.accent)
-                    .frame(width: 34, height: 34)
-                    .background(iconBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                    .accessibilityHidden(true)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).vosFont(WorkspaceText.rowTitle)
-                    .foregroundStyle(action == nil ? palette.disabledText : palette.text)
-                    .lineLimit(textLineLimit)
-                if !subtitle.isEmpty {
-                    Text(subtitle).vosFont(WorkspaceText.meta)
-                        .foregroundStyle(action == nil ? palette.disabledText : palette.secondaryText)
-                        .lineLimit(textLineLimit)
-                }
-            }
-            Spacer(minLength: 8)
-            trailing()
-        }
-        .padding(.horizontal, density == .comfortable ? 12 : 10)
-        .padding(.vertical, density == .comfortable ? 9 : 8)
-        .frame(minHeight: density == .comfortable ? 52 : 44, alignment: .leading)
-        .background(rowBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-        .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
-    }
-
-    private var iconBackground: Color {
-        if action == nil { return palette.selection.opacity(0.35) }
-        return highlighted ? palette.surface : palette.selection.opacity(0.6)
-    }
-
-    private var rowBackground: Color {
-        if highlighted { return palette.selection }
-        if hovered && action != nil { return palette.hover }
-        return .clear
-    }
-
-    // Only 特大 (1.45) crosses 1.3; 大 (1.28) keeps the single-line row.
-    private var textLineLimit: Int {
-        textScale >= 1.3 ? 2 : 1
-    }
-}
-
-extension WorkspaceListRow where Trailing == WorkspaceRowChevron {
-    init(density: Density = .comfortable, title: String, subtitle: String = "", icon: String? = nil,
-         materialIcon: MaterialRowIconKind? = nil, highlighted: Bool = false, action: (() -> Void)? = nil) {
-        self.init(density: density, title: title, subtitle: subtitle, icon: icon, materialIcon: materialIcon,
-                  trailing: { WorkspaceRowChevron() }, highlighted: highlighted, action: action)
-    }
-}
-
 private struct WorkspaceHoverHighlight: ViewModifier {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let cornerRadius: CGFloat
+    let isSelected: Bool
     @State private var hovered = false
 
     func body(content: Content) -> some View {
-        content.background(hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: cornerRadius))
+        content.background(background, in: RoundedRectangle(cornerRadius: cornerRadius))
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+    }
+
+    private var background: Color {
+        if isSelected { return palette.selection }
+        return hovered ? palette.hover : .clear
     }
 }
 
@@ -466,8 +387,8 @@ private struct WorkspaceFocusRing: ViewModifier {
 }
 
 extension View {
-    func workspaceHoverHighlight(cornerRadius: CGFloat = WorkspaceMetrics.controlRadius) -> some View {
-        modifier(WorkspaceHoverHighlight(cornerRadius: cornerRadius))
+    func workspaceHoverHighlight(cornerRadius: CGFloat = WorkspaceMetrics.controlRadius, isSelected: Bool = false) -> some View {
+        modifier(WorkspaceHoverHighlight(cornerRadius: cornerRadius, isSelected: isSelected))
     }
 
     func workspaceModalSurface() -> some View {

@@ -237,7 +237,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia || !attachments.isEmpty { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: PackageLayout.currentVersion, databaseSchema: PackageLayout.currentVersion, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: PackageLayout.currentVersion, databaseSchema: PackageLayout.currentVersion, createdAt: TimestampFormatting.iso.string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)

@@ -238,7 +238,7 @@ extension VoiceOSStore {
         try beginFocusedConversation(claimID: claimID, actionID: nil, commandID: commandID)
     }
     public func beginConversationForAction(actionID: String, commandID: String = UUID().uuidString) throws -> String {
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let action = try self.action(id: actionID, includeHistory: true),
               action.validity == "current", action.state != "dismissed", action.intentActor == "user" else { throw VoiceOSError("行动已变化，请从当前任务或目标重新进入") }
         return try beginFocusedConversation(claimID: action.claimID, actionID: actionID, commandID: commandID)
     }
@@ -476,8 +476,8 @@ extension VoiceOSStore {
         func checkedContext(_ id:String?, frozen:Bool) throws -> (LocalTranscriptContext,String) {
             guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND destination='local'",[id]).first else { throw VoiceOSError("讨论缺少本地上下文") }
             let snapshot = try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(row["snapshot_json"]!.utf8))
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-            let digest = SHA256.hash(data:try encoder.encode(snapshot.sources)).map { String(format:"%02x",$0) }.joined()
+            let encoder = StableJSON.makeEncoder()
+            let digest = Digest.sha256(try encoder.encode(snapshot.sources))
             let inputs = try db.query("SELECT * FROM context_inputs WHERE context_id=?",[id])
             guard snapshot.scalarBudget > 0, !snapshot.sources.isEmpty, inputs.count == snapshot.sources.count,
                   Set(snapshot.sources.map(\.sourceID)).count == snapshot.sources.count,

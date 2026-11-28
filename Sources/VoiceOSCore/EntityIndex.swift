@@ -50,7 +50,7 @@ extension VoiceOSStore {
 
     @discardableResult
     public func refreshEntities(sourceID: String) throws -> [SourceEntity] {
-        guard let source = try sources().first(where: { $0.id == sourceID }) else { throw VoiceOSError("来源不存在") }
+        guard let source = try sourceRecord(id: sourceID) else { throw VoiceOSError("来源不存在") }
         let statements = try statementTexts(sourceID: sourceID, transcriptVersionID: source.transcriptVersionID)
         let entries = Self.extractedEntities(sourceID: sourceID, transcript: source.transcript ?? "", spans: source.spans, statements: statements)
         try replaceEntities(sourceID: sourceID, entries: entries)

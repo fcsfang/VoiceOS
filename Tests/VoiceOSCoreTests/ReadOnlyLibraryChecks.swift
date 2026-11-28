@@ -281,6 +281,19 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         """)
         try insertSource("feedback-1", name: "反馈一", transcript: "反馈正文")
         try insertSource("feedback-2", name: "反馈二", transcript: "反思正文")
+        try database.execute("""
+        INSERT INTO jobs(id,source_id,input_version_id,stage,config,state)
+        VALUES('feedback-new-job','feedback-1','version-feedback-1','transcription','reprocessed','completed')
+        """)
+        try database.execute("""
+        INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at,current_version_id)
+        VALUES('feedback-new-transcript','feedback-1','asset-feedback-1','version-feedback-1','feedback-new-job',
+               'verbatim','重转写反馈正文','zh-CN','fixture','2026-11-02T00:00:00Z','feedback-current-version')
+        """)
+        try database.execute("""
+        INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at)
+        VALUES('feedback-current-version','feedback-new-transcript',2,'校正后的反馈正文','[]','correction','user','2026-11-03T00:00:00Z')
+        """)
         try insertFeedback("feedback-row-1", actionID: "action-a", sequence: 1, kind: "outcome",
                            sourceID: "feedback-1", relation: "progress", createdAt: "2026-11-05T00:00:00Z")
         try insertFeedback("feedback-row-2", actionID: "action-a", sequence: 2, kind: "reflection",
@@ -308,7 +321,8 @@ final class ReadOnlyLibraryChecks: XCTestCase {
 
         let withText = try XCTUnwrap(try library.action(id: "action-a", includeFeedback: true,
                                                         includeFeedbackText: true))
-        XCTAssertEqual(withText.feedback?.compactMap(\.text), ["反馈正文", "反思正文"])
+        XCTAssertEqual(withText.feedback?.map(\.id), ["feedback-row-1", "feedback-row-2"])
+        XCTAssertEqual(withText.feedback?.compactMap(\.text), ["校正后的反馈正文", "反思正文"])
     }
 
     func testRejectsMissingLibraryAndWrongSchemaVersion() throws {

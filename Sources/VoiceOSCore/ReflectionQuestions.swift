@@ -132,7 +132,8 @@ extension VoiceOSStore {
     public func renameReflectionQuestion(id: String, title: String) throws {
         let row = try reflectionQuestionRow(id), title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title.unicodeScalars.count <= 200 else { throw VoiceOSError("请填写不超过 200 字的长期问题") }
-        if title == row["title"], try sources().first(where: { $0.id == row["title_source_id"] })?.transcript == title { return }
+        if title == row["title"], let titleSourceID = row["title_source_id"],
+           try sourceRecord(id: titleSourceID)?.transcript == title { return }
         let sourceID = try recordUserExpression(title)
         try db.transaction {
             if row["ai_named"] != "1" { try db.execute("DELETE FROM reflection_question_sources WHERE question_id=? AND source_id=?", [id,row["title_source_id"]]) }
@@ -274,7 +275,7 @@ extension VoiceOSStore {
 
     public func linkReflectionQuestionSource(questionID: String, sourceID: String) throws {
         _ = try reflectionQuestionRow(questionID)
-        let source = try sources().first { $0.id == sourceID }
+        let source = try sourceRecord(id: sourceID)
         _ = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: max(1, source?.transcript?.unicodeScalars.count ?? 0))
         guard try db.query("SELECT source_id FROM reflection_question_sources WHERE question_id=? AND source_id=?", [questionID,sourceID]).isEmpty else { return }
         try db.transaction {
@@ -294,7 +295,7 @@ extension VoiceOSStore {
 
     public func linkTopicAction(questionID: String, actionID: String, expectedVersion: Int) throws {
         _ = try reflectionQuestionRow(questionID)
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        guard let action = try self.action(id: actionID, includeHistory: true),
               action.validity == "current", action.version == expectedVersion,
               let claim = try candidateClaim(id: action.claimID),
               claim.reviewVersion == action.claimReviewVersion else { throw VoiceOSError("这项任务或原话已变化，请刷新后再关联") }
@@ -360,7 +361,7 @@ extension VoiceOSStore {
     func validateReflectionQuestionContext(_ context: ReflectionQuestionContext) throws {
         let row = try reflectionQuestionRow(context.id)
         let entries = try reflectionQuestionEntries(questionID: context.id).filter { !$0.unavailableSourceIDs.contains($0.sourceID) }
-        let titleSource = try sources().first { $0.id == context.sourceID }
+        let titleSource = try sourceRecord(id: context.sourceID)
         guard row["version"] == String(context.version), row["title"] == context.title,
               row["title_source_id"] == context.sourceID, (row["ai_named"] == "1" || titleSource?.transcript == context.title),
               try Self.relevanceJSON(entries) == Self.relevanceJSON(context.entries) else { throw VoiceOSError("问题、认识记录或关联资料已变化，请重新进入回顾") }

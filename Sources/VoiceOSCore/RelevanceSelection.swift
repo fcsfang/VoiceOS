@@ -103,10 +103,10 @@ extension VoiceOSStore {
             let cloudQueryAllowed: Bool
             let scalarBudget: Int
         }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         let data = try encoder.encode(Payload(query: query, queryID: queryID, documents: candidates.map(\.document),
                                                destination: destination.rawValue, cloudQueryAllowed: cloudQueryAllowed,
                                                scalarBudget: scalarBudget))
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return Digest.sha256(data)
     }
 }

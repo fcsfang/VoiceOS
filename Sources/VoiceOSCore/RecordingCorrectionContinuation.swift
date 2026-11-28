@@ -1,12 +1,50 @@
 import Foundation
 
+public struct PendingRecordingContextReview: Sendable {
+    public let hasPendingGroup: Bool
+    public let isTranscriptionCorrection: Bool
+    public let sourceIDs: [String]
+    public let externalSourceIDBySource: [String: String]
+}
+
+struct RecordingCorrectionGroup {
+    let ownerID: String
+    let memberIDs: [String]
+    let programmeID: String?
+
+    init?(ownerID: String, presentation: RecordingPresentation?) {
+        guard let memberIDs = presentation?.correctedSourceIDs else { return nil }
+        self.ownerID = ownerID
+        self.memberIDs = memberIDs
+        programmeID = presentation?.recordingContext?.externalSourceID
+    }
+}
+
 extension VoiceOSStore {
+    /// Discover recorded correction groups before loading any transcript.
+    public func pendingRecordingContextReview() throws -> PendingRecordingContextReview {
+        let decoder = JSONDecoder()
+        let presentations = try db.query("SELECT id,presentation_json FROM sources WHERE presentation_json IS NOT NULL")
+            .reduce(into: [String: RecordingPresentation]()) { result, row in
+                result[row["id"]!] = try decoder.decode(RecordingPresentation.self, from: Data(row["presentation_json"]!.utf8))
+            }
+        let groups = presentations.compactMap { RecordingCorrectionGroup(ownerID: $0.key, presentation: $0.value) }
+        let sourceIDs = Set(groups.flatMap(\.memberIDs)).sorted()
+        let externalSourceIDBySource = Dictionary(uniqueKeysWithValues: sourceIDs.compactMap { id -> (String, String)? in
+            guard let externalID = presentations[id]?.recordingContext?.externalSourceID else { return nil }
+            return (id, externalID)
+        })
+        return PendingRecordingContextReview(hasPendingGroup: !groups.isEmpty,
+                                             isTranscriptionCorrection: sourceIDs.contains { presentations[$0]?.recordingUnderstandingIsCorrection == true },
+                                             sourceIDs: sourceIDs, externalSourceIDBySource: externalSourceIDBySource)
+    }
+
     /// Re-enrol the complete personal recording after an explicit transcription
     /// correction. Only membership and old action identities are queued here;
     /// current interpretation still requires normal independent model review.
     @discardableResult
     public func queueCorrectedRecordingUnderstanding(sourceID: String, previousActionIDs: [String]) throws -> [String] {
-        guard let corrected = try sources().first(where: { $0.id == sourceID }), ["audio", "video"].contains(corrected.kind),
+        guard let corrected = try sourceRecord(id: sourceID), ["audio", "video"].contains(corrected.kind),
               let version = corrected.transcriptVersionID,
               try db.query("SELECT id FROM transcript_versions WHERE id=? AND reason='transcription_error' AND actor='user'", [version]).first != nil else {
             throw VoiceOSError("当前录音没有可自动继续的本人明确更正，或文字处理权限已暂停")
@@ -129,7 +167,7 @@ extension VoiceOSStore {
     /// After the ordinary full-text checks finish, update saved physical pair
     /// versions. It cannot enrol sources or authorize an unavailable companion.
     public func refreshCorrectedRecordingContexts(sourceIDs: [String]) throws {
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog = try recordingContextCatalog(sourceIDs: sourceIDs)
         var pairs: [RecordingContext] = []
         for id in Set(sourceIDs) {
             guard let personal = catalog[id], personal.presentation?.correctedSourceIDs != nil,

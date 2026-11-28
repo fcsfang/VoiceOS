@@ -9,7 +9,7 @@ extension VoiceOSStore {
         SELECT f.*,s.state AS source_state,s.feedback_json,v.text
         FROM action_feedback f JOIN actions a ON a.id=f.action_id
         JOIN sources s ON s.id=f.source_id
-        JOIN transcripts t ON t.source_id=s.id JOIN transcript_versions v ON v.id=t.current_version_id
+        \(ActionFeedbackRecord.textJoin)
         WHERE a.kind='task' AND (a.validity='current' OR (a.validity='frozen' AND EXISTS(
             SELECT 1 FROM action_revisions r WHERE r.action_id=a.id AND r.version=a.version
             AND r.command_id LIKE ?))) AND s.state IN ('saved','reference_only')
@@ -19,7 +19,7 @@ extension VoiceOSStore {
             guard (intent?.relation == nil || intent?.relation == "outcome"),
                   intent?.organizedClaimID.map({ claims[$0]?.validity == "current" }) ?? true,
                   let text = row["text"], !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return ActionFeedbackRecord(id: row["id"]!, actionID: row["action_id"]!, actionVersion: Int(row["action_version"]!)!, sourceID: row["source_id"]!, kind: row["kind"]!, text: text, sourceState: row["source_state"]!, createdAt: row["created_at"]!, recordingSourceID: intent?.recordingSourceID, relation: intent?.relation)
+            return ActionFeedbackRecord.read(row, intent: intent)
         }
     }
 

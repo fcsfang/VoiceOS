@@ -30,8 +30,8 @@ extension VoiceOSStore {
         guard try reflectionQuestions().contains(where: { $0.id == questionID }) else { throw VoiceOSError("找不到这个主题") }
         let existing = try reflectionTopicFeedback().first { $0.id == questionID }
         let effectiveMode = snooze ? existing?.mode ?? mode : mode
-        let until = snooze ? ISO8601DateFormatter().string(from: now.addingTimeInterval(7 * 86_400)) : nil
-        let reviewedAt = !snooze && mode == .reduced ? ISO8601DateFormatter().string(from: now) : existing?.reviewedAt
+        let until = snooze ? TimestampFormatting.iso.string(from: now.addingTimeInterval(7 * 86_400)) : nil
+        let reviewedAt = !snooze && mode == .reduced ? TimestampFormatting.iso.string(from: now) : existing?.reviewedAt
         try db.execute("""
         INSERT INTO reflection_topic_feedback(id,question_id,mode,snoozed_until,reviewed_at) VALUES(?,?,?,?,?)
         ON CONFLICT(question_id) DO UPDATE SET mode=excluded.mode,snoozed_until=excluded.snoozed_until,reviewed_at=excluded.reviewed_at
@@ -43,7 +43,7 @@ extension VoiceOSStore {
         try db.execute("""
         INSERT INTO reflection_topic_feedback(id,question_id,mode,reviewed_at) VALUES(?,?,'normal',?)
         ON CONFLICT(question_id) DO UPDATE SET reviewed_at=excluded.reviewed_at
-        """, [UUID().uuidString,questionID,ISO8601DateFormatter().string(from: now)])
+        """, [UUID().uuidString,questionID,TimestampFormatting.iso.string(from: now)])
     }
 
     /// A local, explainable candidate. Age alone never resurfaces arbitrary

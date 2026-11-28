@@ -10,7 +10,7 @@ public actor NativeRetrieval: LocalRetrievalPort {
     private var vectors: [String:[Double]] = [:]
     public init() {}
     private func vector(_ text: String, using embedding: NLEmbedding) -> [Double]? {
-        let key = SHA256.hash(data:Data(text.utf8)).map { String(format:"%02x",$0) }.joined()
+        let key = Digest.sha256(Data(text.utf8))
         if let vector = vectors[key] { return vector }
         guard let vector = embedding.vector(for:text), !vector.isEmpty, vector.allSatisfy(\.isFinite) else { return nil }
         if vectors.count >= 4096 { vectors.removeAll(keepingCapacity:true) }

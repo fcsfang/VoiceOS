@@ -26,7 +26,7 @@ extension VoiceOSStore {
             guard let action = try db.query("SELECT validity,state FROM actions WHERE id=?", [actionID]).first,
                   action["validity"] == "current", action["state"] == "open" else { throw VoiceOSError("行动不存在或已关闭") }
             guard focused.count < 3 else { throw VoiceOSError("最多只能置顶 3 条专注行动") }
-            try db.execute("INSERT INTO action_focus(action_id,created_at) VALUES(?,?)", [actionID, ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO action_focus(action_id,created_at) VALUES(?,?)", [actionID, TimestampFormatting.iso.string(from: Date())])
         }
     }
 }

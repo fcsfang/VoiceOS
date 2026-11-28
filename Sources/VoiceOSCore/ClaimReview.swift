@@ -21,7 +21,7 @@ extension VoiceOSStore {
             guard receipt["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一审阅命令不能更换内容") }
             return Int(receipt["version"]!)!
         }
-        guard let current = try candidateClaims(includeFrozen: true).first(where: { $0.id == claimID }),
+        guard let current = try refreshedCandidateClaim(id: claimID, includeFrozen: true),
               current.validity == "current" else { throw VoiceOSError("候选依据或授权已失效，不能继续认可或更正") }
         guard current.reviewVersion == expectedVersion else { throw VoiceOSError("审阅已更新，请重新读取候选") }
         let text: String, owner: String, decision: String, reason: String
@@ -40,7 +40,7 @@ extension VoiceOSStore {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 2000, note.unicodeScalars.count <= 2000 else { throw VoiceOSError("审阅内容为空或过长") }
         let next = current.reviewVersion + 1
         try db.transaction {
-            try db.execute("INSERT INTO claim_reviews(id,claim_id,version,from_version,decision,statement,ownership,reason,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,claimID,String(next),String(expectedVersion),decision,text,owner,reason,note,commandID,fingerprint,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("INSERT INTO claim_reviews(id,claim_id,version,from_version,decision,statement,ownership,reason,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,claimID,String(next),String(expectedVersion),decision,text,owner,reason,note,commandID,fingerprint,TimestampFormatting.iso.string(from: Date())])
             try db.execute("UPDATE claims SET review_version=? WHERE id=? AND review_version=?", [String(next),claimID,String(expectedVersion)])
             if action == .endorse {
                 // Endorsement changes confidence, not the action's meaning.
@@ -64,7 +64,7 @@ extension VoiceOSStore {
     }
     private static func reviewFingerprint(_ claimID: String, _ expected: Int, _ action: ClaimReviewAction, _ statement: String?, _ ownership: String?, _ note: String) throws -> String {
         let payload: [String: Any] = ["claimID": claimID, "expected": expected, "action": action.rawValue, "statement": statement as Any? ?? NSNull(), "ownership": ownership as Any? ?? NSNull(), "note": note]
-        return SHA256.hash(data: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])).map { String(format: "%02x", $0) }.joined()
+        return Digest.sha256(try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]))
     }
     static func validateStoredClaimReviews(_ db: Database) throws {
         for claim in try db.query("SELECT * FROM claims") {

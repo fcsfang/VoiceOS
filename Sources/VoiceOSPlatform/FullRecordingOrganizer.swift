@@ -86,7 +86,34 @@ public enum FullRecordingOrganizer {
         let arguments = [script.path] + folders.map(\.path) + [reviewTranscriptOnly ? "--review-transcript-only" : "--include-knowledge"]
         var environment = ["PATH": "/opt/homebrew/bin:/usr/bin:/bin", "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"]
         environment.merge(modelEnvironment) { _, new in new }
-        try await run(executable: python, arguments: arguments, log: log, environment: environment)
+        let failureFile = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: failureFile) }
+        environment["VOICEOS_ORGANIZER_FAILURE_FILE"] = failureFile.path
+        do {
+            try await run(executable: python, arguments: arguments, log: log, environment: environment)
+        } catch let error as VoiceOSError {
+            if let data = try? Data(contentsOf: failureFile),
+               let failure = try? JSONDecoder().decode(ServiceFailure.self, from: data),
+               let cause = failure.cause {
+                throw RecordingServiceFailure(cause, message: error.message)
+            }
+            throw error
+        }
+    }
+
+    private struct ServiceFailure: Decodable {
+        enum Kind: String, Decodable { case http, connection }
+        let kind: Kind
+        let status: Int?
+        var cause: RecordingServiceFailure.Cause? {
+            switch kind {
+            case .http:
+                guard let status, (100...599).contains(status) else { return nil }
+                return .http(status)
+            case .connection:
+                return .connection
+            }
+        }
     }
     private static func run(executable: URL, arguments: [String], log: URL, environment: [String: String]? = nil) async throws {
         FileManager.default.createFile(atPath: log.path, contents: nil)

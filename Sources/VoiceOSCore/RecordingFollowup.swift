@@ -184,7 +184,7 @@ private final class FollowupTranscriptScalars {
 
 extension VoiceOSStore {
     private func followupJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encoder = StableJSON.makeEncoder()
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
     private func rememberedThought(_ claim: CandidateClaim, catalog: [String: SourceRecord], scalarsCache: FollowupTranscriptScalars? = nil) throws -> RememberedThought? {
@@ -205,8 +205,7 @@ extension VoiceOSStore {
         let versions = Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0.version) })
         for row in try db.query("""
         SELECT f.action_id,f.action_version,s.id,s.state,s.feedback_json,v.text FROM action_feedback f
-        JOIN sources s ON s.id=f.source_id JOIN transcripts t ON t.source_id=s.id
-        JOIN transcript_versions v ON v.id=t.current_version_id ORDER BY f.sequence
+        JOIN sources s ON s.id=f.source_id \(ActionFeedbackRecord.textJoin) ORDER BY f.sequence
         """) {
             guard row["state"] == "saved", let sourceID = row["id"],catalog[sourceID]?.needsTranscriptionReview != true, let text = row["text"] else { continue }
             let intent = try Self.feedbackIntent(row["feedback_json"])
@@ -226,7 +225,7 @@ extension VoiceOSStore {
             return try rememberedThought(claim, catalog: catalog, scalarsCache: scalarsCache)
         }
         let feedback = try preloaded ?? followupFeedback(actions: actions, claims: claims, catalog: catalog)
-        return try actions.filter { $0.validity == "current" && $0.kind == "task" && $0.intentActor == "user" && $0.state != "dismissed" }.compactMap { action in
+        return try actions.filter { $0.isCurrentTask && $0.intentActor == "user" && $0.state != "dismissed" }.compactMap { action in
             guard let claim = claims[action.claimID], try thought(for: claim) != nil else { return nil }
             return .init(id: action.id, version: action.version, title: action.title, state: action.state, goalID: action.intent?.goalID ?? goalIDByTaskID[action.id], feedback: feedback[action.id] ?? [])
         }.sorted { $0.id < $1.id }
@@ -420,7 +419,7 @@ extension VoiceOSStore {
             guard seen.insert($0.sourceID).inserted else { return false }
             if $0.state == "queued" { return true }
             guard $0.state == "failed", let retryAt = $0.retryAt,
-                  let date = ISO8601DateFormatter().date(from: retryAt) else { return false }
+                  let date = TimestampFormatting.iso.date(from: retryAt) else { return false }
             return date <= now
         }.reversed()
     }
@@ -480,9 +479,11 @@ extension VoiceOSStore {
               current.contentDigest == context.contentDigest else { throw VoiceOSError("上下文来源或逐字稿已变化，请重新准备") }
     }
     private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String) throws {
-        try followupContinuousIsCurrent(input, sourceID: sourceID, catalog: try sources(), expressions: try recordingExpressions())
+        let catalog = try sourceCatalog()
+        try followupContinuousIsCurrent(input, sourceID: sourceID, catalog: catalog,
+                                       expressions: RecordingExpression.current(in: catalog))
     }
-    private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String, catalog: [SourceRecord], expressions: [RecordingExpression]) throws {
+    private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String, catalog: [String: SourceRecord], expressions: [RecordingExpression]) throws {
         guard let input, Self.isDigestContext(input.context) else {
             try validateContinuousRecordingContext(input, sourceID: sourceID, catalog: catalog, expressions: expressions); return
         }
@@ -503,6 +504,14 @@ extension VoiceOSStore {
     /// transcript and continuous-expression context is validated once, instead
     /// of once per receipt.
     public func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]? = nil, claimRows preloadedClaims: [CandidateClaim]? = nil, actionRows preloadedActions: [ActionRecord]? = nil, latest preloadedLatest: [String: [CandidateClaim]]? = nil) throws -> [String: RecordingFollowupValidity] {
+        try recordingFollowupValidities(receipts, catalogRows: preloadedCatalog, claimRows: preloadedClaims,
+                                        actionRows: preloadedActions, latest: preloadedLatest, expressions: nil)
+    }
+
+    func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]?,
+                                     claimRows preloadedClaims: [CandidateClaim]?, actionRows preloadedActions: [ActionRecord]?,
+                                     latest preloadedLatest: [String: [CandidateClaim]]?,
+                                     expressions preloadedExpressions: [RecordingExpression]?) throws -> [String: RecordingFollowupValidity] {
         let completed = receipts.filter { $0.state == "completed" && $0.result != nil }
         guard !completed.isEmpty else { return [:] }
         let catalogRows: [SourceRecord]
@@ -528,7 +537,13 @@ extension VoiceOSStore {
         let actions: [String: ActionRecord] = Dictionary(uniqueKeysWithValues: actionRows.map { ($0.id, $0) })
         let policies = Dictionary(catalogRows.map { ($0.id, $0.policyVersion) }, uniquingKeysWith: { first, _ in first })
         let feedback = try StartupTrace.measure("validity.feedback") { try followupFeedback(actions: actionRows, claims: claims, catalog: catalog) }
-        let expressions = try StartupTrace.measure("validity.expressions") { try recordingExpressions() }
+        let expressions = try StartupTrace.measure("validity.expressions") {
+            if let preloadedExpressions { return preloadedExpressions }
+            // A caller can preload a subset. Only a store-owned full catalog
+            // can establish the complete set of workflow groups.
+            if preloadedCatalog != nil { return try recordingExpressions() }
+            return RecordingExpression.current(in: catalog)
+        }
         let scalarsCache = FollowupTranscriptScalars()
         var rememberedCache: [String: RememberedThought?] = [:]
         func remembered(_ claim: CandidateClaim) throws -> RememberedThought? {
@@ -552,7 +567,7 @@ extension VoiceOSStore {
                 key = sourceID + "|" + input.expressionID + "|" + input.digest + "|" + ((try? Self.relevanceJSON(input.policies)) ?? "")
             } else { key = sourceID + "|none" }
             if let cached = continuousValidity[key] { return cached }
-            let current = (try? followupContinuousIsCurrent(input, sourceID: sourceID, catalog: catalogRows, expressions: expressions)) != nil
+            let current = (try? followupContinuousIsCurrent(input, sourceID: sourceID, catalog: catalog, expressions: expressions)) != nil
             continuousValidity[key] = current
             return current
         }
@@ -707,7 +722,7 @@ extension VoiceOSStore {
     }
     static func conformanceRetryAt(now: Date = Date()) -> String { followupRetryAt(now: now, after: 60) }
     static func followupRetryAt(now: Date = Date(), after seconds: TimeInterval) -> String {
-        ISO8601DateFormatter().string(from: now.addingTimeInterval(seconds))
+        TimestampFormatting.iso.string(from: now.addingTimeInterval(seconds))
     }
     private static func isTransientFollowupError(_ failure: Error) -> Bool {
         let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure
@@ -724,13 +739,13 @@ extension VoiceOSStore {
         let command = "goal-step:" + goalID + ":" + receipt.id + ":" + Self.relevanceHash(Data((step.title + "\n" + step.condition).utf8))
         if step.existingTaskID.isEmpty, validity.sourceCurrent,
            let id = try db.query("SELECT id FROM actions WHERE command_id=?", [command]).first?["id"],
-           let existing = try actions(includeHistory: true).first(where: { $0.id == id }),
+           let existing = try self.action(id: id, includeHistory: true),
            existing.validity == "current", existing.state == "open", existing.intent?.goalID == goalID {
             return id
         }
         guard validity.goalIsCurrent(goalID) else { throw VoiceOSError("这个目标或阶段任务已变化，请更新建议") }
         if !step.existingTaskID.isEmpty {
-            guard let task = try actions(includeHistory: true).first(where: { $0.id == step.existingTaskID }), task.validity == "current", task.state == "open" else { throw VoiceOSError("这个步骤已完成或发生变化，请刷新目标建议") }
+            guard let task = try self.action(id: step.existingTaskID, includeHistory: true), task.validity == "current", task.state == "open" else { throw VoiceOSError("这个步骤已完成或发生变化，请刷新目标建议") }
             return step.existingTaskID
         }
         let id = try createAction(claimID: goal.thought.id, expectedClaimReviewVersion: goal.thought.reviewVersion, title: step.title, kind: .task, note: step.condition, commandID: command)

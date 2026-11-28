@@ -42,11 +42,11 @@ extension VoiceOSStore {
                            destination: identity.destination)
     }
 
-    static func processingNow() -> String { ISO8601DateFormatter().string(from: Date()) }
+    static func processingNow() -> String { TimestampFormatting.iso.string(from: Date()) }
 
     static func processingSnapshotDigest(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        return SHA256.hash(data: try encoder.encode(snapshot)).map { String(format: "%02x", $0) }.joined()
+        let encoder = StableJSON.makeEncoder()
+        return Digest.sha256(try encoder.encode(snapshot))
     }
 
     // The command describes a scope, not the randomly generated preparation ID.
@@ -358,7 +358,7 @@ extension VoiceOSStore {
             // schema25/v24 before this fix used the full snapshot hash as both fields.
             let semanticFingerprint = try Self.processingCommandFingerprint(snapshot)
             guard row["command_fingerprint"] == row["snapshot_digest"] || row["command_fingerprint"] == semanticFingerprint else { throw VoiceOSError("处理命令摘要不一致") }
-            let contextEncoder = JSONEncoder(); contextEncoder.outputFormatting = [.sortedKeys]
+            let contextEncoder = StableJSON.makeEncoder()
             let contextDigest = Self.relevanceHash(try contextEncoder.encode(snapshot.context.sources))
             guard snapshot.context.sources.count == 1, snapshot.context.contentDigest == contextDigest, snapshot.context.sources[0].sourceID == sourceID,
                   snapshot.context.sources[0].sourceVersionID == row["source_version_id"], snapshot.context.sources[0].transcriptVersionID == row["transcript_version_id"],

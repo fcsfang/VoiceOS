@@ -21,7 +21,7 @@ extension ControlCenter {
     }
     func claimStatement(claimID:String) async throws -> String {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
-        guard let claim = try await store.candidateClaims().first(where: { $0.id == claimID }) else { throw VoiceOSError("观点不存在") }
+        guard let claim = try await store.refreshedCandidateClaim(id: claimID) else { throw VoiceOSError("观点不存在") }
         return claim.statement
     }
 }

@@ -75,15 +75,7 @@ extension VoiceOSStore {
     func reflectionContents(start: Date, end: Date, timeZoneID: String, selectedSourceIDs: Set<String>?) throws -> ConversationReflectionFocus {
         guard ready, start < end, TimeZone(identifier: timeZoneID) != nil else { throw VoiceOSError("回顾时间范围无效") }
         let claims = try candidateClaims(), byID = Dictionary(uniqueKeysWithValues: claims.map { ($0.id, $0) })
-        // Retaining a discussion result adds knowledge; it must not replace the
-        // original understanding of every recording included in that discussion.
-        var latestAttempt: [String: String] = [:]
-        for row in try db.query("""
-        SELECT i.source_id,a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-        WHERE a.state='completed' AND \(Self.claimExtractionAttemptFilter)
-        AND a.provider!='discussion_derivation' AND substr(a.provider,1,19)!='discussion_outcome:'
-        ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC
-        """) where latestAttempt[row["source_id"]!] == nil { latestAttempt[row["source_id"]!] = row["id"]! }
+        let latestAttempt = try latestClaimProducerIDs(scope: .reflection)
         let claimAttempts = Dictionary(uniqueKeysWithValues: try db.query("SELECT id,attempt_id FROM claims").map { ($0["id"]!, $0["attempt_id"]!) })
         let sources = try sources().filter { ["saved", "reference_only"].contains($0.state) && !($0.transcript ?? "").isEmpty }
         let catalog = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -153,12 +145,12 @@ extension VoiceOSStore {
         try db.query("""
         SELECT f.*,s.state AS source_state,s.feedback_json,v.text
         FROM action_feedback f JOIN actions a ON a.id=f.action_id JOIN sources s ON s.id=f.source_id
-        JOIN transcripts t ON t.source_id=s.id JOIN transcript_versions v ON v.id=t.current_version_id
+        \(ActionFeedbackRecord.textJoin)
         WHERE a.validity='current' AND s.state IN ('saved','reference_only') ORDER BY f.created_at,f.sequence
         """).compactMap { row in
             let intent = try Self.feedbackIntent(row["feedback_json"])
             guard intent?.organizedClaimID.map({ claims[$0] != nil }) ?? true else { return nil }
-            return ActionFeedbackRecord(id: row["id"]!, actionID: row["action_id"]!, actionVersion: Int(row["action_version"]!)!, sourceID: row["source_id"]!, kind: row["kind"]!, text: row["text"]!, sourceState: row["source_state"]!, createdAt: row["created_at"]!, recordingSourceID: intent?.recordingSourceID, relation: intent?.relation)
+            return ActionFeedbackRecord.read(row, intent: intent)
         }
     }
 
@@ -186,33 +178,64 @@ extension VoiceOSStore {
     // somebody happens to open the original review conversation.
     func validateReflectionBasis(_ focus: ConversationReflectionFocus) throws {
         if let question = focus.question { try validateReflectionQuestionContext(question) }
-        for thought in focus.thoughts {
-            guard let row = try db.query("""
-            SELECT c.review_version,c.validity,c.statement,c.ownership,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision,x.state
-            FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id
-            LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version WHERE c.id=?
-            """, [thought.claimID]).first,
+        if !focus.thoughts.isEmpty {
+            let ids = try Self.relevanceJSON(focus.thoughts.map(\.claimID))
+            let rows = try db.query("""
+                SELECT c.id,c.review_version,c.validity,c.statement,c.ownership,
+                       r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision,x.state
+                FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id
+                LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version
+                WHERE c.id IN (SELECT value FROM json_each(?))
+                """, [ids])
+            let claims = Dictionary(uniqueKeysWithValues: rows.map { ($0["id"]!, $0) })
+            for thought in focus.thoughts {
+                guard let row = claims[thought.claimID],
                   row["validity"] == "current", row["state"] == "current", row["decision"] != "rejected",
                   row["review_version"] == String(thought.reviewVersion),
                   (row["reviewed_statement"] ?? row["statement"]) == thought.summary,
                   (row["reviewed_ownership"] ?? row["ownership"]) == thought.ownership else { throw VoiceOSError("回顾观点已变化，请重新进入这个周期") }
+            }
         }
+        guard !focus.tasks.isEmpty else { return }
+        let ids = try Self.relevanceJSON(focus.tasks.map(\.actionID))
+        let taskRows = try db.query("""
+            SELECT id,validity,version,state,title,claim_id FROM actions
+            WHERE id IN (SELECT value FROM json_each(?))
+            """, [ids])
+        let tasks = Dictionary(uniqueKeysWithValues: taskRows.map { ($0["id"]!, $0) })
+        let feedbackRows = try db.query("""
+            SELECT f.*,s.state AS source_state,s.feedback_json,v.text,c.validity AS organized_claim_validity
+            FROM action_feedback f JOIN sources s ON s.id=f.source_id
+            \(ActionFeedbackRecord.textJoin)
+            LEFT JOIN claims c ON c.id=CASE WHEN json_valid(s.feedback_json)
+                                            THEN json_extract(s.feedback_json,'$.organizedClaimID') END
+            WHERE f.action_id IN (SELECT value FROM json_each(?)) AND s.state IN ('saved','reference_only')
+            ORDER BY f.action_id,f.created_at,f.sequence
+            """, [ids])
+        let actualByTask = Dictionary(grouping: feedbackRows) { $0["action_id"]! }
+        let capturedByTask = Dictionary(grouping: focus.outcomes, by: \.actionID)
         for task in focus.tasks {
-            guard let row = try db.query("SELECT * FROM actions WHERE id=?", [task.actionID]).first,
+            guard let row = tasks[task.actionID],
                   row["validity"] == "current", row["version"] == String(task.version), row["state"] == task.state,
                   row["title"] == task.title, row["claim_id"] == task.claimID else { throw VoiceOSError("回顾任务已变化，请重新进入这个周期") }
-            let actual = try db.query("""
-            SELECT f.*,s.state AS source_state,s.feedback_json,v.text
-            FROM action_feedback f JOIN sources s ON s.id=f.source_id
-            JOIN transcripts t ON t.source_id=s.id JOIN transcript_versions v ON v.id=t.current_version_id
-            WHERE f.action_id=? AND s.state IN ('saved','reference_only') ORDER BY f.created_at,f.sequence
-            """, [task.actionID]).compactMap { row -> ActionFeedbackRecord? in
+            let actual = try (actualByTask[task.actionID] ?? []).compactMap { row -> ActionFeedbackRecord? in
                 let intent = try Self.feedbackIntent(row["feedback_json"])
-                if let id = intent?.organizedClaimID, try db.query("SELECT validity FROM claims WHERE id=?", [id]).first?["validity"] != "current" { return nil }
-                return ActionFeedbackRecord(id: row["id"]!, actionID: row["action_id"]!, actionVersion: Int(row["action_version"]!)!, sourceID: row["source_id"]!, kind: row["kind"]!, text: row["text"]!, sourceState: row["source_state"]!, createdAt: row["created_at"]!, recordingSourceID: intent?.recordingSourceID, relation: intent?.relation)
+                if intent?.organizedClaimID != nil, row["organized_claim_validity"] != "current" { return nil }
+                return ActionFeedbackRecord.read(row, intent: intent)
             }
-            guard try Self.relevanceJSON(actual) == Self.relevanceJSON(focus.outcomes.filter { $0.actionID == task.actionID }) else { throw VoiceOSError("回顾结果已变化，请重新进入这个周期") }
+            guard Self.matchesSavedFeedback(actual, captured: capturedByTask[task.actionID] ?? []) else { throw VoiceOSError("回顾结果已变化，请重新进入这个周期") }
         }
+    }
+
+    private static func matchesSavedFeedback(_ actual: [ActionFeedbackRecord], captured: [ActionFeedbackRecord]) -> Bool {
+        if actual == captured { return true }
+        // Old snapshots could contain one row per transcription. Retain the
+        // snapshot when every current row is still present as captured evidence.
+        let rowsByID = Dictionary(grouping: captured, by: \.id)
+        guard rowsByID.count < captured.count, rowsByID.count == actual.count else { return false }
+        var seen = Set<String>()
+        let capturedOrder = captured.compactMap { seen.insert($0.id).inserted ? $0.id : nil }
+        return capturedOrder == actual.map(\.id) && actual.allSatisfy { rowsByID[$0.id]?.contains($0) == true }
     }
 
     func validateReflectionFocus(_ focus: ConversationReflectionFocus) throws {
@@ -238,15 +261,20 @@ extension VoiceOSStore {
             }
         }
         let feedback = try reflectionFeedback(claims: claims)
+        let hasLegacyDuplicates = Set(focus.outcomes.map(\.id)).count < focus.outcomes.count
         for task in focus.tasks {
             let results = feedback.filter { $0.actionID == task.actionID }
+            var seen = Set<String>()
+            let capturedSources = hasLegacyDuplicates
+                ? task.feedbackSourceIDs.filter { seen.insert($0).inserted }
+                : task.feedbackSourceIDs
             guard let action = actions[task.actionID], action.validity == "current", action.version == task.version, action.title == task.title, action.state == task.state,
                   action.claimID == task.claimID,
                   (action.intent?.intentType ?? action.kind) == task.kind, action.intent?.goalID == task.goalID,
-                  results.map(\.sourceID) == task.feedbackSourceIDs else { throw VoiceOSError("回顾中的任务或结果已更新，请重新进入这个周期") }
+                  results.map(\.sourceID) == capturedSources else { throw VoiceOSError("回顾中的任务或结果已更新，请重新进入这个周期") }
         }
         let ids = Set(focus.tasks.map(\.actionID))
-        guard try Self.relevanceJSON(feedback.filter { ids.contains($0.actionID) }) == Self.relevanceJSON(focus.outcomes) else { throw VoiceOSError("回顾中的实际反馈已更新，请重新进入这个周期") }
+        guard Self.matchesSavedFeedback(feedback.filter { ids.contains($0.actionID) }, captured: focus.outcomes) else { throw VoiceOSError("回顾中的实际反馈已更新，请重新进入这个周期") }
         for completion in focus.completions {
             guard focus.contains(timestamp: completion.revision.createdAt),
                   let current = try actionHistory(actionID: completion.actionID).first(where: { $0.id == completion.id }),

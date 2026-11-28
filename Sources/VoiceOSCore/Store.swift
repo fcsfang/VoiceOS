@@ -236,12 +236,24 @@ public actor VoiceOSStore {
             throw error
         }
     }
+    // A source is one material even if an older library stored several jobs for it.
+    // Keep a completed text visible while another job is queued. For competing
+    // texts, preserve the first job in the existing source/configuration index.
+    private static let sourceTranscriptJoin = """
+        FROM sources s LEFT JOIN jobs j ON j.id=(
+            SELECT candidate.id FROM jobs candidate
+            LEFT JOIN transcripts candidate_text ON candidate_text.job_id=candidate.id
+            WHERE candidate.source_id=s.id AND candidate.stage='transcription' AND candidate.input_version_id=s.version_id
+            ORDER BY candidate_text.current_version_id IS NULL,candidate.config LIMIT 1
+        )
+        LEFT JOIN transcripts t ON t.job_id=j.id
+        """
+
     private static let sourceSelect = """
         SELECT s.id,s.asset_id,s.name,s.state,s.kind,s.created_at,s.expected_bytes,s.duration,s.error,s.relative_path,
                s.local_only,s.policy_version,s.origin,s.speaker,s.feedback_json,s.timezone,s.presentation_json,
                j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json,v.reason AS transcript_version_reason
-        FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
-        LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id
+        \(sourceTranscriptJoin) LEFT JOIN transcript_versions v ON v.id=t.current_version_id
         """
     /// Row-change counter for this connection; stable means no writes happened,
     /// so a periodic full reload can skip re-reading the whole library.
@@ -249,12 +261,31 @@ public actor VoiceOSStore {
     public func sources() throws -> [SourceRecord] {
         try db.query(Self.sourceSelect + " ORDER BY s.created_at DESC,s.id").map(Self.sourceRecord)
     }
+    func sourceCatalog() throws -> [String: SourceRecord] {
+        Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
     /// Targeted read for callers that hold ids; the full-table variant decodes
     /// every transcript and is far too heavy to run once per checked id.
     public func sourceRecords(ids: [String]) throws -> [SourceRecord] {
         guard !ids.isEmpty else { return [] }
         let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
         return try db.query(Self.sourceSelect + " WHERE s.id IN (\(marks))", ids).map(Self.sourceRecord)
+    }
+
+    public func sourceRecord(id: String) throws -> SourceRecord? {
+        try sourceRecords(ids: [id]).first
+    }
+
+    func sourceTranscriptRevisions(ids: [String]) throws -> [String: (versionID: String?, policyVersion: Int, localOnly: Bool)] {
+        guard !ids.isEmpty else { return [:] }
+        let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let rows = try db.query("""
+            SELECT s.id,t.current_version_id,s.policy_version,s.local_only
+            \(Self.sourceTranscriptJoin) WHERE s.id IN (\(marks))
+            """, ids)
+        return Dictionary(uniqueKeysWithValues: rows.map { row in
+            (row["id"]!, (row["current_version_id"], Int(row["policy_version"]!)!, row["local_only"] != "0"))
+        })
     }
     private static func sourceRecord(_ row: [String: String]) throws -> SourceRecord {
         let feedback = try feedbackIntent(row["feedback_json"])
@@ -334,16 +365,32 @@ public actor VoiceOSStore {
             WHERE t.job_id=jobs.id AND length(trim(v.text, ' ' || char(9) || char(10) || char(13)))=0)))
         """, [sourceID,sourceID])
     }
+
+    private static let queuedTranscriptionJobs = """
+        FROM jobs j JOIN sources s ON s.id=j.source_id
+        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id
+        """
+
+    public func queuedTranscriptionSourceIDs() throws -> [String] {
+        try db.query("""
+            SELECT DISTINCT s.id,s.created_at \(Self.queuedTranscriptionJobs)
+            ORDER BY s.created_at DESC,s.id
+            """).map { $0["id"]! }
+    }
+
     public func processTranscriptions(using speech: any SpeechPort, sourceIDs: [String]? = nil) async throws {
         guard ready, !processing else { return }
         let backend = speech.backendIdentity
         guard !backend.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, backend.utf8.count <= 160, !backend.contains("\n"), !backend.contains("\r") else { throw VoiceOSError("转写端口身份无效") }
+        guard sourceIDs?.isEmpty != true else { return }
+        let scope = sourceIDs == nil ? "" : " AND j.source_id IN (SELECT value FROM json_each(?))"
+        let bindings = try sourceIDs.map { [try Self.relevanceJSON($0)] } ?? []
         processing = true
         defer { processing = false }
         while let row = try db.query("""
-        SELECT j.*,s.asset_id,s.relative_path FROM jobs j JOIN sources s ON s.id=j.source_id
-        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id ORDER BY s.created_at
-        """).first(where: { sourceIDs?.contains($0["source_id"]!) ?? true }) {
+        SELECT j.id,j.source_id,j.input_version_id,s.asset_id \(Self.queuedTranscriptionJobs)\(scope)
+        ORDER BY s.created_at,j.rowid LIMIT 1
+        """, bindings).first {
             let job = row["id"]!; let source = row["source_id"]!; let lease = UUID().uuidString
             try db.execute("UPDATE jobs SET state='running',config=?,lease_token=?,attempts=attempts+1 WHERE id=?", [backend,lease,job])
             do {
@@ -364,20 +411,12 @@ public actor VoiceOSStore {
                         try db.execute("UPDATE jobs SET state='blocked',lease_token=NULL,error=? WHERE id=?", [SourceRecord.emptyTranscriptJobError,job])
                         return
                     }
-                    let spans = String(decoding: try JSONEncoder().encode(result.spans), as: UTF8.self)
-                    if let existing = try db.query("SELECT id,version FROM transcripts WHERE job_id=?", [job]).first {
-                        let next = Int(existing["version"]!)! + 1, versionID = UUID().uuidString
-                        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,?,?,?,'original','system',?)", [versionID,existing["id"],String(next),text,spans,Self.now()])
-                        try db.execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [versionID,String(next),existing["id"]])
+                    if let existingID = try db.query("SELECT id FROM transcripts WHERE job_id=?", [job]).first?["id"] {
+                        _ = try db.appendTranscriptVersion(transcriptID: existingID,
+                                                           speech: result, reason: .original, createdAt: Self.now())
                     } else {
-                        let transcriptID = UUID().uuidString
-                        try db.execute("""
-                        INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at)
-                        VALUES(?,?,?,?,?,'verbatim',?,'zh_CN',?,?)
-                        """, [transcriptID,source,row["asset_id"],row["input_version_id"],job,text,backend,Self.now()])
-                        let versionID = UUID().uuidString
-                        try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,transcriptID,text,spans,Self.now()])
-                        try db.execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,transcriptID])
+                        try db.createTranscript(sourceID: source, assetID: row["asset_id"]!, inputVersionID: row["input_version_id"]!,
+                                                jobID: job, speech: result, backend: backend, createdAt: Self.now())
                     }
                     try db.execute("UPDATE jobs SET state='completed' ,lease_token=NULL,error=NULL WHERE id=?", [job])
                     try checkpoint(.transcriptUncommitted)

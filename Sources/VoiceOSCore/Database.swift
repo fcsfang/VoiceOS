@@ -31,6 +31,7 @@ final class Database {
         try execute("CREATE INDEX IF NOT EXISTS context_inputs_source_context ON context_inputs(source_id,context_id)")
         try execute("CREATE INDEX IF NOT EXISTS model_attempts_context_state ON model_attempts(context_id,state,producer_sequence)")
         try execute("CREATE INDEX IF NOT EXISTS claims_attempt ON claims(attempt_id)")
+        try execute("CREATE INDEX IF NOT EXISTS transcripts_source_created ON transcripts(source_id,created_at)")
         try ensureSearchTriggers()
     }
 
@@ -1590,11 +1591,8 @@ final class Database {
     }
     func backfillTranscriptVersions() throws {
         for row in try query("SELECT * FROM transcripts WHERE current_version_id IS NULL") {
-            let versionID = UUID().uuidString
-            let speech = SpeechText(text: row["text"]!)
-            let spans = String(decoding: try JSONEncoder().encode(speech.spans), as: UTF8.self)
-            try execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,row["id"],row["text"],spans,row["created_at"]])
-            try execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,row["id"]])
+            _ = try appendTranscriptVersion(transcriptID: row["id"]!, speech: SpeechText(text: row["text"]!),
+                                            reason: .original, createdAt: row["created_at"]!)
         }
     }
 }
