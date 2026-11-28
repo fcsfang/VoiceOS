@@ -27,8 +27,7 @@ private final class NoModelRedirect: NSObject, URLSessionTaskDelegate, @unchecke
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 public struct DirectModelHTTPTransport: ModelHTTPTransport {
-    private let diagnostics: ModelHTTPDiagnostics?
-    public init(diagnostics: ModelHTTPDiagnostics? = nil) { self.diagnostics=diagnostics }
+    public init() {}
     public func send(_ request: URLRequest) async throws -> ModelHTTPReply {
         let settings = URLSessionConfiguration.ephemeral
         // Honor a bounded driver deadline; a session-wide 60s cap otherwise
@@ -39,25 +38,14 @@ public struct DirectModelHTTPTransport: ModelHTTPTransport {
         settings.httpCookieStorage = nil; settings.urlCredentialStorage = nil; settings.urlCache = nil
         let session = URLSession(configuration: settings, delegate: NoModelRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        let start=Date()
-        var headersSeconds: Double?,firstByteSeconds: Double?,status: Int?
         var body = Data()
-        do {
-            let (bytes, response) = try await session.bytes(for: request)
-            headersSeconds=Date().timeIntervalSince(start)
-            guard let http = response as? HTTPURLResponse else { throw VoiceOSError("模型传输未返回 HTTP 状态") }
-            status=http.statusCode
-            for try await byte in bytes {
-                if firstByteSeconds == nil { firstByteSeconds=Date().timeIntervalSince(start) }
-                guard body.count < 16_777_216 else { throw ModelPortFailure.rejected("响应超过 16 MiB 限制") }
-                body.append(byte)
-            }
-            await diagnostics?.append(.init(deadlineSeconds:deadline,requestBytes:request.httpBody?.count ?? 0,headersSeconds:headersSeconds,firstBodyByteSeconds:firstByteSeconds,totalSeconds:Date().timeIntervalSince(start),responseBytes:body.count,httpStatus:status,result:"completed",urlErrorCode:nil))
-            return ModelHTTPReply(status: http.statusCode, body: body)
-        } catch {
-            await diagnostics?.append(.init(deadlineSeconds:deadline,requestBytes:request.httpBody?.count ?? 0,headersSeconds:headersSeconds,firstBodyByteSeconds:firstByteSeconds,totalSeconds:Date().timeIntervalSince(start),responseBytes:body.count,httpStatus:status,result:Task.isCancelled ? "cancelled":"failed",urlErrorCode:(error as? URLError)?.code.rawValue))
-            throw error
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw VoiceOSError("模型传输未返回 HTTP 状态") }
+        for try await byte in bytes {
+            guard body.count < 16_777_216 else { throw ModelPortFailure.rejected("响应超过 16 MiB 限制") }
+            body.append(byte)
         }
+        return ModelHTTPReply(status: http.statusCode, body: body)
     }
 }
 

@@ -49,9 +49,25 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 | A07 · 已统一模型请求退避 | 模型同时使用非流式 HTTP、SSE、Python 全文整理及 Hindsight；多处重复错误摘要与重试逻辑。 | 逐一识别同协议同语义的重复。保留传输差异、模型结果未知和可重试的区别，保持凭据和个人正文不进入诊断。 |
 | A08 | Swift tests 已有 121 个文件，另有 Python 流程测试、真实 CLI 验证配方和应用打包脚本；README 的部分架构与行为基线已滞后。 | 先证明正常入口覆盖及兼容性，再收敛重复验证；把新确立的边界检查接入现有本地打包入口。 |
 | A09 | Apple 权限、云端文字处理许可、模型密钥、记忆身份和消息凭据的合法使用条件分别落在系统、业务状态或单独配置文件。 | 核对各授权的写端、读端与恢复入口；只统一实现方式相同的能力。涉及保存范围或默认许可变更时单列待确认。 |
-| A10 | 启动/HTTP 诊断、持久化业务错误和用户提示各有写端；监测、整理、备份的错误分类缺少同处的调用方地图。 | 先确认现有使用者及内容隐私要求，能复用的分类统一，允许不同输出渠道保留不同信息。 |
+| A10 · 已建立渠道地图并删除无读端诊断 | 启动/HTTP 诊断、持久化业务错误和用户提示各有写端；监测、整理、备份的错误分类缺少同处的调用方地图。`ModelHTTPDiagnostics` 只有写端，没有读者。 | 已核对五类渠道与三类重试语义，未发现可安全合并的重复分类；无读端的 `ModelHTTPDiagnostics` 连同传输层计时一起删除。字符串分类点与子进程错误载体记录在下方地图。 |
 | A11 · 已统一行动时间与只读投影 | 部分搜索、外部 CLI、工作区和详情各自读取行动与材料；日期、展示标题和有效性已部分有共享解析。只读 CLI 的列表与详情曾各自重复行动 SQL、到期/计划/提醒查询。 | 从同一个材料或行动沿正常入口核对重复投影，避免把分页与轻量快照强行合并。CLI 列表与详情共用一份投影，隐私字段按需投影。unknown 链接语义待确认。 |
 | A12 | 构建、验证和运维入口包括 SwiftPM、`scripts/app`、`scripts/tests`、`voiceos-check`、`voiceos-cli` 和重启脚本。SwiftPM 声明包目标，Python 负责签名与发布资源。 | 保持一个产品打包入口，核对资产与运行脚本的来源，按执行路径找重叠；现有隔离库和启动安全验证一并保留。 |
+
+## 错误分类与输出渠道（A10）
+
+| 渠道 | 写端 | 读端 | 内容与隐私约束 |
+| --- | --- | --- | --- |
+| 模型 HTTP 诊断 | 无。`ModelHTTPDiagnostics` 只写不读，已随 A10 删除 | 无 | 模型请求成败由端口错误与调用方状态承载；如未来需要观测，先证明有读端再建载体。 |
+| 用户提示 | 各功能在语义所在处构造中文文案（`VoiceOSError`、`ModelDeadlineExceeded`、`RecordingFollowupTransientError` 等） | SwiftUI 状态行、处理页、通知；不解析文案 | 可含材料标题与下一步建议，不含密钥与服务端正文。 |
+| 持久化业务状态 | 状态机 outcome（`RecordingInboxOutcome` 的 completed/retryableFailure/deferred/needsAttention）、跟进 evidence、提醒回读异常、模型尝试记录 | 处理页、启动续跑、CLI `status` | 重启后可续跑与核对；分类作为状态保存，诊断正文不进长期库。 |
+| 子进程与脚本日志 | Python 整理、转写、QQ 采集的处理日志（如录音目录的 `处理日志.txt`）与 stderr | 处理页错误行、`voiceos-check`、人工排查 | 日志留在资料库或临时目录；不含模型密钥；正文仅限该功能的处理输入。 |
+| CLI 输出 | `voiceos-cli` 的 stdout JSON 与 stderr 错误 JSON | 外部自动化 | stdout 只输出 JSON；退出码 0/1/2/3/4/5 分层；参数正文不回显。 |
+
+重试语义分三类，保持分离：
+
+- 同一请求的线级重试：`ResponsesRetry` 负责 429/502/503/504 与瞬时连接错误的 5s/15s 退避，最多三次；写端为 `ResponsesModelPort` 与 `ResponsesRecordingFollowupPort`（后者因结构修复会更换 payload，保留自有循环并复用同一延迟与预算）。
+- 操作级结果分类：录音入口把错误归为 deferred/retryableFailure/needsAttention；401/403 需用户处理，408/429/5xx 可重试。错误只在子进程消息边界上可见，`HTTP (\d{3})` 是唯一的字符串解析点（记录在案；升级为结构化载体属于跨 Python/Swift 变更，单列候选）。
+- 推送投递：`MonitorPushComposer.validateResponse` 把非 2xx 视为可稍后重试，`MonitorPush` 负责网络错误文案；投递失败由监测循环重投，与模型重试语义不同，保留。
 
 ## 决策记录
 
@@ -72,6 +88,8 @@ SwiftPM 的 targets 无模块循环。命令行到应用的写回走 URL 协议�
 - A05 通过全源引用检查确认旧 DiscussionView 和 WorkspaceTopicTile 没有运行时入口，直接删除。现有讨论使用 WorkspaceDiscussionView，当前主题页继续走正在使用的阅读与导航实现。历史工作记录保留。两种仍在用的 Workspace 行组件各自需要核对交互契约。
 
 - A11 只读 CLI 的列表与详情原各自拼一份行动 SQL，详情再逐项查计划、提醒与到期。改为共享 `actionColumns`/`actionTables` 与 `actionSummary`，一次 JOIN 取齐，详情从同一行构造；删除 `resolvedDue`、`scheduleRow`、`scheduleRecord`、`reminderRecord`。隐私选项由「先查后裁」改为「按需投影列」。用真实副本逐字对照列表与三种详情组合的 JSON，确认对外契约不变；unknown 链接语义继续留在待确认。
+
+- A10 盘点五类输出渠道后发现 `ModelHTTPDiagnostics` 只有写端、没有读者，连同传输层的计时变量一起删除。三类重试语义（同请求线级、操作级结果、推送投递）比较过合并，因预算、payload 与呈现不同而保留分离；子进程字符串分类点记录为后续候选，不在本批改动。
 
 ## 待确认的兼容性取舍
 
