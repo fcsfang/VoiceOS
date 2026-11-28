@@ -62,6 +62,13 @@ public struct TranscriptionReview: Codable, Sendable {
     public var scope: String? = nil
     public var full_text_independent_passes: Int? = nil
     public var review_method: String? = nil
+    static func requiresFullTextReview(kind: String, backend: String?, hasText: Bool,
+                                       spans: [TranscriptSpan], review: TranscriptionReview?) -> Bool {
+        ["audio", "video"].contains(kind) && backend?.hasPrefix("Qwen3-ASR") == true &&
+            hasText && !spans.isEmpty && spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } &&
+            review?.isCompleteFullTextReview != true
+    }
+
     public var isCompleteFullTextReview: Bool {
         let receipts = (response_ids ?? []).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard completed &&
@@ -153,15 +160,10 @@ public enum MaterialDisplayTitle {
 }
 
 public extension SourceRecord {
-    var recordingExpression: RecordingExpression? {
-        guard let value=presentation?.expression,!localOnly,!needsTranscriptionReview,
-              value.versions[id] == transcriptVersionID,value.policies[id] == policyVersion else { return nil }
-        return value
-    }
+    var recordingExpression: RecordingExpression? { readableRecordingExpression }
     var needsTranscriptionReview: Bool {
-        ["audio", "video"].contains(kind) && transcriptionBackend?.hasPrefix("Qwen3-ASR") == true &&
-        !(transcript ?? "").isEmpty && !spans.isEmpty && spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } &&
-        transcriptionReview?.isCompleteFullTextReview != true
+        TranscriptionReview.requiresFullTextReview(kind: kind, backend: transcriptionBackend,
+            hasText: !(transcript ?? "").isEmpty, spans: spans, review: transcriptionReview)
     }
     var transcriptionReview: TranscriptionReview? {
         guard presentation?.transcriptionReview?.transcriptVersionID == transcriptVersionID else { return nil }
@@ -414,13 +416,9 @@ public extension SourceRecord {
     /// The external context member this personal recording is attached to,
     /// when both sides still match the saved versions and permissions.
     func pairedContextSourceID(in catalog: [String: SourceRecord]) -> String? {
-        guard let pair = presentation?.recordingContext, pair.personalSourceID == id,
-              let external = catalog[pair.externalSourceID], !localOnly, !external.localOnly,
-              !needsTranscriptionReview, !external.needsTranscriptionReview,
-              transcriptVersionID == pair.personalVersionID,
-              external.transcriptVersionID == pair.externalVersionID,
-              policyVersion == pair.personalPolicyVersion,
-              external.policyVersion == pair.externalPolicyVersion else { return nil }
+        guard let pair = presentation?.recordingContext,
+              let external = catalog[pair.externalSourceID],
+              pair.matchesCurrentRevisions(personalSourceID: id, personal: self, external: external) else { return nil }
         return external.id
     }
 }

@@ -52,6 +52,15 @@ enum RecordingExpressionInvalidity: Error {
     }
 }
 
+extension RecordingSourceFacts {
+    var readableRecordingExpression: RecordingExpression? {
+        guard let expression = presentation?.expression, !localOnly, !needsTranscriptionReview,
+              expression.versions[id] == recordingTranscriptVersionID,
+              expression.policies[id] == policyVersion else { return nil }
+        return expression
+    }
+}
+
 extension RecordingExpression {
     static func current(in catalog: [String: SourceRecord]) -> [RecordingExpression] {
         var seen = Set<String>()
@@ -70,17 +79,17 @@ extension RecordingExpression {
         case workflow
     }
 
-    func invalidity(in catalog: [String: SourceRecord], for use: Use) -> RecordingExpressionInvalidity? {
+    func invalidity<Source: RecordingSourceFacts>(in catalog: [String: Source], for use: Use) -> RecordingExpressionInvalidity? {
         let readingDigest = use == .reading ? digest : nil
         for sourceID in sourceIDs {
             guard let member = catalog[sourceID] else { return .missingMember }
             switch use {
             case .reading:
-                guard let expression = member.recordingExpression,
+                guard let expression = member.readableRecordingExpression,
                       expression.digest == readingDigest else { return .memberChanged }
             case .workflow:
                 guard member.presentation?.expression?.id == id,
-                      member.transcriptVersionID == versions[sourceID],
+                      member.recordingTranscriptVersionID == versions[sourceID],
                       member.policyVersion == policies[sourceID],
                       !member.localOnly, member.state == "saved" else { return .memberChanged }
             }
@@ -91,7 +100,7 @@ extension RecordingExpression {
         }
         for (sourceID, version) in externalVersions ?? [:] {
             guard let external = catalog[sourceID],
-                  external.transcriptVersionID == version,
+                  external.recordingTranscriptVersionID == version,
                   external.policyVersion == externalPolicies?[sourceID],
                   !external.localOnly, !external.needsTranscriptionReview else { return .externalChanged }
         }

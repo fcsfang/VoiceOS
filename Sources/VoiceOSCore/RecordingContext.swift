@@ -12,6 +12,47 @@ public struct RecordingContext: Codable, Sendable {
     public let personalPolicyVersion: Int
     public let externalPolicyVersion: Int
 }
+/// The source fields shared by full records and targeted validation reads.
+protocol RecordingSourceFacts {
+    var id: String { get }
+    var state: String { get }
+    var origin: String { get }
+    var speaker: String { get }
+    var localOnly: Bool { get }
+    var needsTranscriptionReview: Bool { get }
+    var recordingTranscriptVersionID: String? { get }
+    var policyVersion: Int { get }
+    var presentation: RecordingPresentation? { get }
+}
+
+extension RecordingSourceFacts {
+    var isPersonalRecording: Bool { origin == "user" && speaker == "user" }
+    var isExternalRecording: Bool { origin == "external" && speaker != "user" }
+    var canUseRecordingContextText: Bool { !localOnly && !needsTranscriptionReview }
+}
+
+extension SourceRecord: RecordingSourceFacts {
+    var recordingTranscriptVersionID: String? { transcriptVersionID }
+}
+
+extension RecordingContext {
+    func matchesCurrentRevisions<Source: RecordingSourceFacts>(personalSourceID: String,
+                                                                 personal: Source, external: Source) -> Bool {
+        self.personalSourceID == personalSourceID &&
+            personal.canUseRecordingContextText && external.canUseRecordingContextText &&
+            personal.recordingTranscriptVersionID == personalVersionID &&
+            external.recordingTranscriptVersionID == externalVersionID &&
+            personal.policyVersion == personalPolicyVersion &&
+            external.policyVersion == externalPolicyVersion
+    }
+
+    func canSupplyContext<Source: RecordingSourceFacts>(personalSourceID: String,
+                                                        personal: Source, external: Source) -> Bool {
+        personal.isPersonalRecording && external.isExternalRecording &&
+            matchesCurrentRevisions(personalSourceID: personalSourceID, personal: personal, external: external)
+    }
+}
+
 public struct RecordingContextSnapshot: Codable, Sendable {
     public let pairing: RecordingContext
     public let context: LocalTranscriptContext
@@ -277,12 +318,12 @@ public struct SourcePageIndex: Sendable {
 
 extension VoiceOSStore {
     public func attachRecordingContext(personalSourceID: String, externalSourceID: String, sessionID: String, offsetMS: Int = 0) throws {
-        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let catalog = Dictionary(try sourceRecords(ids: [personalSourceID, externalSourceID]).map { ($0.id, $0) },
+                                 uniquingKeysWith: { first, _ in first })
         guard let personal=catalog[personalSourceID],let external=catalog[externalSourceID],
-              personal.origin == "user",personal.speaker == "user",external.origin == "external",external.speaker != "user",
-              !personal.localOnly,!external.localOnly,!sessionID.isEmpty,
+              personal.isPersonalRecording, external.isExternalRecording,
+              personal.canUseRecordingContextText, external.canUseRecordingContextText, !sessionID.isEmpty,
               let personalVersion=personal.transcriptVersionID,let externalVersion=external.transcriptVersionID,
-              !personal.needsTranscriptionReview,!external.needsTranscriptionReview,
               !(personal.transcript ?? "").isEmpty,!(external.transcript ?? "").isEmpty else { throw VoiceOSError("双轨配对需要已授权并完整核对的本人和节目原话") }
         var presentation=personal.presentation ?? RecordingPresentation()
         let pairing=RecordingContext(personalSourceID:personalSourceID,externalSourceID:externalSourceID,sessionID:sessionID,offsetMS:offsetMS,personalVersionID:personalVersion,externalVersionID:externalVersion,personalPolicyVersion:personal.policyVersion,externalPolicyVersion:external.policyVersion)
@@ -295,11 +336,10 @@ extension VoiceOSStore {
     }
     public func recordingContext(sourceID: String, catalog:[String:SourceRecord]) throws -> RecordingContext? {
         guard let personal=catalog[sourceID],let pairing=personal.presentation?.recordingContext else { return nil }
-        guard pairing.personalSourceID == sourceID,let external=catalog[pairing.externalSourceID],
-              personal.origin == "user",personal.speaker == "user",external.origin == "external",external.speaker != "user",
-              !personal.localOnly,!external.localOnly,!personal.needsTranscriptionReview,!external.needsTranscriptionReview,
-              personal.transcriptVersionID == pairing.personalVersionID,external.transcriptVersionID == pairing.externalVersionID,
-              personal.policyVersion == pairing.personalPolicyVersion,external.policyVersion == pairing.externalPolicyVersion else { throw VoiceOSError("双轨原话或许可已变化，需要重新关联后继续理解") }
+        guard let external = catalog[pairing.externalSourceID],
+              pairing.canSupplyContext(personalSourceID: sourceID, personal: personal, external: external) else {
+            throw VoiceOSError("双轨原话或许可已变化，需要重新关联后继续理解")
+        }
         return pairing
     }
     public func recordingContextSourceIDs(sourceIDs: [String]) throws -> [String] {
