@@ -237,7 +237,8 @@ public actor VoiceOSStore {
         }
     }
     private static let sourceTranscriptJoin = """
-        FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
+        FROM sources s LEFT JOIN jobs j
+          ON j.source_id=s.id AND j.stage='transcription' AND j.input_version_id=s.version_id
         LEFT JOIN transcripts t ON t.job_id=j.id
         """
 
@@ -353,6 +354,19 @@ public actor VoiceOSStore {
             WHERE t.job_id=jobs.id AND length(trim(v.text, ' ' || char(9) || char(10) || char(13)))=0)))
         """, [sourceID,sourceID])
     }
+
+    private static let queuedTranscriptionJobs = """
+        FROM jobs j JOIN sources s ON s.id=j.source_id
+        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id
+        """
+
+    public func queuedTranscriptionSourceIDs() throws -> [String] {
+        try db.query("""
+            SELECT DISTINCT s.id,s.created_at \(Self.queuedTranscriptionJobs)
+            ORDER BY s.created_at DESC,s.id
+            """).map { $0["id"]! }
+    }
+
     public func processTranscriptions(using speech: any SpeechPort, sourceIDs: [String]? = nil) async throws {
         guard ready, !processing else { return }
         let backend = speech.backendIdentity
@@ -363,8 +377,7 @@ public actor VoiceOSStore {
         processing = true
         defer { processing = false }
         while let row = try db.query("""
-        SELECT j.id,j.source_id,j.input_version_id,s.asset_id FROM jobs j JOIN sources s ON s.id=j.source_id
-        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id\(scope)
+        SELECT j.id,j.source_id,j.input_version_id,s.asset_id \(Self.queuedTranscriptionJobs)\(scope)
         ORDER BY s.created_at,j.rowid LIMIT 1
         """, bindings).first {
             let job = row["id"]!; let source = row["source_id"]!; let lease = UUID().uuidString

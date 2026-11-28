@@ -80,6 +80,20 @@ extension CoreFlowTests {
         XCTAssertFalse(record.needsEmptyTranscriptionReview)
         XCTAssertEqual(unrelated.jobState, "queued")
         XCTAssertNil(unrelated.transcript)
+
+        let db = await store.db
+        try db.execute("""
+            INSERT INTO jobs(id,source_id,input_version_id,stage,config,state)
+            VALUES('obsolete-queued-job',?,?,'transcription','fixture','queued')
+            """, [id, UUID().uuidString])
+        let eligible = try await store.queuedTranscriptionSourceIDs()
+        XCTAssertEqual(eligible, [other])
+        let currentRows = try await store.sourceRecords(ids: [id])
+        XCTAssertEqual(currentRows.count, 1)
+        XCTAssertEqual(currentRows.first?.jobState, "completed")
+        try await store.processTranscriptions(using: SpeakingSpeech(text: text))
+        let remaining = try await store.queuedTranscriptionSourceIDs()
+        XCTAssertTrue(remaining.isEmpty)
     }
 
     func testHistoricalCompletedEmptyTranscriptIsIdentifiedAndReplaced() async throws {

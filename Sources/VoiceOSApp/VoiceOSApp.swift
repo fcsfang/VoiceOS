@@ -3395,8 +3395,12 @@ final class ControlCenter: ObservableObject {
             await process()
             worker = nil
             if let store {
-                let queuedTranscription = (try? await store.sources())?.contains(where: { $0.jobState == "queued" }) == true
-                let pendingTranscription = speechPort != nil && queuedTranscription
+                let pendingTranscription: Bool
+                if speechPort != nil {
+                    pendingTranscription = (try? await store.queuedTranscriptionSourceIDs())?.isEmpty == false
+                } else {
+                    pendingTranscription = false
+                }
                 // A queued expression intent is intentionally left durable while
                 // no text model is configured. It must not cause a tight retry
                 // loop; configureTextModel() wakes it after a real identity is
@@ -3416,9 +3420,9 @@ final class ControlCenter: ObservableObject {
         guard let store else { return }
         defer { processingActivity = nil }
         if let selectedSpeech = speechPort {
-            for source in (try? await store.sources()) ?? [] where source.jobState == "queued" {
-                processingActivity = .init(sourceID: source.id, label: "正在本地转写")
-                do { try await store.processTranscriptions(using: selectedSpeech, sourceIDs: [source.id]) }
+            for sourceID in (try? await store.queuedTranscriptionSourceIDs()) ?? [] {
+                processingActivity = .init(sourceID: sourceID, label: "正在本地转写")
+                do { try await store.processTranscriptions(using: selectedSpeech, sourceIDs: [sourceID]) }
                 catch { status = error.localizedDescription }
                 await refresh()
             }
